@@ -1,0 +1,34 @@
+{
+    "tab_size": 4,
+    "soft_wrap": "preferred_line_length",
+    "preferred_line_length": 100,
+    "format_on_save": "on",
+    "formatter": "language_server",
+    "languages": {
+        "TypeScript": {
+            "tab_size": 4,
+            "formatter": "language_server"
+        },
+        "TSX": {
+            "tab_size": 4,
+            "formatter": "language_server"
+        },
+        "JavaScript": {
+            "tab_size": 4,
+            "formatter": "language_server"
+        },
+        "Svelte": {
+            "tab_size": 4,
+            "formatter": "language_server"
+        },
+        "HTML": {
+            "tab_size": 4
+        },
+        "CSS": {
+            "tab_size": 4
+        },
+        "JSON": {
+            "tab_size": 4
+        }
+    }
+}

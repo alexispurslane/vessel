@@ -1,0 +1,254 @@
+<script lang="ts">
+    import { page } from "$app/stores";
+    import {
+        getChat,
+        send,
+        abort,
+        connectStream,
+        disconnectStream,
+        deleteMessage,
+        editMessage,
+    } from "$lib/stores/chat.svelte.js";
+    import { getConversations } from "$lib/stores/conversations.svelte.js";
+    import { getAuth } from "$lib/stores/auth.svelte.js";
+    import { getSettingsStore } from "$lib/stores/settings.svelte.js";
+    import {
+        ChatAvatar,
+        ChatMessage,
+        ChatInput,
+    } from "$lib/components/chat/index.js";
+    import { ScrollArea } from "$lib/components/ui/scroll-area";
+    import { Spinner } from "$lib/components/ui/spinner/index.js";
+    import Bot from "@lucide/svelte/icons/bot";
+    import { listModels } from "$lib/api.js";
+    import type { ModelInfo } from "$lib/types.js";
+    import { onMount } from "svelte";
+    import { goto } from "$app/navigation";
+
+    let id = $derived($page.params.id);
+    const chat = getChat();
+    const conversations = getConversations();
+    const auth = getAuth();
+    const settingsStore = getSettingsStore();
+
+    let inputText = $state("");
+    let viewportEl = $state<HTMLElement | null>(null);
+    let availableModels = $state<ModelInfo[]>([]);
+    let selectedModelId = $state(""); // Just the model ID — provider is resolved automatically
+    let thinkingOpen = $state<Record<string, boolean>>({}); // msg.id -> whether thinking is expanded
+
+    // Auto-collapse thinking dropdowns when a message transitions from thinking to output streaming
+    $effect(() => {
+        for (const msg of chat.messages) {
+            if (msg.thinkingStreaming === false && thinkingOpen[msg.id] === undefined && msg.thinking) {
+                // Thinking just finished for this message — explicitly close it
+                thinkingOpen[msg.id] = false;
+            }
+        }
+    });
+
+    onMount(async () => {
+        try {
+            availableModels = await listModels();
+        } catch {
+            // Models will be empty, user can still chat with default
+        }
+    });
+
+    // Initialize model selector: set the default model once settings load,
+    // or fall back to the first available model. We only apply the default
+    // once to avoid overwriting a manual user selection or conversation model.
+    let defaultApplied = $state(false);
+    let conversationTitle = $state("New Chat");
+
+    $effect(() => {
+        const conversationInfo = conversations.list.find((x) => x.id === chat.conversationId);
+        if (!!conversationInfo) {
+            conversationTitle = conversationInfo.title;
+        }
+    });
+
+    $effect(() => {
+        // When models are loaded and no model is selected yet, use the fallback
+        if (availableModels.length > 0 && !selectedModelId && !defaultApplied) {
+            selectedModelId = availableModels[0]?.id || "";
+        }
+        // When the default model setting becomes available, override the fallback
+        if (!defaultApplied && settingsStore.defaultModel) {
+            selectedModelId = settingsStore.defaultModel;
+            defaultApplied = true;
+        }
+    });
+
+    // Connect to SSE stream on mount and when the conversation id changes; disconnect on cleanup
+    $effect(() => {
+        const currentId = id;
+        if (currentId) {
+            connectStream(currentId).then(() => {
+                // After connecting (which loads history), set model selector to last used model
+                if (chat.lastModel) {
+                    selectedModelId = chat.lastModel.modelId;
+                    defaultApplied = true; // prevent default from overwriting conversation model
+                }
+
+                // If an initial message was passed (e.g., from the home page), send it now
+                const initialMessage = $page.url.searchParams.get("initialMessage");
+                const initialModel = $page.url.searchParams.get("initialModel");
+                if (initialMessage) {
+                    // Use the model ID directly — provider is resolved automatically
+                    const modelId = initialModel || selectedModelId;
+                    if (modelId) {
+                        selectedModelId = modelId;
+                    }
+                    send(initialMessage, modelId);
+                    // Clear the params from the URL to avoid re-sending on refresh/reconnect
+                    goto(`/chat/${currentId}`, { replaceState: true });
+                }
+            });
+        }
+        return () => disconnectStream();
+    });
+
+    // Auto-scroll to bottom when messages arrive or streaming content updates
+    $effect(() => {
+        const count = chat.messages.length;
+        const lastMsg = chat.messages[count - 1];
+        // Track all reactive content so we re-scroll as deltas arrive
+        const _content = lastMsg?.content;
+        const _thinking = lastMsg?.thinking;
+        const _streaming = lastMsg?.streaming;
+        const _thinkingStreaming = lastMsg?.thinkingStreaming;
+
+        // Use nested rAF: first waits for Svelte's DOM update,
+        // second ensures the browser has painted the new content
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                if (viewportEl) {
+                    viewportEl.scrollTop = viewportEl.scrollHeight;
+                }
+            });
+        });
+    });
+
+    function handleSend() {
+        const text = inputText.trim();
+        if (!text || !chat.connected || chat.generating) return;
+        // Provider is resolved automatically from the model ID on the backend
+        send(text, selectedModelId || undefined);
+        inputText = "";
+    }
+
+    function handleAbort() {
+        abort();
+    }
+
+    // Look up a model's display name from the available models list.
+    // Model IDs are unique, so we only need the modelId to find it.
+    // Falls back to the modelId if not found.
+    function getModelDisplayName(modelId: string | undefined): string {
+        if (!modelId) return "AI";
+        const found = availableModels.find((m) => m.id === modelId);
+        return found?.name || modelId;
+    }
+
+    function handleDeleteMessage(messageId: string, role: string) {
+        deleteMessage(messageId, role);
+    }
+
+    function handleEditMessage(messageId: string, role: string, newText?: string) {
+        editMessage(messageId, role, newText);
+    }
+</script>
+
+<svelte:head>
+    <title>{conversationTitle}</title>
+</svelte:head>
+
+<div class="h-full flex flex-col overflow-hidden">
+    <!-- Message area -->
+    <ScrollArea class="flex-1 min-h-0 overflow-hidden" bind:viewportRef={viewportEl}>
+        <div class="flex flex-col gap-6 p-6">
+            {#if chat.messages.length === 0}
+                <div class="flex items-center justify-center py-24">
+                    <div class="flex flex-col items-center gap-4 text-muted-foreground">
+                        <div class="rounded-full bg-muted p-4">
+                            <Bot class="size-8 opacity-60" />
+                        </div>
+                        <div class="text-center">
+                            <p class="text-sm font-medium">Start a conversation</p>
+                            <p class="text-xs mt-1 opacity-70">
+                                Send a message to begin chatting with the AI assistant.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            {:else}
+                {#each chat.messages as msg, i (msg.id)}
+                    {@const isConsecutive = i > 0 && chat.messages[i - 1].role === msg.role}
+                    <div class="flex {msg.role === 'user' ? 'justify-end' : 'justify-start'} {isConsecutive ? '-mt-4' : ''}">
+                        <div
+                            class="flex gap-3 max-w-[80%] {msg.role === 'user'
+                                ? 'flex-row-reverse'
+                                : ''}"
+                        >
+                            <!-- Avatar -->
+                            <ChatAvatar
+                                role={msg.role}
+                                {isConsecutive}
+                                username={auth.username}
+                                model={msg.model}
+                                modelProvider={msg.modelProvider}
+                                {getModelDisplayName}
+                                hasContent={!!(msg.content || msg.thinking)}
+                            />
+
+                            <!-- Message bubble and tool calls -->
+                            <ChatMessage
+                                {msg}
+                                thinkingIsOpen={thinkingOpen[msg.id]}
+                                onthinkingtoggle={(open) => (thinkingOpen[msg.id] = open)}
+                                scrollContainer={viewportEl}
+                                ondelete={handleDeleteMessage}
+                                onedit={handleEditMessage}
+                                navigating={chat.navigating}
+                            />
+                        </div>
+                    </div>
+                {/each}
+            {/if}
+        </div>
+    </ScrollArea>
+
+    <!-- Input area -->
+    <div class="shrink-0 px-4 py-3 bg-background">
+        <ChatInput
+            bind:value={inputText}
+            placeholder={chat.connected ? "Type a message..." : "Connecting..."}
+            disabled={!chat.connected}
+            generating={chat.generating}
+            connected={chat.connected}
+            models={availableModels}
+            bind:selectedModelId
+            defaultModelId={settingsStore.defaultModel}
+            onsend={handleSend}
+            onabort={handleAbort}
+        />
+        <!-- Connection status / error -->
+        <div class="flex items-center gap-1.5 mt-1.5 min-h-4">
+            {#if chat.error}
+                <p class="text-xs text-destructive">{chat.error}</p>
+            {:else if !chat.connected}
+                <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <span class="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-pulse"
+                    ></span>
+                    Connecting...
+                </span>
+            {:else if chat.generating}
+                <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Spinner class="size-3" />
+                    Generating...
+                </span>
+            {/if}
+        </div>
+    </div>
+</div>
