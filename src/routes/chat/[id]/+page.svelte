@@ -161,10 +161,10 @@
 </script>
 
 <svelte:head>
-    <title>{conversationTitle}</title>
+    <title>Vessel - {conversationTitle}</title>
 </svelte:head>
 
-<div class="h-full flex flex-col overflow-hidden">
+<div class="h-full w-full flex flex-col overflow-hidden min-w-0 max-w-[100ch] mx-auto">
     <!-- Message area -->
     <ScrollArea class="flex-1 min-h-0 overflow-hidden" bind:viewportRef={viewportEl}>
         <div class="flex flex-col gap-6 p-6">
@@ -184,17 +184,17 @@
                 </div>
             {:else}
                 {#each chat.messages as msg, i (msg.id)}
-                    {@const isConsecutive = i > 0 && chat.messages[i - 1].role === msg.role}
-                    <div class="flex {msg.role === 'user' ? 'justify-end' : 'justify-start'} {isConsecutive ? '-mt-4' : ''}">
+                    {@const isLastConsecutive = chat.messages[i + 1]?.role !== msg.role}
+                    <div class="flex w-full {msg.role === 'user' ? 'justify-end' : 'justify-start'} {!isLastConsecutive ? '-mt-4' : ''}">
                         <div
-                            class="flex gap-3 max-w-[80%] {msg.role === 'user'
-                                ? 'flex-row-reverse'
+                            class="flex gap-3 w-[min(75%,65ch)] font-serif {msg.role === 'user'
+                                ? 'flex-row-reverse items-end'
                                 : ''}"
                         >
                             <!-- Avatar -->
                             <ChatAvatar
                                 role={msg.role}
-                                {isConsecutive}
+                                isConsecutive={!isLastConsecutive}
                                 username={auth.username}
                                 model={msg.model}
                                 modelProvider={msg.modelProvider}
@@ -203,6 +203,7 @@
                             />
 
                             <!-- Message bubble and tool calls -->
+                            <div class="min-w-0 flex-1">
                             <ChatMessage
                                 {msg}
                                 thinkingIsOpen={thinkingOpen[msg.id]}
@@ -212,6 +213,7 @@
                                 onedit={handleEditMessage}
                                 navigating={chat.navigating}
                             />
+                            </div>
                         </div>
                     </div>
                 {/each}

@@ -1,7 +1,7 @@
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types.js";
-import { getDb } from "$lib/server/db/index.js";
-import { disposeSession, resolveModelProvider } from "$lib/server/agent/session-store.js";
+import { getDb, upsertTags } from "$lib/server/db/index.js";
+import { destroyConversation, resolveModelProvider } from "$lib/server/agent/session-store.js";
 
 /**
  * GET /api/sessions/[id]
@@ -15,14 +15,14 @@ export const GET: RequestHandler = async ({ params }) => {
         )
         .get(params.id) as
         | {
-              id: string;
-              title: string;
-              tags: string;
-              model_provider: string | null;
-              model_id: string | null;
-              created_at: string;
-              updated_at: string;
-          }
+            id: string;
+            title: string;
+            tags: string;
+            model_provider: string | null;
+            model_id: string | null;
+            created_at: string;
+            updated_at: string;
+        }
         | undefined;
 
     if (!row) {
@@ -55,6 +55,8 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
     if (tags !== undefined) {
         updates.push("tags = ?");
         values.push(JSON.stringify(tags));
+        // Ensure these tags exist in the global tags table
+        upsertTags(tags);
     }
     if (model_id !== undefined) {
         updates.push("model_id = ?");
@@ -79,19 +81,20 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 
 /**
  * DELETE /api/sessions/[id]
- * Delete a conversation.
+ * Delete a conversation — removes in-memory session, pi session file,
+ * workspace directory, and DB row. Only triggered when the user
+ * explicitly hits the trash icon on a conversation.
  */
 export const DELETE: RequestHandler = async ({ params }) => {
+    // Check the conversation exists before destroying
     const db = getDb();
+    const row = db.prepare("SELECT id FROM conversations WHERE id = ?").get(params.id);
 
-    // Clean up the in-memory session and pi session first
-    disposeSession(params.id);
-
-    const result = db.prepare("DELETE FROM conversations WHERE id = ?").run(params.id);
-
-    if (result.changes === 0) {
+    if (!row) {
         return json({ error: "Conversation not found" }, { status: 404 });
     }
+
+    await destroyConversation(params.id);
 
     return json({ success: true });
 };

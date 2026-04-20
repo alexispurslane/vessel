@@ -1,5 +1,5 @@
 /**
- * SQLite schema for TalkAI.
+ * SQLite schema for Vessel.
  *
  * pi-coding-agent owns message/conversation history via .jsonl session files.
  * This DB only stores: auth, web sessions, provider config, custom models, settings, and conversation metadata.
@@ -59,6 +59,16 @@ CREATE TABLE IF NOT EXISTS conversations (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS tags (
+  name TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS conversation_settings (
+  conversation_id TEXT NOT NULL PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+  settings JSON NOT NULL DEFAULT '{}'
+);
 `;
 
 /**
@@ -100,7 +110,7 @@ export function runMigrations(db: DatabaseType): void {
             if (duplicates.length > 0) {
                 console.warn(
                     `[migration] custom_models has duplicate model IDs: ${duplicates.map((d) => d.id).join(", ")}. ` +
-                        `Keeping the most recently inserted row for each duplicate.`
+                    `Keeping the most recently inserted row for each duplicate.`
                 );
             }
 
@@ -137,6 +147,50 @@ export function runMigrations(db: DatabaseType): void {
         }
     } catch (e) {
         console.error("[migration] Failed to migrate custom_models to unique model IDs:", e);
+        throw e;
+    }
+
+    // Backfill tags table from existing conversations
+    // Each conversation stores tags as a JSON array of strings in the `tags` column.
+    // Extract all unique tag values and insert them into the `tags` table.
+    try {
+        const tableExists = db
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='tags'")
+            .get();
+        if (tableExists) {
+            const rows = db
+                .prepare("SELECT tags FROM conversations WHERE tags != '[]'")
+                .all() as { tags: string }[];
+            const insertTag = db.prepare(
+                "INSERT OR IGNORE INTO tags (name) VALUES (?)"
+            );
+            const insertMany = db.transaction((tags: string[]) => {
+                for (const tag of tags) {
+                    insertTag.run(tag);
+                }
+            });
+            const allTags: string[] = [];
+            for (const row of rows) {
+                try {
+                    const parsed = JSON.parse(row.tags) as string[];
+                    if (Array.isArray(parsed)) {
+                        for (const tag of parsed) {
+                            if (typeof tag === "string" && tag.trim()) {
+                                allTags.push(tag.trim().toLowerCase());
+                            }
+                        }
+                    }
+                } catch {
+                    // Skip malformed JSON
+                }
+            }
+            if (allTags.length > 0) {
+                insertMany([...new Set(allTags)]);
+                console.log(`[migration] Backfilled ${allTags.length} unique tags into tags table`);
+            }
+        }
+    } catch (e) {
+        console.error("[migration] Failed to backfill tags table:", e);
         throw e;
     }
 }

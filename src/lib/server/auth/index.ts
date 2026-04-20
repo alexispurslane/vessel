@@ -72,7 +72,7 @@ export function deleteSession(token: string): void {
 
 // --- Cookie helpers ---
 
-export const SESSION_COOKIE_NAME = "talkai_session";
+export const SESSION_COOKIE_NAME = "vessel_session";
 const SESSION_COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
 export function sessionCookie(token: string): string {

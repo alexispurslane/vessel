@@ -17,7 +17,7 @@ import {
     type Tool,
     type ToolCall,
 } from "@mariozechner/pi-ai";
-import { getDb } from "../db/index.js";
+import { getDb, getAllTags, upsertTags } from "../db/index.js";
 import { findModelById, getModelRegistry, getSessionHistory } from "./session-store.js";
 
 // --- Types ---
@@ -76,13 +76,17 @@ export async function generateTitleAndTags(
     }
 
     try {
-        const result = await callModelForTitle(model, userMessage);
+        const existingTags = getAllTags();
+        const result = await callModelForTitle(model, userMessage, existingTags);
         console.log(`Generated title: ${result.title}, tags: ${result.tags.join(", ")}`);
 
         // Update the conversation in DB
         db.prepare(
             "UPDATE conversations SET title = ?, tags = ?, updated_at = datetime('now') WHERE id = ?"
         ).run(result.title, JSON.stringify(result.tags), conversationId);
+
+        // Ensure these tags exist in the global tags table
+        upsertTags(result.tags);
 
         return result;
     } catch (err) {
@@ -173,7 +177,7 @@ const generateTitleTool: Tool = {
  * in the options. (pi-coding-agent's AgentSession does this same
  * resolution internally before every request.)
  */
-async function callModelForTitle(model: Model<any>, userMessage: string): Promise<GenerateResult> {
+async function callModelForTitle(model: Model<any>, userMessage: string, existingTags: string[]): Promise<GenerateResult> {
     // Resolve API key and headers from ModelRegistry
     const modelRegistry = getModelRegistry();
     const auth = await modelRegistry.getApiKeyAndHeaders(model);
@@ -181,14 +185,17 @@ async function callModelForTitle(model: Model<any>, userMessage: string): Promis
         throw new Error(auth.error);
     }
 
-    const systemPrompt = `You generate concise titles and relevant tags for chat conversations. Given the user's first message, call the generate_conversation_title tool with an appropriate title and tags. You MUST call the tool — do not respond with text.`;
+    const systemPrompt = `You generate concise titles and relevant tags for chat conversations. Given the user's first message, call the generate_conversation_title tool with an appropriate title and tags. You MUST call the tool — do not respond with text.${existingTags.length > 0
+        ? `\n\nExisting tags already in use (prefer reusing these when relevant): ${existingTags.join(", ")}`
+        : ""
+        }`;
 
     const context: Context = {
         systemPrompt,
         messages: [
             {
                 role: "user",
-                content: `First message in conversation:\n\n${userMessage}`,
+                content: `First message in conversation, which you should generate title and tags from, NOT respond to:\n\n${userMessage}`,
                 timestamp: Date.now(),
             },
         ],

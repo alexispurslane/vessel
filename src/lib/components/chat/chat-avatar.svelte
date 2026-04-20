@@ -5,6 +5,7 @@
         TooltipProvider,
         TooltipTrigger,
     } from "$lib/components/ui/tooltip";
+
     import Bot from "@lucide/svelte/icons/bot";
     import User from "@lucide/svelte/icons/user";
 
@@ -36,7 +37,7 @@
     }: Props = $props();
 </script>
 
-<div class="shrink-0 mt-0.5 {isConsecutive ? 'invisible' : ''}">
+<div class="flex flex-row items-end shrink-0 mt-0.5 font-sans {isConsecutive ? 'invisible' : ''}">
     {#if role === "user"}
         <div class="flex flex-col items-center gap-0.5">
             {#if username}

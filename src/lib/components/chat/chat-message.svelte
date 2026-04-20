@@ -143,7 +143,7 @@
     }
 </script>
 
-<div class="flex flex-col gap-1.5 min-w-0">
+<div class="flex flex-col gap-1.5 w-full font-sans">
     <!-- Thinking section -->
     {#if msg.role === "assistant" && (msg.thinking || msg.thinkingStreaming)}
         <details
@@ -177,7 +177,7 @@
     {/if}
 
     {#if msg.isError || msg.content || msg.streaming}
-        <div class="group/msg" bind:this={msgEl}>
+        <div class="group/msg w-full" bind:this={msgEl}>
             <div
                 class="rounded-2xl px-4 py-2.5 text-sm leading-relaxed {msg.isError
                     ? 'bg-destructive/10 text-destructive border border-destructive/30 rounded-bl-sm'
@@ -296,7 +296,7 @@
 
     <!-- Tool calls -->
     {#if msg.toolCalls && msg.toolCalls.length > 0}
-        <div class="flex flex-col gap-1 ml-1">
+        <div class="flex flex-col gap-1">
             {#each msg.toolCalls as tool, i (msg.id + "-tool-" + i)}
                 <details class="group rounded-lg border bg-background text-sm">
                     <summary

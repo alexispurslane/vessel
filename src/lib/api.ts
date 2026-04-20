@@ -1,5 +1,5 @@
 /**
- * API client for TalkAI backend.
+ * API client for Vessel backend.
  * All fetch calls go through here for consistent error handling.
  */
 import type {
@@ -9,6 +9,7 @@ import type {
     ProviderInfo,
     CustomModelDef,
     ModelInfo,
+    ConversationSettings,
 } from "$lib/types.js";
 
 class ApiError extends Error {
@@ -74,6 +75,15 @@ export async function listConversations(): Promise<ConversationListItem[]> {
     return apiFetch<ConversationListItem[]>("/api/sessions");
 }
 
+export interface TagConversationsResult {
+    tag: string;
+    conversations: ConversationListItem[];
+}
+
+export async function listConversationsByTag(tag: string): Promise<TagConversationsResult> {
+    return apiFetch<TagConversationsResult>(`/api/tags/${encodeURIComponent(tag)}`);
+}
+
 export async function createConversation(
     title?: string,
     modelId?: string
@@ -101,6 +111,39 @@ export async function updateConversation(
 export async function deleteConversation(id: string): Promise<{ success: boolean }> {
     return apiFetch<{ success: boolean }>(`/api/sessions/${id}`, {
         method: "DELETE",
+    });
+}
+
+/**
+ * Release the in-memory copy of a conversation's session on the server.
+ * Does NOT delete any data on disk — the conversation can be rehydrated later.
+ * Call this when the user closes the tab or ends their browser session.
+ */
+export async function releaseConversation(id: string): Promise<{ released: boolean }> {
+    try {
+        return await apiFetch<{ released: boolean }>(`/api/sessions/${id}/release`, {
+            method: "POST",
+        });
+    } catch {
+        // Best-effort — if the server is unreachable or the session
+        // isn't loaded, that's fine. The idle timeout will clean up eventually.
+        return { released: false };
+    }
+}
+
+export async function getConversationSettings(
+    id: string
+): Promise<Partial<ConversationSettings>> {
+    return apiFetch<Partial<ConversationSettings>>(`/api/sessions/${id}/settings`);
+}
+
+export async function updateConversationSettings(
+    id: string,
+    settings: ConversationSettings
+): Promise<{ success: boolean; restarted: boolean }> {
+    return apiFetch<{ success: boolean; restarted: boolean }>(`/api/sessions/${id}/settings`, {
+        method: "PUT",
+        body: JSON.stringify(settings),
     });
 }
 
@@ -162,6 +205,12 @@ export async function getMessageHistory(conversationId: string): Promise<Message
 
 export async function abortGeneration(conversationId: string): Promise<{ aborted: boolean }> {
     return apiFetch<{ aborted: boolean }>(`/api/sessions/${conversationId}/abort`, {
+        method: "POST",
+    });
+}
+
+export async function restartAllSessions(): Promise<{ restarted: number }> {
+    return apiFetch<{ restarted: number }>("/api/sessions/restart-all", {
         method: "POST",
     });
 }
@@ -283,4 +332,13 @@ export async function deleteProvider(provider: string): Promise<{ success: boole
 
 export async function fetchProviderModels(provider: string): Promise<{ models: string[] }> {
     return apiFetch<{ models: string[] }>(`/api/providers/${provider}/fetch-models`);
+}
+
+// --- Filesystem ---
+
+export async function fsComplete(partial: string, type?: "file" | "directory" | "all"): Promise<{ completions: string[] }> {
+    return apiFetch<{ completions: string[] }>("/api/fs-complete", {
+        method: "POST",
+        body: JSON.stringify({ partial, type }),
+    });
 }

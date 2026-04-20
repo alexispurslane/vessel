@@ -62,7 +62,7 @@
             "cursor-pointer",
             // Active state: inverted colors (white bg, dark text)
             isActive
-                ? "bg-foreground text-background font-medium shadow-sm hover:bg-gray-500/30 hover:text-foreground"
+                ? "bg-foreground text-background font-medium shadow-sm hover:bg-foreground/90"
                 : "hover:bg-gray-500/30",
             className
         ),

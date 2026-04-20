@@ -1,5 +1,5 @@
 /**
- * Server-only types for TalkAI.
+ * Server-only types for Vessel.
  *
  * Shared domain types (ConversationListItem, CustomModelDef, etc.)
  * live in $lib/types.ts and are imported from there.
@@ -43,6 +43,8 @@ export type {
 // --- Server-internal types ---
 
 import type { ChatSSEEvent } from "$lib/types.js";
+import type { ConversationSettings } from "$lib/types.js";
+import type { Sandbox } from "zerobox";
 
 /** Internal: an active session in memory with its SSE subscribers */
 export interface ActiveSession {
@@ -50,5 +52,9 @@ export interface ActiveSession {
     sessionId: string;
     subscribers: Map<string, { send: (event: ChatSSEEvent) => void }>;
     unsubscribe: () => void;
+    /** Per-session zerobox sandbox controlling tool execution isolation. Null if sandboxing is disabled. */
+    sandbox: Sandbox | null;
+    /** Per-conversation settings that override global sandbox settings. */
+    conversationSettings?: ConversationSettings;
     disposeTimer?: ReturnType<typeof setTimeout>;
 }

@@ -1,5 +1,5 @@
 import { join, resolve } from "path";
-import { writeFileSync, mkdirSync } from "fs";
+import { writeFileSync, mkdirSync, rmSync, existsSync } from "fs";
 import {
     createAgentSession,
     AuthStorage,
@@ -8,8 +8,10 @@ import {
     SettingsManager,
     type AgentSession as PiAgentSession,
     type AgentSessionEvent as PiAgentSessionEvent,
-    createCodingTools,
 } from "@mariozechner/pi-coding-agent";
+import type { AgentTool } from "@mariozechner/pi-agent-core";
+import { createSandboxedCodingTools } from "./sandboxed-tools.js";
+import { createSessionSandbox, getSessionWorkDir, loadConversationSettingsFromDb } from "./sandbox-factory.js";
 import type { Model as PiModel, Api } from "@mariozechner/pi-ai";
 import { getDb } from "../db/index.js";
 import { randomUUID } from "crypto";
@@ -24,8 +26,11 @@ const SESSIONS_DIR = resolve(DATA_DIR, "sessions");
 const AGENT_DIR = resolve(DATA_DIR, "agent");
 const MODELS_JSON_PATH = resolve(DATA_DIR, "models.json");
 
-/** How long to keep a session in memory after all subscribers disconnect */
-const SESSION_DISPOSE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+/** How long to keep a session in memory after all subscribers disconnect.
+ * This is a safety net — the primary release mechanism is the explicit
+ * /api/sessions/[id]/release call from the frontend on conversation switch.
+ */
+const SESSION_DISPOSE_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
 
 /** Monotonically increasing event ID for SSE Last-Event-Id support */
 let eventCounter = 0n;
@@ -512,6 +517,14 @@ export async function getOrCreateSession(conversationId: string): Promise<PiAgen
 
     mkdirSync(AGENT_DIR, { recursive: true });
 
+    // Load per-conversation settings (override global sandbox settings)
+    const conversationSettings = loadConversationSettingsFromDb(conversationId);
+
+    // Create per-session zerobox sandbox for tool execution isolation.
+    // Returns null if sandboxing is disabled in settings.
+    // Per-conversation settings override global sandbox config.
+    const sandbox = createSessionSandbox(conversationId, conversationSettings);
+
     const createOpts: Parameters<typeof createAgentSession>[0] = {
         cwd: process.cwd(),
         agentDir: AGENT_DIR,
@@ -519,7 +532,6 @@ export async function getOrCreateSession(conversationId: string): Promise<PiAgen
         authStorage: modelRegistry.authStorage,
         modelRegistry,
         settingsManager,
-        tools: createCodingTools(process.cwd()),
     };
 
     if (model) {
@@ -527,6 +539,35 @@ export async function getOrCreateSession(conversationId: string): Promise<PiAgen
     }
 
     const { session: agentSession } = await createAgentSession(createOpts);
+
+    // If sandbox is enabled, inject sandboxed tools as baseToolsOverride.
+    // We can't pass these via createAgentSession's `tools` option — it only extracts
+    // tool names and then creates fresh default tools internally, discarding our custom
+    // operations. Instead, we inject them as baseToolsOverride after construction.
+    //
+    // AgentSession._buildRuntime checks this field: when set, it uses these tools
+    // instead of creating default ones. We must set it and rebuild the runtime
+    // so the tool registry picks up our custom operations.
+    if (sandbox) {
+        const sessionWorkDir = getSessionWorkDir(conversationId);
+        const sandboxedTools = createSandboxedCodingTools(sessionWorkDir, sandbox);
+        const baseToolsOverride: Record<string, AgentTool<any>> = {};
+        for (const tool of sandboxedTools) {
+            baseToolsOverride[tool.name] = tool;
+        }
+
+        // _buildRuntime requires an options object with at least flagValues (a Map)
+        // and activeToolNames. When baseToolsOverride is set, defaultActiveToolNames
+        // is derived from its keys, so we just need to include our tool names.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (agentSession as any)._baseToolsOverride = baseToolsOverride;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (agentSession as any)._buildRuntime({
+            flagValues: new Map(),
+            activeToolNames: Object.keys(baseToolsOverride),
+            includeAllExtensionTools: true,
+        });
+    }
 
     // Subscribe to events and broadcast to SSE subscribers
     const unsubscribe = agentSession.subscribe((event: PiAgentSessionEvent) => {
@@ -543,6 +584,8 @@ export async function getOrCreateSession(conversationId: string): Promise<PiAgen
         sessionId: conversationId,
         subscribers: new Map(),
         unsubscribe,
+        sandbox,
+        conversationSettings: conversationSettings ?? undefined,
     });
 
     return agentSession;
@@ -629,8 +672,14 @@ export async function abortSession(conversationId: string): Promise<void> {
 }
 
 /**
- * Immediately dispose of an active session (clean up memory + pi session).
- * Used when a conversation is deleted.
+ * Dispose of an in-memory session only (no disk cleanup).
+ * Used when the in-memory copy should be released but the conversation
+ * data on disk (pi session file, workspace) should be preserved for
+ * later rehydration.
+ *
+ * Called by:
+ * - Idle timeout (scheduleDispose): all subscribers disconnected
+ * - Browser session end (via /api/sessions/release endpoint)
  */
 export function disposeSession(conversationId: string): void {
     const session = sessions.get(conversationId);
@@ -641,11 +690,124 @@ export function disposeSession(conversationId: string): void {
         clearTimeout(session.disposeTimer);
     }
 
+    // Unsubscribe from agent events and dispose the in-memory pi session
+    session.unsubscribe();
+    session.agentSession.dispose();
+    sessions.delete(conversationId);
+    console.log(`Disposed in-memory session ${conversationId} (idle timeout or browser session end)`);
+}
+
+/**
+ * Restart a specific session by disposing it from memory.
+ * It will be lazily recreated with fresh settings (including per-conversation
+ * sandbox policy) when next accessed via getOrCreateSession.
+ *
+ * Returns true if the session was active and disposed, false otherwise.
+ */
+export function restartSession(conversationId: string): boolean {
+    const session = sessions.get(conversationId);
+    if (!session) return false;
+
+    // Clear any pending disposal timer
+    if (session.disposeTimer) {
+        clearTimeout(session.disposeTimer);
+    }
+
     // Unsubscribe from agent events and dispose the pi session
     session.unsubscribe();
     session.agentSession.dispose();
     sessions.delete(conversationId);
-    console.log(`Disposed session ${conversationId} (explicit delete)`);
+    console.log(`Restarted session ${conversationId} (conversation settings changed)`);
+    return true;
+}
+
+/**
+ * Fully destroy a conversation: dispose in-memory session, delete the
+ * pi session file, delete the workspace directory (if configured), and remove the DB row.
+ * Only called when the user explicitly hits the trash icon.
+ */
+export async function destroyConversation(conversationId: string): Promise<void> {
+    // 1. Dispose in-memory session if loaded
+    disposeSession(conversationId);
+
+    // Load per-conversation settings before deleting DB rows
+    const convSettings = loadConversationSettingsFromDb(conversationId);
+    const deleteWorkspace = convSettings?.deleteWorkspaceWithConversation !== false; // default true
+
+    // 2. Delete the pi session .jsonl file
+    const db = getDb();
+    const row = db
+        .prepare("SELECT session_file_path FROM conversations WHERE id = ?")
+        .get(conversationId) as { session_file_path: string } | undefined;
+
+    if (row?.session_file_path && existsSync(row.session_file_path)) {
+        try {
+            rmSync(row.session_file_path);
+            console.log(`Deleted pi session file: ${row.session_file_path}`);
+        } catch (err) {
+            console.error(`Failed to delete pi session file ${row.session_file_path}:`, err);
+        }
+    }
+
+    // 3. Delete the conversation's workspace directory (if setting allows)
+    if (deleteWorkspace) {
+        const workspaceDir = getSessionWorkDir(conversationId);
+        if (existsSync(workspaceDir)) {
+            try {
+                rmSync(workspaceDir, { recursive: true });
+                console.log(`Deleted workspace directory: ${workspaceDir}`);
+            } catch (err) {
+                console.error(`Failed to delete workspace directory ${workspaceDir}:`, err);
+            }
+        }
+
+        // Also clean up the parent session directory if it's now empty
+        // (e.g. data/sessions/<id>/ which contained workspace/)
+        const sessionDir = resolve(SESSIONS_DIR, conversationId);
+        if (existsSync(sessionDir)) {
+            try {
+                rmSync(sessionDir, { recursive: true });
+                console.log(`Deleted session directory: ${sessionDir}`);
+            } catch (err) {
+                console.error(`Failed to delete session directory ${sessionDir}:`, err);
+            }
+        }
+    } else {
+        console.log(`Keeping workspace for conversation ${conversationId} (deleteWorkspaceWithConversation = false)`);
+    }
+
+    // 4. Delete the DB rows (conversation_settings is ON DELETE CASCADE)
+    db.prepare("DELETE FROM conversations WHERE id = ?").run(conversationId);
+    console.log(`Destroyed conversation ${conversationId} (explicit user delete)`);
+}
+
+/**
+ * Restart all active sessions by disposing them from memory.
+ * They will be lazily recreated with fresh settings (including sandbox policy)
+ * when next accessed via getOrCreateSession.
+ *
+ * Returns the number of sessions that were restarted.
+ */
+export function restartAllSessions(): number {
+    const ids = [...sessions.keys()];
+    for (const id of ids) {
+        const session = sessions.get(id)!;
+
+        // Clear any pending disposal timer
+        if (session.disposeTimer) {
+            clearTimeout(session.disposeTimer);
+        }
+
+        // Unsubscribe from agent events and dispose the pi session
+        session.unsubscribe();
+        session.agentSession.dispose();
+        sessions.delete(id);
+    }
+
+    if (ids.length > 0) {
+        console.log(`Restarted ${ids.length} session(s) — they will be re-created on next access`);
+    }
+    return ids.length;
 }
 
 /**

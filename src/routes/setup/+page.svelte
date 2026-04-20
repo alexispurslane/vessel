@@ -56,7 +56,8 @@
 <div class="flex min-h-svh items-center justify-center p-4">
     <Card class="w-full max-w-sm">
         <CardHeader class="text-center">
-            <CardTitle class="text-xl">TalkAI</CardTitle>
+            <img src="/vessel.png" alt="Vessel" class="mx-auto size-10 rounded-full" />
+            <CardTitle class="text-xl">Vessel</CardTitle>
             <CardDescription>Create Account</CardDescription>
         </CardHeader>
         <CardContent>

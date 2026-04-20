@@ -26,6 +26,7 @@
         deleteCustomModel,
         getSettings,
         updateSettings,
+        restartAllSessions,
     } from "$lib/api.js";
     import type { ProviderInfo, ModelInfo, CustomModelDef } from "$lib/types.js";
     import Key from "@lucide/svelte/icons/key";
@@ -36,7 +37,10 @@
     import Check from "@lucide/svelte/icons/check";
     import Settings2 from "@lucide/svelte/icons/settings-2";
     import Pencil from "@lucide/svelte/icons/pencil";
-    import ArrowLeft from "@lucide/svelte/icons/arrow-left";
+    import Shield from "@lucide/svelte/icons/shield";
+    import X from "@lucide/svelte/icons/x";
+    import PageLayout from "$lib/components/page-layout/index.svelte";
+    import { PillList, PathAutocompletePillList } from "$lib/components/pill-list/index.js";
     import {
         Select,
         SelectContent,
@@ -353,6 +357,7 @@
             const sm = appSettings["secondaryModel"] ?? "";
             if (dm) defaultModelId = dm;
             if (sm) secondaryModelId = sm;
+            loadSandboxSettings();
         } catch (e) {
             settingsError = e instanceof Error ? e.message : "Failed to load settings";
         } finally {
@@ -403,22 +408,174 @@
             goto("/");
         }
     }
+
+    // --- Sandbox settings state ---
+    let sandboxEnabled = $state(true);
+    let sandboxSnapshotEnabled = $state(true);
+    let sandboxAllowNet = $state(false);
+    let sandboxSettingsLoading = $state(false);
+    let sandboxSettingsSaved = $state(false);
+    let sandboxSettingsError = $state<string | null>(null);
+
+    // Pill-based list states
+    let readPaths = $state<Array<{ path: string; editing?: boolean }>>([]);
+    let writePaths = $state<Array<{ path: string; editing?: boolean }>>([]);
+    let allowedDomains = $state<Array<{ domain: string; editing?: boolean }>>([]);
+    let allowedEnvVars = $state<Array<{ name: string; editing?: boolean }>>([]);
+
+    // Secrets state for custom pill UI
+    let secrets = $state<Array<{ key: string; value: string; hosts: string; editing?: boolean }>>([]);
+    let newSecretKey = $state("");
+    let newSecretValue = $state("");
+    let newSecretHosts = $state("");
+    let showNewSecretForm = $state(false);
+
+    function loadPillListsFromSettings() {
+        readPaths = (JSON.parse(appSettings["sandbox.extraReadPaths"] || "[]") as string[])
+            .map((p: string) => ({ path: p, editing: false }));
+        writePaths = (JSON.parse(appSettings["sandbox.extraWritePaths"] || "[]") as string[])
+            .map((p: string) => ({ path: p, editing: false }));
+        allowedDomains = (JSON.parse(appSettings["sandbox.allowedNetDomains"] || "[]") as string[])
+            .map((d: string) => ({ domain: d, editing: false }));
+        allowedEnvVars = (JSON.parse(appSettings["sandbox.allowEnv"] || "[]") as string[])
+            .map((e: string) => ({ name: e, editing: false }));
+    }
+
+    function savePillListsToSettings(): Record<string, string> {
+        return {
+            "sandbox.extraReadPaths": JSON.stringify(readPaths.map((p) => p.path).filter(Boolean)),
+            "sandbox.extraWritePaths": JSON.stringify(writePaths.map((p) => p.path).filter(Boolean)),
+            "sandbox.allowedNetDomains": JSON.stringify(allowedDomains.map((d) => d.domain).filter(Boolean)),
+            "sandbox.allowEnv": JSON.stringify(allowedEnvVars.map((e) => e.name).filter(Boolean)),
+        };
+    }
+
+    function parseSecretsInput(input: string): Record<string, { value: string; hosts: string[] }> {
+        const result: Record<string, { value: string; hosts: string[] }> = {};
+        const lines = input.split("\n").map((l: string) => l.trim()).filter(Boolean);
+        for (const line of lines) {
+            const match = line.match(/^(\w+)=(.+?)(?:\s+(.+))?$/);
+            if (match) {
+                const [, name, value, hostsStr] = match;
+                const hosts = hostsStr ? hostsStr.split(",").map((h: string) => h.trim()).filter(Boolean) : [];
+                result[name] = { value, hosts };
+            }
+        }
+        return result;
+    }
+
+    function secretsToInput(secrets: Record<string, { value: string; hosts: string[] }>): string {
+        return Object.entries(secrets)
+            .map(([name, config]) => {
+                const hosts = config.hosts.length > 0 ? ` ${config.hosts.join(",")}` : "";
+                return `${name}=${config.value}${hosts}`;
+            })
+            .join("\n");
+    }
+
+    function loadSecretsFromSettings() {
+        const secretsObj = JSON.parse(appSettings["sandbox.secrets"] || "{}") as Record<string, { value: string; hosts: string[] }>;
+        secrets = Object.entries(secretsObj).map(([key, config]) => ({
+            key,
+            value: config.value,
+            hosts: config.hosts.join(","),
+            editing: false,
+        }));
+    }
+
+    function addNewSecret() {
+        if (!newSecretKey.trim() || !newSecretValue.trim()) return;
+        secrets = [...secrets, {
+            key: newSecretKey.trim(),
+            value: newSecretValue,
+            hosts: newSecretHosts.trim(),
+            editing: false,
+        }];
+        newSecretKey = "";
+        newSecretValue = "";
+        newSecretHosts = "";
+        showNewSecretForm = false;
+    }
+
+    function startEditingSecret(index: number) {
+        secrets = secrets.map((s, i) => ({ ...s, editing: i === index }));
+    }
+
+    function saveSecretEdit(index: number, updated: { key: string; value: string; hosts: string }) {
+        secrets = secrets.map((s, i) => {
+            return i === index ? { ...updated, editing: false } : { ...s, editing: false };
+        });
+    }
+
+    function deleteSecret(index: number) {
+        secrets = secrets.filter((_, i) => i !== index);
+    }
+
+    function cancelNewSecret() {
+        showNewSecretForm = false;
+        newSecretKey = "";
+        newSecretValue = "";
+        newSecretHosts = "";
+    }
+
+    function loadSandboxSettings() {
+        sandboxSettingsLoading = true;
+        try {
+            sandboxEnabled = appSettings["sandbox.enabled"] !== "false";
+            sandboxAllowNet = appSettings["sandbox.allowNet"] === "true";
+            loadPillListsFromSettings();
+            loadSecretsFromSettings();
+            sandboxSnapshotEnabled = appSettings["sandbox.snapshotEnabled"] !== "false";
+        } catch {
+            // Use defaults on parse error
+        } finally {
+            sandboxSettingsLoading = false;
+        }
+    }
+
+    async function saveSandboxSettings() {
+        sandboxSettingsError = null;
+        sandboxSettingsSaved = false;
+        try {
+            const pillLists = savePillListsToSettings();
+
+            const secretsObj: Record<string, { value: string; hosts: string[] }> = {};
+            for (const s of secrets) {
+                if (s.key.trim()) {
+                    secretsObj[s.key.trim()] = {
+                        value: s.value,
+                        hosts: s.hosts.split(",").map((h: string) => h.trim()).filter(Boolean),
+                    };
+                }
+            }
+
+            await updateSettings({
+                "sandbox.enabled": sandboxEnabled ? "true" : "false",
+                "sandbox.allowNet": sandboxAllowNet ? "true" : "false",
+                "sandbox.secrets": JSON.stringify(secretsObj),
+                "sandbox.snapshotEnabled": sandboxSnapshotEnabled ? "true" : "false",
+                ...pillLists,
+            });
+
+            // Restart all active sessions so they pick up the new sandbox policy
+            await restartAllSessions();
+
+            sandboxSettingsSaved = true;
+            setTimeout(() => { sandboxSettingsSaved = false; }, 2000);
+        } catch (e) {
+            sandboxSettingsError = e instanceof Error ? e.message : "Failed to save sandbox settings";
+        }
+    }
 </script>
 
-<div class="mx-auto w-full max-w-4xl p-6">
-    <div class="mb-6 flex items-center gap-4">
-        <Button variant="ghost" size="icon" onclick={handleBack} aria-label="Go back">
-            <ArrowLeft class="h-5 w-5" />
-        </Button>
-        <h1 class="text-2xl font-bold">Settings</h1>
-    </div>
-
+<PageLayout title="Settings" onback={handleBack}>
     <Tabs bind:value={activeTab}>
         <TabsList class="mb-6 w-full justify-start">
             <TabsTrigger value="defaults"><Settings2 class="mr-1.5 h-4 w-4" /> Defaults</TabsTrigger
             >
             <TabsTrigger value="providers"><Key class="mr-1.5 h-4 w-4" /> Providers</TabsTrigger>
             <TabsTrigger value="models"><Cpu class="mr-1.5 h-4 w-4" /> Models</TabsTrigger>
+            <TabsTrigger value="sandbox"><Shield class="mr-1.5 h-4 w-4" /> Sandbox</TabsTrigger>
         </TabsList>
 
         <!-- Defaults Tab -->
@@ -991,5 +1148,305 @@
             </Card>
         </TabsContent>
 
+        <!-- Sandbox Tab -->
+        <TabsContent value="sandbox">
+            <Card>
+                <CardHeader>
+                    <CardTitle>Sandbox</CardTitle>
+                    <CardDescription
+                        >Configure zerobox sandboxing for agent tool execution. Each conversation
+                        gets an isolated sandbox that restricts filesystem access, network, and
+                        environment variables. Settings apply immediately to all conversations —
+                        saving will restart any active sessions to pick up the new configuration.</CardDescription
+                    >
+                </CardHeader>
+                <CardContent>
+                    {#if sandboxSettingsLoading}
+                        <div class="flex items-center justify-center py-8">
+                            <Spinner class="h-6 w-6" />
+                        </div>
+                    {:else}
+                        <div class="space-y-6">
+                            {#if sandboxSettingsError}
+                                <p class="text-sm text-destructive">{sandboxSettingsError}</p>
+                            {/if}
+                            {#if sandboxSettingsSaved}
+                                <p class="text-sm text-green-600">Settings saved.</p>
+                            {/if}
+
+                            <!-- Enable/Disable -->
+                            <div class="flex items-center justify-between rounded-lg border p-4">
+                                <div class="space-y-0.5">
+                                    <Label class="text-base font-medium">Enable Sandboxing</Label>
+                                    <p class="text-sm text-muted-foreground"
+                                        >When disabled, agent tools run without any isolation. Enable for
+                                        safer execution of AI-generated commands and file
+                                        operations.</p
+                                    >
+                                </div>
+                                <Switch bind:checked={sandboxEnabled} />
+                            </div>
+
+                            {#if sandboxEnabled}
+                                <!-- Extra Read Paths -->
+                                <div class="rounded-lg border p-4 space-y-3">
+                                    <div>
+                                        <Label class="text-base font-medium">Extra Readable Paths</Label>
+                                        <p class="text-sm text-muted-foreground mt-1"
+                                            >Additional paths the agent can read from. The project directory
+                                            and session workspace are always readable.</p
+                                        >
+                                    </div>
+
+                                    <PathAutocompletePillList
+                                        items={readPaths}
+                                        onChange={(items) => (readPaths = items)}
+                                        addPlaceholder="/path/to/directory"
+                                        addButtonLabel="Add Path"
+                                    />
+                                </div>
+
+                                <!-- Extra Write Paths -->
+                                <div class="rounded-lg border p-4 space-y-3">
+                                    <div>
+                                        <Label class="text-base font-medium">Extra Writable Paths</Label>
+                                        <p class="text-sm text-muted-foreground mt-1"
+                                            >Additional paths the agent can write to. The session workspace
+                                            is always writable.</p
+                                        >
+                                    </div>
+
+                                    <PathAutocompletePillList
+                                        items={writePaths}
+                                        onChange={(items) => (writePaths = items)}
+                                        addPlaceholder="/path/to/directory"
+                                        addButtonLabel="Add Path"
+                                    />
+                                </div>
+
+                                <Separator />
+
+                                <!-- Network Access -->
+                                <div class="flex items-center justify-between rounded-lg border p-4">
+                                    <div class="space-y-0.5">
+                                        <Label class="text-base font-medium">Allow Network Access</Label>
+                                        <p class="text-sm text-muted-foreground"
+                                            >When enabled, tools can make outbound network requests. You can
+                                            restrict to specific domains below.</p
+                                        >
+                                    </div>
+                                    <Switch bind:checked={sandboxAllowNet} />
+                                </div>
+
+                                {#if sandboxAllowNet}
+                                    <div class="rounded-lg border p-4 space-y-3">
+                                        <div>
+                                            <Label class="text-base font-medium">Allowed Domains</Label>
+                                            <p class="text-sm text-muted-foreground mt-1"
+                                                >Leave empty to allow all domains. Otherwise, only these
+                                                domains will be accessible.</p
+                                            >
+                                        </div>
+
+                                        <PillList
+                                            items={allowedDomains}
+                                            labelKey="domain"
+                                            onChange={(items) => (allowedDomains = items)}
+                                            addPlaceholder="example.com"
+                                            addButtonLabel="Add Domain"
+                                            inputWidth="w-36"
+                                        />
+                                    </div>
+                                {/if}
+
+                                <Separator />
+
+                                <!-- Secrets -->
+                                <div class="rounded-lg border p-4 space-y-3">
+                                    <div>
+                                        <Label class="text-base font-medium">Secrets</Label>
+                                        <p class="text-sm text-muted-foreground mt-1"
+                                            >Credentials injected by the sandbox. The agent sees placeholders —
+                                            the real value is only substituted for requests to the specified
+                                            hosts.</p
+                                        >
+                                    </div>
+
+                                    <div class="flex flex-wrap gap-2">
+                                        {#each secrets as secret, index (secret.key + index)}
+                                            {#if secret.editing}
+                                                <!-- Editing pill -->
+                                                    <div class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm">
+                                                    <input
+                                                        type="text"
+                                                        value={secret.key}
+                                                        oninput={(e) => (secret.key = e.currentTarget.value)}
+                                                        placeholder="KEY"
+                                                        class="w-24 rounded border-0 bg-muted px-2 py-1 text-xs font-mono focus:ring-1 focus:ring-ring"
+                                                    />
+                                                    <input
+                                                        type="password"
+                                                        value={secret.value}
+                                                        oninput={(e) => (secret.value = e.currentTarget.value)}
+                                                        placeholder="value"
+                                                        class="w-32 rounded border-0 bg-muted px-2 py-1 text-xs font-mono focus:ring-1 focus:ring-ring"
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        value={secret.hosts}
+                                                        oninput={(e) => (secret.hosts = e.currentTarget.value)}
+                                                        placeholder="hosts"
+                                                        class="w-24 rounded border-0 bg-muted px-2 py-1 text-xs font-mono focus:ring-1 focus:ring-ring"
+                                                    />
+                                                    <Button
+                                                        size="sm"
+                                                        variant="ghost"
+                                                        class="h-5 w-5 rounded-full p-0"
+                                                        onclick={() => saveSecretEdit(index, { key: secret.key, value: secret.value, hosts: secret.hosts })}
+                                                    >
+                                                        <Check class="h-3 w-3" />
+                                                    </Button>
+                                                </div>
+                                            {:else}
+                                                <!-- Saved pill -->
+                                                <div class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm">
+                                                    <span class="font-mono font-medium">{secret.key}</span>
+                                                    <span class="text-muted-foreground">=</span>
+                                                    <span class="font-mono text-muted-foreground">••••</span>
+                                                    {#if secret.hosts}
+                                                        <span class="text-xs text-muted-foreground">({secret.hosts})</span>
+                                                    {/if}
+                                                    <Button
+                                                        size="sm"
+                                                        variant="ghost"
+                                                        class="h-5 w-5 rounded-full p-0 ml-1"
+                                                        onclick={() => startEditingSecret(index)}
+                                                    >
+                                                        <Pencil class="h-3 w-3" />
+                                                    </Button>
+                                                    <Button
+                                                        size="sm"
+                                                        variant="ghost"
+                                                        class="h-5 w-5 rounded-full p-0 text-destructive hover:text-destructive"
+                                                        onclick={() => deleteSecret(index)}
+                                                    >
+                                                        <Trash2 class="h-3 w-3" />
+                                                    </Button>
+                                                </div>
+                                            {/if}
+                                        {/each}
+
+                                        {#if showNewSecretForm}
+                                            <!-- New secret editing pill -->
+                                            <div class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm">
+                                                <input
+                                                    type="text"
+                                                    bind:value={newSecretKey}
+                                                    placeholder="KEY"
+                                                    class="w-24 rounded border-0 bg-muted px-2 py-1 text-xs font-mono focus:ring-1 focus:ring-ring"
+                                                    onkeydown={(e) => e.key === "Enter" && newSecretValue && addNewSecret()}
+                                                />
+                                                <input
+                                                    type="password"
+                                                    bind:value={newSecretValue}
+                                                    placeholder="value"
+                                                    class="w-28 rounded border-0 bg-muted px-2 py-1 text-xs font-mono focus:ring-1 focus:ring-ring"
+                                                    onkeydown={(e) => e.key === "Enter" && newSecretKey && addNewSecret()}
+                                                />
+                                                <input
+                                                    type="text"
+                                                    bind:value={newSecretHosts}
+                                                    placeholder="hosts"
+                                                    class="w-20 rounded border-0 bg-muted px-2 py-1 text-xs font-mono focus:ring-1 focus:ring-ring"
+                                                    onkeydown={(e) => e.key === "Enter" && newSecretKey && newSecretValue && addNewSecret()}
+                                                />
+                                                <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    class="h-5 w-5 rounded-full p-0"
+                                                    onclick={addNewSecret}
+                                                    disabled={!newSecretKey.trim() || !newSecretValue}
+                                                >
+                                                    <Check class="h-3 w-3" />
+                                                </Button>
+                                                <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    class="h-5 w-5 rounded-full p-0"
+                                                    onclick={cancelNewSecret}
+                                                >
+                                                    <X class="h-3 w-3" />
+                                                </Button>
+                                            </div>
+                                        {:else}
+                                            <!-- Add button -->
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                class="rounded-full h-8 px-3"
+                                                onclick={() => (showNewSecretForm = true)}
+                                            >
+                                                <Plus class="h-3.5 w-3.5 mr-1" /> Add Secret
+                                            </Button>
+                                        {/if}
+                                    </div>
+                                </div>
+
+                                <Separator />
+
+                                <!-- Snapshot & Restore -->
+                                <div
+                                    class="flex items-center justify-between rounded-lg border p-4"
+                                >
+                                    <div class="space-y-0.5">
+                                        <Label class="text-base font-medium">Snapshot Filesystem Changes</Label>
+                                        <p class="text-sm text-muted-foreground"
+                                            >Record all filesystem changes made by the agent for audit and
+                                            potential undo.</p
+                                        >
+                                    </div>
+                                    <Switch bind:checked={sandboxSnapshotEnabled} />
+                                </div>
+
+                                <Separator />
+
+                                <!-- Environment Variables -->
+                                <div class="rounded-lg border p-4 space-y-3">
+                                    <div>
+                                        <Label class="text-base font-medium">Allowed Environment Variables</Label>
+                                        <p class="text-sm text-muted-foreground mt-1"
+                                            >Only these environment variables will be visible inside the
+                                            sandbox. PATH, HOME, USER, SHELL, TERM, LANG, and NODE_ENV are
+                                            always included. All others are stripped unless added here.</p
+                                        >
+                                    </div>
+
+                                    <PillList
+                                        items={allowedEnvVars}
+                                        labelKey="name"
+                                        onChange={(items) => (allowedEnvVars = items)}
+                                        addPlaceholder="VAR_NAME"
+                                        addButtonLabel="Add Variable"
+                                        inputWidth="w-28"
+                                    />
+                                </div>
+                            {/if}
+
+                            <!-- Save Button -->
+                            <div class="flex justify-end pt-2">
+                                <Button onclick={saveSandboxSettings}>
+                                    {#if sandboxSettingsSaved}
+                                        <Check class="mr-1.5 h-4 w-4" /> Saved
+                                    {:else}
+                                        Save Sandbox Settings
+                                    {/if}
+                                </Button>
+                            </div>
+                        </div>
+                    {/if}
+                </CardContent>
+            </Card>
+        </TabsContent>
+
     </Tabs>
-</div>
+</PageLayout>

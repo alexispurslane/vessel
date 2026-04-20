@@ -1,5 +1,5 @@
 {
-    "name": "talkai",
+    "name": "vessel",
     "private": true,
     "version": "0.0.1",
     "type": "module",
@@ -15,6 +15,7 @@
     },
     "devDependencies": {
         "@fontsource-variable/inter": "^5.2.8",
+        "@fontsource-variable/merriweather": "^5.2.6",
         "@internationalized/date": "^3.12.1",
         "@lucide/svelte": "^1.8.0",
         "@sveltejs/adapter-auto": "^7.0.1",
@@ -52,6 +53,7 @@
         "bcryptjs": "^3.0.3",
         "better-sqlite3": "^12.9.0",
         "cookie": "^1.1.1",
-        "pi-mcp-adapter": "^2.4.0"
+        "pi-mcp-adapter": "^2.4.0",
+        "zerobox": "^0.2.6"
     }
 }

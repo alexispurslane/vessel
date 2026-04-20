@@ -7,7 +7,7 @@
     import { Button } from "$lib/components/ui/button/index.js";
     import { Spinner } from "$lib/components/ui/spinner/index.js";
     import MessageSquare from "@lucide/svelte/icons/message-square";
-    import Bot from "@lucide/svelte/icons/bot";
+
     import { listModels } from "$lib/api.js";
     import type { ModelInfo } from "$lib/types.js";
     import { onMount } from "svelte";
@@ -78,11 +78,11 @@
         <!-- Logo/Header -->
         <div class="mb-8 text-center">
             <div
-                class="mx-auto mb-4 flex size-16 items-center justify-center rounded-full bg-muted"
+                class="mx-auto mb-4 flex size-16 items-center justify-center rounded-full bg-muted overflow-hidden"
             >
-                <Bot class="size-8 text-muted-foreground" />
+                <img src="/vessel.png" alt="Vessel" class="size-16 rounded-full" />
             </div>
-            <h1 class="text-2xl font-bold">TalkAI</h1>
+            <h1 class="text-2xl font-bold">Vessel</h1>
             <p class="mt-2 text-muted-foreground">Start a conversation with a message</p>
         </div>
 

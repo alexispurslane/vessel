@@ -7,6 +7,7 @@ import {
     getMessageHistory,
     generateTitle,
     navigateMessage as apiNavigate,
+    releaseConversation,
 } from "$lib/api.js";
 import type { ChatMessage } from "$lib/types.js";
 import { setActiveConversation, updateConversationTitleAndTags } from "./conversations.svelte.js";
@@ -675,6 +676,16 @@ function stripThinkingTagsFromText(text: string): string {
 }
 
 export function disconnectStream(): void {
+    // Release the in-memory session on the server when switching away.
+    // This is best-effort — if it fails, the idle timeout on the server
+    // will eventually clean up.
+    const convId = currentConversationId;
+    if (convId) {
+        releaseConversation(convId).catch(() => {
+            // Best-effort — ignore failures (server idle timeout is the fallback)
+        });
+    }
+
     if (currentEventSource) {
         currentEventSource.close();
         currentEventSource = null;
@@ -882,4 +893,29 @@ export function switchConversation(conversationId: string): void {
 
     clearMessages();
     connectStream(conversationId);
+}
+
+/**
+ * Reconnect to the current conversation after a session restart.
+ * Used when conversation settings change and the server disposes the
+ * in-memory session (it will be lazily recreated on next connect).
+ */
+export function reconnectStream(): void {
+    const convId = currentConversationId;
+    if (!convId) return;
+
+    // Close the current EventSource without sending a release request
+    // since the server already disposed the session.
+    if (currentEventSource) {
+        currentEventSource.close();
+        currentEventSource = null;
+    }
+    connected = false;
+    generating = false;
+    streamingMessageId = null;
+    insideThinkingTag = false;
+
+    // Reconnect — the server will create a fresh session with updated settings
+    clearMessages();
+    connectStream(convId);
 }

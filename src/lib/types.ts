@@ -1,5 +1,5 @@
 /**
- * Shared domain types for TalkAI.
+ * Shared domain types for Vessel.
  *
  * These types are used by both the frontend and backend.
  * Server-only types (Pi re-exports, ActiveSession) live in
@@ -14,6 +14,40 @@ export interface AuthStatus {
     authenticated: boolean;
     username?: string;
 }
+
+// --- Conversation Settings ---
+
+/** Per-conversation settings stored as JSON in the conversation_settings table. */
+export interface ConversationSettings {
+    /** Whether the sandbox is enabled for this conversation (null = use global default) */
+    sandboxEnabled?: boolean | null;
+    /** Extra readable paths for the sandbox (null = use global default) */
+    extraReadPaths?: string[] | null;
+    /** Extra writable paths for the sandbox (null = use global default) */
+    extraWritePaths?: string[] | null;
+    /** Whether network access is allowed (null = use global default) */
+    allowNet?: boolean | null;
+    /** Allowed network domains when allowNet is truthy (null = use global default) */
+    allowedNetDomains?: string[] | null;
+    /** Secrets to inject into the sandbox (null = use global default) */
+    secrets?: Record<string, { value: string; hosts: string[] }> | null;
+    /** Environment variable names to allow in the sandbox (null = use global default) */
+    allowEnv?: string[] | null;
+    /** Whether to delete the workspace when the conversation is trashed */
+    deleteWorkspaceWithConversation?: boolean;
+}
+
+/** Default values for per-conversation settings. Null fields inherit from global settings. */
+export const DEFAULT_CONVERSATION_SETTINGS: ConversationSettings = {
+    sandboxEnabled: null,
+    extraReadPaths: null,
+    extraWritePaths: null,
+    allowNet: null,
+    allowedNetDomains: null,
+    secrets: null,
+    allowEnv: null,
+    deleteWorkspaceWithConversation: true,
+};
 
 // --- Conversations ---
 
