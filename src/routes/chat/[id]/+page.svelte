@@ -16,12 +16,13 @@
         ChatAvatar,
         ChatMessage,
         ChatInput,
+        ThinkingGroup,
     } from "$lib/components/chat/index.js";
     import { ScrollArea } from "$lib/components/ui/scroll-area";
     import { Spinner } from "$lib/components/ui/spinner/index.js";
     import Bot from "@lucide/svelte/icons/bot";
     import { listModels } from "$lib/api.js";
-    import type { ModelInfo } from "$lib/types.js";
+    import type { ModelInfo, RenderItem, ThinkingGroup as ThinkingGroupType } from "$lib/types.js";
     import { onMount } from "svelte";
     import { goto } from "$app/navigation";
 
@@ -40,14 +41,110 @@
     let viewportEl = $state<HTMLElement | null>(null);
     let availableModels = $state<ModelInfo[]>([]);
     let selectedModelId = $state(""); // Just the model ID — provider is resolved automatically
-    let thinkingOpen = $state<Record<string, boolean>>({}); // msg.id -> whether thinking is expanded
+    let thinkingOpen = $state<Record<string, boolean>>({}); // item id -> whether thinking is expanded
 
-    // Auto-collapse thinking dropdowns when a message transitions from thinking to output streaming
-    $effect(() => {
+    /** Whether an assistant message is "intermediate" — thinking/tool calls only, no visible text for the user.
+     *  These get grouped into ThinkingGroups in the render layer.
+     *
+     *  Important: a message that is still streaming might start with thinking/tool calls
+     *  and later receive text content, so we only group non-streaming messages that
+     *  definitively have no content. Streaming messages with thinking but no content yet
+     *  are still grouped (they'll stay in the group since tool calls always precede final text
+     *  in the agent loop — the text comes in a NEW message/turn). */
+    function isIntermediateAssistant(msg: typeof chat.messages[number]): boolean {
+        if (msg.role !== "assistant") return false;
+        // If it has visible text content (non-empty after trimming), it's not intermediate
+        if (msg.content && msg.content.trim()) return false;
+        // If it has thinking or tool calls, it IS intermediate
+        if (msg.thinking || msg.thinkingStreaming || (msg.toolCalls && msg.toolCalls.length > 0)) return true;
+        // Error messages with content are not intermediate
+        if (msg.isError) return false;
+        // Empty assistant messages with no thinking/tools are not intermediate either
+        return false;
+    }
+
+    /** Transform the flat message list into render items, grouping consecutive intermediate
+     *  assistant messages into single ThinkingGroups with interleaved thinking + tool calls. */
+    let renderItems: RenderItem[] = $derived.by(() => {
+        const items: RenderItem[] = [];
+        let currentGroup: ThinkingGroupType | null = null;
+
         for (const msg of chat.messages) {
-            if (msg.thinkingStreaming === false && thinkingOpen[msg.id] === undefined && msg.thinking) {
-                // Thinking just finished for this message — explicitly close it
-                thinkingOpen[msg.id] = false;
+            if (isIntermediateAssistant(msg)) {
+                // This message belongs in a thinking group
+                if (!currentGroup) {
+                    currentGroup = {
+                        type: "thinkingGroup",
+                        id: `group-${msg.id}`,
+                        steps: [],
+                        streaming: false,
+                        model: msg.model,
+                        modelProvider: msg.modelProvider,
+                        messageIds: [],
+                    };
+                }
+
+                // Add thinking step (if present)
+                if (msg.thinking || msg.thinkingStreaming) {
+                    currentGroup.steps.push({
+                        id: `${msg.id}-thinking`,
+                        messageId: msg.id,
+                        type: "thinking",
+                        thinking: msg.thinking,
+                        streaming: msg.thinkingStreaming,
+                    });
+                    if (msg.thinkingStreaming) currentGroup.streaming = true;
+                }
+
+                // Add tool call steps (interleaved after the thinking)
+                if (msg.toolCalls) {
+                    for (let i = 0; i < msg.toolCalls.length; i++) {
+                        const tc = msg.toolCalls[i];
+                        currentGroup.steps.push({
+                            id: `${msg.id}-tool-${i}`,
+                            messageId: msg.id,
+                            type: "toolCall",
+                            toolCall: tc,
+                            streaming: tc.status === "running",
+                        });
+                        if (tc.status === "running") currentGroup.streaming = true;
+                    }
+                }
+
+                currentGroup.messageIds.push(msg.id);
+                if (msg.model) currentGroup.model = msg.model;
+                if (msg.modelProvider) currentGroup.modelProvider = msg.modelProvider;
+            } else {
+                // This message breaks any current group
+                if (currentGroup) {
+                    items.push(currentGroup);
+                    currentGroup = null;
+                }
+                items.push({ type: "message", msg });
+            }
+        }
+
+        // Don't forget the last group
+        if (currentGroup) {
+            items.push(currentGroup);
+        }
+
+        return items;
+    });
+
+    // Auto-collapse thinking dropdowns when a group or message transitions from streaming to done
+    $effect(() => {
+        for (const item of renderItems) {
+            if (item.type === "thinkingGroup") {
+                // When streaming has stopped and we haven't explicitly set open state, close it
+                if (!item.streaming && thinkingOpen[item.id] === undefined) {
+                    thinkingOpen[item.id] = false;
+                }
+            } else {
+                const msg = item.msg;
+                if (msg.thinkingStreaming === false && thinkingOpen[msg.id] === undefined && msg.thinking) {
+                    thinkingOpen[msg.id] = false;
+                }
             }
         }
     });
@@ -209,39 +306,64 @@
                     </div>
                 </div>
             {:else}
-                {#each chat.messages as msg, i (msg.id)}
-                    {@const isLastConsecutive = chat.messages[i + 1]?.role !== msg.role}
-                    <div class="flex w-full {msg.role === 'user' ? 'justify-end' : 'justify-start'} {!isLastConsecutive ? '-mt-4' : ''}">
-                        <div
-                            class="flex gap-3 w-[min(75%,65ch)] font-serif {msg.role === 'user'
-                                ? 'flex-row-reverse items-end'
-                                : ''}"
-                        >
-                            <!-- Avatar -->
-                            <ChatAvatar
-                                role={msg.role}
-                                isConsecutive={!isLastConsecutive}
-                                username={auth.username}
-                                model={msg.model}
-                                modelProvider={msg.modelProvider}
-                                {getModelDisplayName}
-                                hasContent={!!(msg.content || msg.thinking)}
-                            />
-
-                            <!-- Message bubble and tool calls -->
-                            <div class="min-w-0 flex-1">
-                            <ChatMessage
-                                {msg}
-                                thinkingIsOpen={thinkingOpen[msg.id]}
-                                onthinkingtoggle={(open) => (thinkingOpen[msg.id] = open)}
-                                scrollContainer={viewportEl}
-                                ondelete={handleDeleteMessage}
-                                onedit={handleEditMessage}
-                                navigating={chat.navigating}
-                            />
+                {#each renderItems as item, i (item.type === "thinkingGroup" ? item.id : item.msg.id)}
+                    {#if item.type === "thinkingGroup"}
+                        <!-- Grouped thinking + tool calls -->
+                        <div class="flex w-full justify-start">
+                            <div class="flex gap-3 w-[min(75%,65ch)] font-serif">
+                                <ChatAvatar
+                                    role="assistant"
+                                    isConsecutive={false}
+                                    model={item.model}
+                                    modelProvider={item.modelProvider}
+                                    {getModelDisplayName}
+                                    hasContent={true}
+                                />
+                                <div class="min-w-0 flex-1">
+                                    <ThinkingGroup
+                                        group={item}
+                                        thinkingIsOpen={thinkingOpen[item.id]}
+                                        onthinkingtoggle={(open) => (thinkingOpen[item.id] = open)}
+                                    />
+                                </div>
                             </div>
                         </div>
-                    </div>
+                    {:else}
+                        {@const msg = item.msg}
+                        {@const nextItem = renderItems[i + 1]}
+                        {@const isLastConsecutive = nextItem?.type !== "message" || nextItem.msg.role !== msg.role}
+                        <div class="flex w-full {msg.role === 'user' ? 'justify-end' : 'justify-start'} {!isLastConsecutive ? '-mt-4' : ''}">
+                            <div
+                                class="flex gap-3 w-[min(75%,65ch)] font-serif {msg.role === 'user'
+                                    ? 'flex-row-reverse items-end'
+                                    : ''}"
+                            >
+                                <!-- Avatar -->
+                                <ChatAvatar
+                                    role={msg.role}
+                                    isConsecutive={!isLastConsecutive}
+                                    username={auth.username}
+                                    model={msg.model}
+                                    modelProvider={msg.modelProvider}
+                                    {getModelDisplayName}
+                                    hasContent={!!(msg.content || msg.thinking)}
+                                />
+
+                                <!-- Message bubble and tool calls -->
+                                <div class="min-w-0 flex-1">
+                                <ChatMessage
+                                    {msg}
+                                    thinkingIsOpen={thinkingOpen[msg.id]}
+                                    onthinkingtoggle={(open) => (thinkingOpen[msg.id] = open)}
+                                    scrollContainer={viewportEl}
+                                    ondelete={handleDeleteMessage}
+                                    onedit={handleEditMessage}
+                                    navigating={chat.navigating}
+                                />
+                                </div>
+                            </div>
+                        </div>
+                    {/if}
                 {/each}
             {/if}
         </div>

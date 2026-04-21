@@ -171,3 +171,42 @@ export interface ToolCallInfo {
     output?: string;
     isError?: boolean;
 }
+
+/** A single step within a thinking group — either a thinking text chunk or a tool call */
+export interface ThinkingStep {
+    /** Unique ID for this step */
+    id: string;
+    /** The message this step came from */
+    messageId: string;
+    type: "thinking" | "toolCall";
+    /** For thinking steps: the reasoning text */
+    thinking?: string;
+    /** For toolCall steps: the tool call info */
+    toolCall?: ToolCallInfo;
+    /** Whether this step's content is still streaming */
+    streaming?: boolean;
+}
+
+/** A group of consecutive assistant messages that are "intermediate" — thinking + tool calls
+ *  with no visible text content for the user. Displayed as a single collapsible block
+ *  showing the full interleaved trace of reasoning and tool use. */
+export interface ThinkingGroup {
+    type: "thinkingGroup";
+    /** Unique ID for this group (derived from first message ID) */
+    id: string;
+    /** The ordered steps within this group (thinking chunks + tool calls, interleaved) */
+    steps: ThinkingStep[];
+    /** Whether any step in this group is still streaming */
+    streaming: boolean;
+    /** The model used for these steps */
+    model?: string;
+    /** The provider of the model */
+    modelProvider?: string;
+    /** Message IDs in this group, for delete/edit callbacks */
+    messageIds: string[];
+}
+
+/** A renderable item in the chat view — either a single message or a grouped thinking block */
+export type RenderItem =
+    | { type: "message"; msg: ChatMessage }
+    | ThinkingGroup;

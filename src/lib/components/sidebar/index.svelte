@@ -56,8 +56,9 @@
                 tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
             }
         }
+        console.log([...tagCounts.entries()]);
         return [...tagCounts.entries()]
-            .sort(([a], [b]) => a.localeCompare(b))
+            .sort(([_1, aCount], [_2, bCount]) => bCount - aCount)
             .map(([tag, count]) => ({ tag, count }));
     });
 
