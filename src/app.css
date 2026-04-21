@@ -432,6 +432,11 @@
     background-color: hsl(var(--tag-hue), 40%, 20%);
 }
 
+.dark [data-active="true"] .tag-pill-colors {
+    color: hsl(var(--tag-hue), 60%, 38%);
+    background-color: hsl(var(--tag-hue), 55%, 90%);
+}
+
 .no-scrollbar {
     -ms-overflow-style: none;
     scrollbar-width: none;
