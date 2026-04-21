@@ -14,6 +14,7 @@
     import {
         PillList,
         PathAutocompletePillList,
+        PillKeyValueList,
     } from "$lib/components/pill-list/index.js";
     import {
         getConversationSettings,
@@ -22,6 +23,7 @@
     import type { ConversationSettings } from "$lib/types.js";
     import { reconnectStream } from "$lib/stores/chat.svelte.js";
     import Shield from "@lucide/svelte/icons/shield";
+    import Check from "@lucide/svelte/icons/check";
 
     interface Props {
         /** The conversation ID */
@@ -76,14 +78,6 @@
 
     let useCustomSecrets = $state(false);
     let secrets = $state<Array<{ key: string; value: string; hosts: string; editing?: boolean }>>([]);
-
-    // Secret add/edit state
-    let showNewSecretForm = $state(false);
-    let newSecretKey = $state("");
-    let newSecretValue = $state("");
-    let newSecretHosts = $state("");
-    // Track edit values locally to avoid focus-stealing
-    let secretEditValues = $state<Record<number, { key: string; value: string; hosts: string }>>({});
 
     // --- Load / Save ---
     async function loadSettings() {
@@ -204,46 +198,6 @@
         } finally {
             saving = false;
         }
-    }
-
-    // --- Secret helpers ---
-    function addNewSecret() {
-        if (!newSecretKey.trim() || !newSecretValue.trim()) return;
-        secrets = [...secrets, {
-            key: newSecretKey.trim(),
-            value: newSecretValue,
-            hosts: newSecretHosts.trim(),
-            editing: false,
-        }];
-        newSecretKey = "";
-        newSecretValue = "";
-        newSecretHosts = "";
-        showNewSecretForm = false;
-    }
-
-    function startEditingSecret(index: number) {
-        secrets = secrets.map((s, i) => ({ ...s, editing: i === index }));
-        secretEditValues[index] = { key: secrets[index].key, value: secrets[index].value, hosts: secrets[index].hosts };
-    }
-
-    function saveSecretEdit(index: number) {
-        const editVal = secretEditValues[index];
-        if (editVal) {
-            secrets = secrets.map((s, i) => i === index ? { ...editVal, editing: false } : { ...s, editing: false });
-        }
-        delete secretEditValues[index];
-    }
-
-    function deleteSecret(index: number) {
-        secrets = secrets.filter((_, i) => i !== index);
-        delete secretEditValues[index];
-    }
-
-    function cancelNewSecret() {
-        showNewSecretForm = false;
-        newSecretKey = "";
-        newSecretValue = "";
-        newSecretHosts = "";
     }
 
     // Load settings when dialog opens
@@ -386,7 +340,7 @@
                         </div>
 
                         {#if allowNetState === true}
-                            <div class="mt-4 space-y-3">
+                            <div class="mt-4 space-y-3 mb-4">
                                 <div class="flex items-center justify-between">
                                     <div>
                                         <Label class="text-sm font-medium">Allowed Domains</Label>
@@ -407,139 +361,30 @@
                                     />
                                 {/if}
                             </div>
-                        {/if}
-                    </div>
 
-                    <Separator />
+                            <Separator />
 
-                    <!-- Secrets -->
-                    <div class="rounded-lg border p-4 space-y-3">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <Label class="text-base font-medium">Secrets</Label>
-                                <p class="text-sm text-muted-foreground mt-1">
-                                    {useCustomSecrets ? "Custom secrets for this conversation" : "Using global settings"}
-                                </p>
-                            </div>
-                            <Switch bind:checked={useCustomSecrets} />
-                        </div>
-                        {#if useCustomSecrets}
-                            <div class="flex flex-wrap gap-2">
-                                {#each secrets as secret, index (secret.key + '-' + index)}
-                                    {#if secret.editing}
-                                        <div class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm">
-                                            <input
-                                                type="text"
-                                                class="bg-transparent outline-none w-20 text-xs font-mono"
-                                                placeholder="KEY"
-                                                value={secretEditValues[index]?.key ?? secret.key}
-                                                oninput={(e) => {
-                                                    if (!secretEditValues[index]) secretEditValues[index] = { key: secret.key, value: secret.value, hosts: secret.hosts };
-                                                    secretEditValues[index].key = e.currentTarget.value;
-                                                }}
-                                            />
-                                            <input
-                                                type="text"
-                                                class="bg-transparent outline-none w-20 text-xs"
-                                                placeholder="value"
-                                                value={secretEditValues[index]?.value ?? secret.value}
-                                                oninput={(e) => {
-                                                    if (!secretEditValues[index]) secretEditValues[index] = { key: secret.key, value: secret.value, hosts: secret.hosts };
-                                                    secretEditValues[index].value = e.currentTarget.value;
-                                                }}
-                                            />
-                                            <input
-                                                type="text"
-                                                class="bg-transparent outline-none w-20 text-xs"
-                                                placeholder="hosts"
-                                                value={secretEditValues[index]?.hosts ?? secret.hosts}
-                                                oninput={(e) => {
-                                                    if (!secretEditValues[index]) secretEditValues[index] = { key: secret.key, value: secret.value, hosts: secret.hosts };
-                                                    secretEditValues[index].hosts = e.currentTarget.value;
-                                                }}
-                                                onkeydown={(e) => {
-                                                    if (e.key === "Enter") {
-                                                        e.preventDefault();
-                                                        saveSecretEdit(index);
-                                                    } else if (e.key === "Escape") {
-                                                        secrets = secrets.map((s, i) => ({ ...s, editing: false }));
-                                                        delete secretEditValues[index];
-                                                    }
-                                                }}
-                                            />
-                                            <Button variant="ghost" size="icon" class="h-5 w-5"
-                                                onclick={() => saveSecretEdit(index)}
-                                            >
-                                                <Check class="h-3 w-3" />
-                                            </Button>
-                                        </div>
-                                    {:else}
-                                        <div class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm">
-                                            <span class="font-mono font-medium text-xs">{secret.key}</span>
-                                            <span class="text-muted-foreground">=</span>
-                                            <span class="font-mono text-muted-foreground text-xs">•••</span>
-                                            {#if secret.hosts}
-                                                <span class="text-xs text-muted-foreground">({secret.hosts})</span>
-                                            {/if}
-                                            <Button variant="ghost" size="icon" class="h-5 w-5"
-                                                onclick={() => startEditingSecret(index)}
-                                            >
-                                                <Pencil class="h-3 w-3" />
-                                            </Button>
-                                            <Button variant="ghost" size="icon" class="h-5 w-5"
-                                                onclick={() => deleteSecret(index)}
-                                            >
-                                                <Trash2 class="h-3 w-3" />
-                                            </Button>
-                                        </div>
-                                    {/if}
-                                {/each}
-                                {#if showNewSecretForm}
-                                    <div class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm">
-                                        <input
-                                            type="text"
-                                            class="bg-transparent outline-none w-20 text-xs font-mono"
-                                            placeholder="KEY"
-                                            bind:value={newSecretKey}
-                                        />
-                                        <input
-                                            type="text"
-                                            class="bg-transparent outline-none w-20 text-xs"
-                                            placeholder="value"
-                                            bind:value={newSecretValue}
-                                        />
-                                        <input
-                                            type="text"
-                                            class="bg-transparent outline-none w-20 text-xs"
-                                            placeholder="hosts"
-                                            bind:value={newSecretHosts}
-                                            onkeydown={(e) => {
-                                                if (e.key === "Enter") {
-                                                    e.preventDefault();
-                                                    addNewSecret();
-                                                } else if (e.key === "Escape") {
-                                                    cancelNewSecret();
-                                                }
-                                            }}
-                                        />
-                                        <Button variant="ghost" size="icon" class="h-5 w-5"
-                                            onclick={addNewSecret}
-                                        >
-                                            <Check class="h-3 w-3" />
-                                        </Button>
-                                        <Button variant="ghost" size="icon" class="h-5 w-5"
-                                            onclick={cancelNewSecret}
-                                        >
-                                            <X class="h-3 w-3" />
-                                        </Button>
+                            <div class="mt-4 space-y-3">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <Label class="text-sm font-medium">Secrets</Label>
+                                        <p class="text-xs text-muted-foreground mt-0.5">
+                                            {useCustomSecrets ? "Custom secrets for this conversation" : "Using global settings"}
+                                        </p>
                                     </div>
-                                {:else}
-                                    <Button variant="outline" size="sm" class="h-7 rounded-full"
-                                        onclick={() => (showNewSecretForm = true)}
-                                    >
-                                        <Plus class="h-3.5 w-3.5 mr-1" />
-                                        Add Secret
-                                    </Button>
+                                    <Switch bind:checked={useCustomSecrets} />
+                                </div>
+                                {#if useCustomSecrets}
+                                    <PillKeyValueList
+                                        items={secrets}
+                                        fields={[
+                                            { key: "key", placeholder: "KEY", width: "w-20", mono: true },
+                                            { key: "value", placeholder: "value", width: "w-20", type: "password", viewDisplay: "mask" },
+                                            { key: "hosts", placeholder: "hosts", width: "w-20", showInView: false },
+                                        ]}
+                                        onChange={(items) => (secrets = items)}
+                                        addButtonLabel="Add Secret"
+                                    />
                                 {/if}
                             </div>
                         {/if}

@@ -31,6 +31,11 @@
     const auth = getAuth();
     const settingsStore = getSettingsStore();
 
+    // Session storage key for in-progress message draft, scoped per conversation
+    function draftKey(conversationId: string) {
+        return `chat-draft:${conversationId}`;
+    }
+
     let inputText = $state("");
     let viewportEl = $state<HTMLElement | null>(null);
     let availableModels = $state<ModelInfo[]>([]);
@@ -80,6 +85,18 @@
         }
     });
 
+    // Persist in-progress message to sessionStorage so it survives page reloads
+    $effect(() => {
+        if (id) {
+            const key = draftKey(id);
+            if (inputText.trim()) {
+                sessionStorage.setItem(key, inputText);
+            } else {
+                sessionStorage.removeItem(key);
+            }
+        }
+    });
+
     // Connect to SSE stream on mount and when the conversation id changes; disconnect on cleanup
     $effect(() => {
         const currentId = id;
@@ -89,6 +106,12 @@
                 if (chat.lastModel) {
                     selectedModelId = chat.lastModel.modelId;
                     defaultApplied = true; // prevent default from overwriting conversation model
+                }
+
+                // Restore in-progress draft from sessionStorage if one exists
+                const saved = sessionStorage.getItem(draftKey(currentId));
+                if (saved) {
+                    inputText = saved;
                 }
 
                 // If an initial message was passed (e.g., from the home page), send it now
@@ -101,7 +124,8 @@
                         selectedModelId = modelId;
                     }
                     send(initialMessage, modelId);
-                    // Clear the params from the URL to avoid re-sending on refresh/reconnect
+                    // Clear the draft and the URL params to avoid re-sending on refresh/reconnect
+                    sessionStorage.removeItem(draftKey(currentId));
                     goto(`/chat/${currentId}`, { replaceState: true });
                 }
             });
@@ -136,6 +160,8 @@
         // Provider is resolved automatically from the model ID on the backend
         send(text, selectedModelId || undefined);
         inputText = "";
+        // Clear the draft from sessionStorage since the message has been sent
+        sessionStorage.removeItem(draftKey(id));
     }
 
     function handleAbort() {

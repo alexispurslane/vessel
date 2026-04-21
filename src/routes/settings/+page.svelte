@@ -40,7 +40,7 @@
     import Shield from "@lucide/svelte/icons/shield";
     import X from "@lucide/svelte/icons/x";
     import PageLayout from "$lib/components/page-layout/index.svelte";
-    import { PillList, PathAutocompletePillList } from "$lib/components/pill-list/index.js";
+    import { PillList, PathAutocompletePillList, PillKeyValueList } from "$lib/components/pill-list/index.js";
     import {
         Select,
         SelectContent,
@@ -425,10 +425,6 @@
 
     // Secrets state for custom pill UI
     let secrets = $state<Array<{ key: string; value: string; hosts: string; editing?: boolean }>>([]);
-    let newSecretKey = $state("");
-    let newSecretValue = $state("");
-    let newSecretHosts = $state("");
-    let showNewSecretForm = $state(false);
 
     function loadPillListsFromSettings() {
         readPaths = (JSON.parse(appSettings["sandbox.extraReadPaths"] || "[]") as string[])
@@ -450,29 +446,6 @@
         };
     }
 
-    function parseSecretsInput(input: string): Record<string, { value: string; hosts: string[] }> {
-        const result: Record<string, { value: string; hosts: string[] }> = {};
-        const lines = input.split("\n").map((l: string) => l.trim()).filter(Boolean);
-        for (const line of lines) {
-            const match = line.match(/^(\w+)=(.+?)(?:\s+(.+))?$/);
-            if (match) {
-                const [, name, value, hostsStr] = match;
-                const hosts = hostsStr ? hostsStr.split(",").map((h: string) => h.trim()).filter(Boolean) : [];
-                result[name] = { value, hosts };
-            }
-        }
-        return result;
-    }
-
-    function secretsToInput(secrets: Record<string, { value: string; hosts: string[] }>): string {
-        return Object.entries(secrets)
-            .map(([name, config]) => {
-                const hosts = config.hosts.length > 0 ? ` ${config.hosts.join(",")}` : "";
-                return `${name}=${config.value}${hosts}`;
-            })
-            .join("\n");
-    }
-
     function loadSecretsFromSettings() {
         const secretsObj = JSON.parse(appSettings["sandbox.secrets"] || "{}") as Record<string, { value: string; hosts: string[] }>;
         secrets = Object.entries(secretsObj).map(([key, config]) => ({
@@ -481,41 +454,6 @@
             hosts: config.hosts.join(","),
             editing: false,
         }));
-    }
-
-    function addNewSecret() {
-        if (!newSecretKey.trim() || !newSecretValue.trim()) return;
-        secrets = [...secrets, {
-            key: newSecretKey.trim(),
-            value: newSecretValue,
-            hosts: newSecretHosts.trim(),
-            editing: false,
-        }];
-        newSecretKey = "";
-        newSecretValue = "";
-        newSecretHosts = "";
-        showNewSecretForm = false;
-    }
-
-    function startEditingSecret(index: number) {
-        secrets = secrets.map((s, i) => ({ ...s, editing: i === index }));
-    }
-
-    function saveSecretEdit(index: number, updated: { key: string; value: string; hosts: string }) {
-        secrets = secrets.map((s, i) => {
-            return i === index ? { ...updated, editing: false } : { ...s, editing: false };
-        });
-    }
-
-    function deleteSecret(index: number) {
-        secrets = secrets.filter((_, i) => i !== index);
-    }
-
-    function cancelNewSecret() {
-        showNewSecretForm = false;
-        newSecretKey = "";
-        newSecretValue = "";
-        newSecretHosts = "";
     }
 
     function loadSandboxSettings() {
@@ -1227,169 +1165,63 @@
                                 <Separator />
 
                                 <!-- Network Access -->
-                                <div class="flex items-center justify-between rounded-lg border p-4">
-                                    <div class="space-y-0.5">
-                                        <Label class="text-base font-medium">Allow Network Access</Label>
-                                        <p class="text-sm text-muted-foreground"
-                                            >When enabled, tools can make outbound network requests. You can
-                                            restrict to specific domains below.</p
-                                        >
-                                    </div>
-                                    <Switch bind:checked={sandboxAllowNet} />
-                                </div>
-
-                                {#if sandboxAllowNet}
-                                    <div class="rounded-lg border p-4 space-y-3">
-                                        <div>
-                                            <Label class="text-base font-medium">Allowed Domains</Label>
-                                            <p class="text-sm text-muted-foreground mt-1"
-                                                >Leave empty to allow all domains. Otherwise, only these
-                                                domains will be accessible.</p
+                                <div class="rounded-lg border p-4 space-y-3">
+                                    <div class="flex items-center justify-between">
+                                        <div class="space-y-0.5">
+                                            <Label class="text-base font-medium">Network Access</Label>
+                                            <p class="text-sm text-muted-foreground"
+                                                >When enabled, tools can make outbound network requests.</p
                                             >
                                         </div>
-
-                                        <PillList
-                                            items={allowedDomains}
-                                            labelKey="domain"
-                                            onChange={(items) => (allowedDomains = items)}
-                                            addPlaceholder="example.com"
-                                            addButtonLabel="Add Domain"
-                                            inputWidth="w-36"
-                                        />
-                                    </div>
-                                {/if}
-
-                                <Separator />
-
-                                <!-- Secrets -->
-                                <div class="rounded-lg border p-4 space-y-3">
-                                    <div>
-                                        <Label class="text-base font-medium">Secrets</Label>
-                                        <p class="text-sm text-muted-foreground mt-1"
-                                            >Credentials injected by the sandbox. The agent sees placeholders —
-                                            the real value is only substituted for requests to the specified
-                                            hosts.</p
-                                        >
+                                        <Switch bind:checked={sandboxAllowNet} />
                                     </div>
 
-                                    <div class="flex flex-wrap gap-2">
-                                        {#each secrets as secret, index (secret.key + index)}
-                                            {#if secret.editing}
-                                                <!-- Editing pill -->
-                                                    <div class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm">
-                                                    <input
-                                                        type="text"
-                                                        value={secret.key}
-                                                        oninput={(e) => (secret.key = e.currentTarget.value)}
-                                                        placeholder="KEY"
-                                                        class="w-24 rounded border-0 bg-muted px-2 py-1 text-xs font-mono focus:ring-1 focus:ring-ring"
-                                                    />
-                                                    <input
-                                                        type="password"
-                                                        value={secret.value}
-                                                        oninput={(e) => (secret.value = e.currentTarget.value)}
-                                                        placeholder="value"
-                                                        class="w-32 rounded border-0 bg-muted px-2 py-1 text-xs font-mono focus:ring-1 focus:ring-ring"
-                                                    />
-                                                    <input
-                                                        type="text"
-                                                        value={secret.hosts}
-                                                        oninput={(e) => (secret.hosts = e.currentTarget.value)}
-                                                        placeholder="hosts"
-                                                        class="w-24 rounded border-0 bg-muted px-2 py-1 text-xs font-mono focus:ring-1 focus:ring-ring"
-                                                    />
-                                                    <Button
-                                                        size="sm"
-                                                        variant="ghost"
-                                                        class="h-5 w-5 rounded-full p-0"
-                                                        onclick={() => saveSecretEdit(index, { key: secret.key, value: secret.value, hosts: secret.hosts })}
-                                                    >
-                                                        <Check class="h-3 w-3" />
-                                                    </Button>
-                                                </div>
-                                            {:else}
-                                                <!-- Saved pill -->
-                                                <div class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm">
-                                                    <span class="font-mono font-medium">{secret.key}</span>
-                                                    <span class="text-muted-foreground">=</span>
-                                                    <span class="font-mono text-muted-foreground">••••</span>
-                                                    {#if secret.hosts}
-                                                        <span class="text-xs text-muted-foreground">({secret.hosts})</span>
-                                                    {/if}
-                                                    <Button
-                                                        size="sm"
-                                                        variant="ghost"
-                                                        class="h-5 w-5 rounded-full p-0 ml-1"
-                                                        onclick={() => startEditingSecret(index)}
-                                                    >
-                                                        <Pencil class="h-3 w-3" />
-                                                    </Button>
-                                                    <Button
-                                                        size="sm"
-                                                        variant="ghost"
-                                                        class="h-5 w-5 rounded-full p-0 text-destructive hover:text-destructive"
-                                                        onclick={() => deleteSecret(index)}
-                                                    >
-                                                        <Trash2 class="h-3 w-3" />
-                                                    </Button>
-                                                </div>
-                                            {/if}
-                                        {/each}
+                                    {#if sandboxAllowNet}
+                                        <Separator />
 
-                                        {#if showNewSecretForm}
-                                            <!-- New secret editing pill -->
-                                            <div class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm">
-                                                <input
-                                                    type="text"
-                                                    bind:value={newSecretKey}
-                                                    placeholder="KEY"
-                                                    class="w-24 rounded border-0 bg-muted px-2 py-1 text-xs font-mono focus:ring-1 focus:ring-ring"
-                                                    onkeydown={(e) => e.key === "Enter" && newSecretValue && addNewSecret()}
-                                                />
-                                                <input
-                                                    type="password"
-                                                    bind:value={newSecretValue}
-                                                    placeholder="value"
-                                                    class="w-28 rounded border-0 bg-muted px-2 py-1 text-xs font-mono focus:ring-1 focus:ring-ring"
-                                                    onkeydown={(e) => e.key === "Enter" && newSecretKey && addNewSecret()}
-                                                />
-                                                <input
-                                                    type="text"
-                                                    bind:value={newSecretHosts}
-                                                    placeholder="hosts"
-                                                    class="w-20 rounded border-0 bg-muted px-2 py-1 text-xs font-mono focus:ring-1 focus:ring-ring"
-                                                    onkeydown={(e) => e.key === "Enter" && newSecretKey && newSecretValue && addNewSecret()}
-                                                />
-                                                <Button
-                                                    size="sm"
-                                                    variant="ghost"
-                                                    class="h-5 w-5 rounded-full p-0"
-                                                    onclick={addNewSecret}
-                                                    disabled={!newSecretKey.trim() || !newSecretValue}
+                                        <div class="space-y-3">
+                                            <div>
+                                                <Label class="text-sm font-medium">Allowed Domains</Label>
+                                                <p class="text-xs text-muted-foreground mt-0.5"
+                                                    >Leave empty to allow all domains. Otherwise, only these
+                                                    domains will be accessible.</p
                                                 >
-                                                    <Check class="h-3 w-3" />
-                                                </Button>
-                                                <Button
-                                                    size="sm"
-                                                    variant="ghost"
-                                                    class="h-5 w-5 rounded-full p-0"
-                                                    onclick={cancelNewSecret}
-                                                >
-                                                    <X class="h-3 w-3" />
-                                                </Button>
                                             </div>
-                                        {:else}
-                                            <!-- Add button -->
-                                            <Button
-                                                size="sm"
-                                                variant="outline"
-                                                class="rounded-full h-8 px-3"
-                                                onclick={() => (showNewSecretForm = true)}
-                                            >
-                                                <Plus class="h-3.5 w-3.5 mr-1" /> Add Secret
-                                            </Button>
-                                        {/if}
-                                    </div>
+
+                                            <PillList
+                                                items={allowedDomains}
+                                                labelKey="domain"
+                                                onChange={(items) => (allowedDomains = items)}
+                                                addPlaceholder="example.com"
+                                                addButtonLabel="Add Domain"
+                                                inputWidth="w-36"
+                                            />
+                                        </div>
+
+                                        <Separator />
+
+                                        <div class="space-y-3">
+                                            <div>
+                                                <Label class="text-sm font-medium">Secrets</Label>
+                                                <p class="text-xs text-muted-foreground mt-0.5"
+                                                    >Credentials injected by the sandbox. The agent sees placeholders —
+                                                    the real value is only substituted for requests to the specified
+                                                    hosts.</p
+                                                >
+                                            </div>
+
+                                            <PillKeyValueList
+                                                items={secrets}
+                                                fields={[
+                                                    { key: "key", placeholder: "KEY", width: "w-24", mono: true },
+                                                    { key: "value", placeholder: "value", width: "w-28", type: "password", viewDisplay: "mask" },
+                                                    { key: "hosts", placeholder: "hosts", width: "w-20", showInView: false },
+                                                ]}
+                                                onChange={(items) => (secrets = items)}
+                                                addButtonLabel="Add Secret"
+                                            />
+                                        </div>
+                                    {/if}
                                 </div>
 
                                 <Separator />
