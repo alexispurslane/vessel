@@ -8,6 +8,8 @@
         disconnectStream,
         deleteMessage,
         editMessage,
+        editAssistantMessage,
+        reloadMessages,
     } from "$lib/stores/chat.svelte.js";
     import { getConversations } from "$lib/stores/conversations.svelte.js";
     import { getAuth } from "$lib/stores/auth.svelte.js";
@@ -21,10 +23,15 @@
     import { ScrollArea } from "$lib/components/ui/scroll-area";
     import { Spinner } from "$lib/components/ui/spinner/index.js";
     import Bot from "@lucide/svelte/icons/bot";
-    import { listModels } from "$lib/api.js";
+    import { listModels, getSessionTree, setSessionLeaf } from "$lib/api.js";
     import type { ModelInfo, RenderItem, ThinkingGroup as ThinkingGroupType } from "$lib/types.js";
+    import type { SessionTreeNodeData } from "$lib/api.js";
+    import { MessageDag } from "$lib/components/chat/index.js";
+    import GitBranch from "@lucide/svelte/icons/git-branch";
+    import Shield from "@lucide/svelte/icons/shield";
     import { onMount } from "svelte";
     import { goto } from "$app/navigation";
+    import ConversationSecurityPanel from "$lib/components/conversation-settings/ConversationSecurityPanel.svelte";
 
     let id = $derived($page.params.id);
     const chat = getChat();
@@ -42,6 +49,15 @@
     let availableModels = $state<ModelInfo[]>([]);
     let selectedModelId = $state(""); // Just the model ID — provider is resolved automatically
     let thinkingOpen = $state<Record<string, boolean>>({}); // item id -> whether thinking is expanded
+
+    // DAG history sidebar state
+    let dagOpen = $state(false);
+
+    // Security panel state
+    let securityOpen = $state(false);
+    let dagNodes = $state<SessionTreeNodeData[]>([]);
+    let dagLeafId = $state<string | null>(null);
+    let dagLoading = $state(false);
 
     /** Whether an assistant message is "intermediate" — thinking/tool calls only, no visible text for the user.
      *  These get grouped into ThinkingGroups in the render layer.
@@ -281,16 +297,90 @@
     function handleEditMessage(messageId: string, role: string, newText?: string) {
         editMessage(messageId, role, newText);
     }
+
+    function handleEditAssistantMessage(messageId: string, newText: string) {
+        editAssistantMessage(messageId, newText);
+    }
+
+    async function toggleDag() {
+        dagOpen = !dagOpen;
+        if (dagOpen) {
+            await loadDagData();
+        }
+    }
+
+    async function loadDagData() {
+        if (!id) return;
+        dagLoading = true;
+        try {
+            const tree = await getSessionTree(id);
+            dagNodes = tree.nodes;
+            dagLeafId = tree.leafId;
+        } catch (e) {
+            console.error("Failed to load session tree:", e);
+        } finally {
+            dagLoading = false;
+        }
+    }
+
+    async function handleDagNavigate(entryId: string) {
+        if (!id) return;
+        try {
+            await setSessionLeaf(id, entryId);
+            // Reload the chat messages to reflect the new branch
+            await reloadMessages();
+            // Reload the DAG to update active branch highlighting
+            await loadDagData();
+        } catch (e) {
+            console.error("Failed to navigate to entry:", e);
+        }
+    }
+
+    // Refresh DAG data when the chat navigation state changes (e.g., after delete/edit/regenerate)
+    $effect(() => {
+        if (dagOpen && !chat.navigating) {
+            loadDagData();
+        }
+    });
 </script>
 
 <svelte:head>
     <title>Vessel - {conversationTitle}</title>
 </svelte:head>
 
-<div class="h-full w-full flex flex-col overflow-hidden min-w-0 max-w-[100ch] mx-auto">
-    <!-- Message area -->
-    <ScrollArea class="flex-1 min-h-0 overflow-hidden" bind:viewportRef={viewportEl}>
-        <div class="flex flex-col gap-6 p-6">
+<div class="h-full w-full flex flex-col overflow-hidden">
+    <!-- Main content -->
+    <!-- Fixed-position top bar spanning full width, always at the right edge -->
+    <div class="shrink-0 flex items-center justify-end px-4 py-1.5 border-b h-9">
+        <div class="flex items-center gap-1">
+            <button
+                onclick={() => (securityOpen = !securityOpen)}
+                class="inline-flex items-center gap-1 text-[11px] {securityOpen ? 'text-foreground bg-muted' : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
+                aria-label="Toggle security panel"
+                title="Toggle security panel"
+            >
+                <Shield class="size-3" />
+                <span>Security</span>
+            </button>
+            <button
+                onclick={toggleDag}
+                class="inline-flex items-center gap-1 text-[11px] {dagOpen ? 'text-foreground bg-muted' : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
+                aria-label={dagOpen ? 'Close history view' : 'Open history view'}
+                title={dagOpen ? 'Close history view' : 'Open history view'}
+            >
+                <GitBranch class="size-3" />
+                <span>History</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Content area below the top bar -->
+    <div class="flex-1 min-w-0 flex overflow-hidden">
+    <div class="flex-1 min-w-0 flex flex-col overflow-hidden max-w-[100ch] mx-auto">
+
+        <!-- Message area -->
+        <ScrollArea class="flex-1 min-h-0 overflow-hidden" bind:viewportRef={viewportEl}>
+            <div class="flex flex-col gap-6 p-6">
             {#if chat.messages.length === 0}
                 <div class="flex items-center justify-center py-24">
                     <div class="flex flex-col items-center gap-4 text-muted-foreground">
@@ -334,7 +424,7 @@
                         {@const isLastConsecutive = nextItem?.type !== "message" || nextItem.msg.role !== msg.role}
                         <div class="flex w-full {msg.role === 'user' ? 'justify-end' : 'justify-start'} {!isLastConsecutive ? '-mt-4' : ''}">
                             <div
-                                class="flex gap-3 w-[min(75%,65ch)] font-serif {msg.role === 'user'
+                                class="flex gap-3 w-max-[65ch] font-serif {msg.role === 'user'
                                     ? 'flex-row-reverse items-end'
                                     : ''}"
                             >
@@ -358,6 +448,7 @@
                                     scrollContainer={viewportEl}
                                     ondelete={handleDeleteMessage}
                                     onedit={handleEditMessage}
+                                    oneditassistant={handleEditAssistantMessage}
                                     navigating={chat.navigating}
                                 />
                                 </div>
@@ -401,4 +492,23 @@
             {/if}
         </div>
     </div>
+    </div>
+
+        <!-- Right side panels -->
+        {#if securityOpen && id}
+            <div class="w-80 border-l bg-background flex flex-col shrink-0">
+                <ConversationSecurityPanel conversationId={id} />
+            </div>
+        {/if}
+        {#if dagOpen}
+            <div class="w-72 border-l bg-background flex flex-col shrink-0">
+                <MessageDag
+                    nodes={dagNodes}
+                    leafId={dagLeafId}
+                    onnavigateto={handleDagNavigate}
+                    navigating={chat.navigating}
+                />
+            </div>
+        {/if}
+    </div><!-- close content-area flex row -->
 </div>

@@ -7,6 +7,7 @@ import {
     getMessageHistory,
     generateTitle,
     navigateMessage as apiNavigate,
+    editAssistantMessage as apiEditAssistant,
     releaseConversation,
 } from "$lib/api.js";
 import type { ChatMessage } from "$lib/types.js";
@@ -726,7 +727,7 @@ export async function send(content: string, modelId?: string): Promise<void> {
  * Reload message history from the server and update the local message list.
  * Used after navigating the session tree (delete/edit) to sync local state.
  */
-async function reloadMessages(): Promise<void> {
+export async function reloadMessages(): Promise<void> {
     if (!currentConversationId) return;
 
     try {
@@ -847,6 +848,45 @@ export async function editMessage(messageId: string, role: string, newText?: str
         }
     } catch (e) {
         error = e instanceof Error ? e.message : "Failed to edit message";
+    } finally {
+        navigating = false;
+    }
+}
+
+/**
+ * In-place edit of an assistant message.
+ *
+ * Navigates back to before the target assistant message, appends a new version
+ * with the edited text, and replays all subsequent entries. Does NOT trigger
+ * a new AI generation.
+ */
+export async function editAssistantMessage(messageId: string, newContent: string): Promise<void> {
+    if (!currentConversationId) return;
+
+    // If generating, abort first
+    if (generating) {
+        await abort();
+    }
+
+    // Finalize any streaming message before navigating
+    if (streamingMessageId) {
+        const msg = messages.find((m) => m.id === streamingMessageId);
+        if (msg) {
+            msg.streaming = false;
+            msg.thinkingStreaming = false;
+        }
+        streamingMessageId = null;
+    }
+
+    navigating = true;
+    error = null;
+
+    try {
+        await apiEditAssistant(currentConversationId, messageId, newContent);
+        // Reload messages from server to reflect the new session state
+        await reloadMessages();
+    } catch (e) {
+        error = e instanceof Error ? e.message : "Failed to edit assistant message";
     } finally {
         navigating = false;
     }

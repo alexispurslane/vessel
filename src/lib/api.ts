@@ -178,6 +178,61 @@ export async function navigateMessage(
     );
 }
 
+/**
+ * In-place edit of an assistant message in the session tree.
+ * Navigates back, appends the edited message, then replays all subsequent entries.
+ * Does NOT trigger a new AI generation.
+ */
+export async function editAssistantMessage(
+    conversationId: string,
+    targetEntryId: string,
+    newContent: string
+): Promise<{ cancelled: boolean }> {
+    return apiFetch<{ cancelled: boolean }>(
+        `/api/sessions/${conversationId}/edit-assistant`,
+        {
+            method: "POST",
+            body: JSON.stringify({ targetEntryId, newContent }),
+        }
+    );
+}
+
+// --- Session Tree DAG ---
+
+export interface SessionTreeNodeData {
+    id: string;
+    parentId: string | null;
+    type: string;
+    role?: string;
+    preview: string;
+    fullContent: string;
+    onActiveBranch: boolean;
+    isCurrentLeaf: boolean;
+}
+
+export interface SessionTreeRelation {
+    id: string;
+    parentId: string;
+    childId: string;
+}
+
+export interface SessionTree {
+    nodes: SessionTreeNodeData[];
+    relations: SessionTreeRelation[];
+    leafId: string | null;
+}
+
+export async function getSessionTree(conversationId: string): Promise<SessionTree> {
+    return apiFetch<SessionTree>(`/api/sessions/${conversationId}/tree`);
+}
+
+export async function setSessionLeaf(conversationId: string, targetEntryId: string): Promise<{ success: boolean }> {
+    return apiFetch<{ success: boolean }>(`/api/sessions/${conversationId}/set-leaf`, {
+        method: "POST",
+        body: JSON.stringify({ targetEntryId }),
+    });
+}
+
 export interface MessageHistoryItem {
     id: string;
     role: string;

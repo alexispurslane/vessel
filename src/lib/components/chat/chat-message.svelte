@@ -28,6 +28,8 @@
         ondelete?: (messageId: string, role: string) => void;
         /** Callback to edit this message (navigate back + resend with new text for user, regenerate for assistant) */
         onedit?: (messageId: string, role: string, newText?: string) => void;
+        /** Callback for in-place edit of an assistant message (no AI re-prompt, just modifies the stored text) */
+        oneditassistant?: (messageId: string, newText: string) => void;
         /** Whether a navigation operation is in progress */
         navigating?: boolean;
     }
@@ -39,6 +41,7 @@
         scrollContainer,
         ondelete,
         onedit,
+        oneditassistant,
         navigating = false,
     }: Props = $props();
 
@@ -111,21 +114,20 @@
     }
 
     function handleEdit() {
-        if (msg.role === 'user') {
-            // In-place editing for user messages
-            editText = msg.content;
-            editing = true;
-        } else {
-            // Regenerate for assistant messages
-            onedit?.(msg.id, msg.role);
-        }
+        editText = msg.content;
+        editing = true;
     }
 
     function handleEditSubmit() {
         const trimmed = editText.trim();
         if (!trimmed) return;
         editing = false;
-        onedit?.(msg.id, msg.role, trimmed);
+        if (msg.role === 'user') {
+            onedit?.(msg.id, msg.role, trimmed);
+        } else {
+            // In-place edit for assistant messages — no AI re-prompt
+            oneditassistant?.(msg.id, trimmed);
+        }
     }
 
     function handleEditCancel() {
@@ -190,8 +192,8 @@
                         <AlertCircle class="size-4 shrink-0" />
                         {msg.content}
                     </span>
-                {:else if msg.role === 'user' && editing}
-                    <!-- In-place editing mode for user messages -->
+                {:else if editing}
+                    <!-- In-place editing mode for both user and assistant messages -->
                     <!-- svelte-ignore a11y_autofocus -->
                     <textarea
                         bind:value={editText}
@@ -232,23 +234,29 @@
                         aria-label="Submit edit"
                     >
                         <Check class="size-3" />
-                        Save & Resend
+                        {msg.role === 'user' ? 'Save & Resend' : 'Save'}
                     </button>
                 </div>
             {:else if !msg.streaming && !navigating}
                 <div class="flex justify-end gap-1 mt-1 opacity-0 group-hover/msg:opacity-100 transition-opacity">
-                    {#if onedit}
+                    {#if oneditassistant || (onedit && msg.role === 'user')}
                         <button
                             onclick={() => handleEdit()}
                             class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
-                            aria-label={msg.role === 'user' ? 'Edit message' : 'Regenerate response'}
-                            title={msg.role === 'user' ? 'Edit message' : 'Regenerate response'}
+                            aria-label='Edit message'
+                            title='Edit message'
                         >
-                            {#if msg.role === 'user'}
-                                <Pencil class="size-3" />
-                            {:else}
-                                <RotateCcw class="size-3" />
-                            {/if}
+                            <Pencil class="size-3" />
+                        </button>
+                    {/if}
+                    {#if onedit && msg.role === 'assistant'}
+                        <button
+                            onclick={() => onedit?.(msg.id, msg.role)}
+                            class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
+                            aria-label='Regenerate response'
+                            title='Regenerate response'
+                        >
+                            <RotateCcw class="size-3" />
                         </button>
                     {/if}
                     {#if ondelete}

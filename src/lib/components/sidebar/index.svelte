@@ -63,6 +63,9 @@
     });
 
     function handleNewChat() {
+        setActiveConversation(null);
+        clearMessages();
+        disconnectStream();
         goto("/");
     }
 

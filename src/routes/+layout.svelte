@@ -7,9 +7,7 @@
     } from "$lib/components/ui/sidebar/index.js";
     import { Separator } from "$lib/components/ui/separator/index.js";
     import { Spinner } from "$lib/components/ui/spinner/index.js";
-    import { Button } from "$lib/components/ui/button/index.js";
     import { onMount } from "svelte";
-    import { goto } from "$app/navigation";
     import { page } from "$app/stores";
     import { ModeWatcher } from "mode-watcher";
     import { getAuth, checkAuth, doLogout } from "$lib/stores/auth.svelte.js";
@@ -22,8 +20,6 @@
     import { loadSettings } from "$lib/stores/settings.svelte.js";
     import { hashHue } from "$lib/utils.js";
     import AppSidebar from "$lib/components/sidebar/index.svelte";
-    import ConversationSettingsDialog from "$lib/components/conversation-settings/ConversationSettingsDialog.svelte";
-    import Settings2 from "@lucide/svelte/icons/settings-2";
 
     const auth = getAuth();
     const convs = getConversations();
@@ -39,9 +35,6 @@
         currentPath.startsWith("/chat/") ? currentPath.split("/chat/")[1] : null
     );
 
-    // Conversation settings dialog state
-    let showConversationSettings = $state(false);
-
     // Load conversations and settings when authenticated
     $effect(() => {
         if (auth.isAuthenticated) {
@@ -54,6 +47,9 @@
     $effect(() => {
         if (activeConversationId && activeConversationId !== convs.activeId) {
             setActiveConversation(activeConversationId);
+        } else if (!activeConversationId && convs.activeId) {
+            // Navigated away from a chat page — clear the active conversation
+            setActiveConversation(null);
         }
     });
 
@@ -127,17 +123,6 @@
                         </div>
                     {/if}
                 </div>
-                {#if activeConversationId}
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        class="h-8 w-8 shrink-0"
-                        onclick={() => (showConversationSettings = true)}
-                        aria-label="Conversation settings"
-                    >
-                        <Settings2 class="h-4 w-4" />
-                    </Button>
-                {/if}
             </header>
 
             <main class="flex flex-1 flex-col min-h-0 overflow-auto">
@@ -145,13 +130,4 @@
             </main>
         </SidebarInset>
     </SidebarProvider>
-
-    <!-- Conversation Settings Dialog -->
-    {#if activeConversationId}
-        <ConversationSettingsDialog
-            conversationId={activeConversationId}
-            open={showConversationSettings}
-            onOpenChange={(open) => (showConversationSettings = open)}
-        />
-    {/if}
 {/if}
