@@ -62,6 +62,7 @@ export const PUT: RequestHandler = async ({ params, request }) => {
     if ("secrets" in body) settings.secrets = body.secrets;
     if ("allowEnv" in body) settings.allowEnv = body.allowEnv;
     if ("deleteWorkspaceWithConversation" in body) settings.deleteWorkspaceWithConversation = body.deleteWorkspaceWithConversation;
+    if ("disabledTools" in body) settings.disabledTools = body.disabledTools;
 
     // Check what the old settings were to know if restart is needed
     const oldSettings = loadConversationSettingsFromDb(params.id);
@@ -78,6 +79,7 @@ export const PUT: RequestHandler = async ({ params, request }) => {
         "allowedNetDomains",
         "secrets",
         "allowEnv",
+        "disabledTools",
     ];
 
     const sandboxChanged = sandboxKeys.some((key) => {

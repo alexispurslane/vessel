@@ -35,6 +35,12 @@ export interface ConversationSettings {
     allowEnv?: string[] | null;
     /** Whether to delete the workspace when the conversation is trashed */
     deleteWorkspaceWithConversation?: boolean;
+    /** Built-in agent tools to disable for this conversation (null = none disabled, use all default tools) */
+    disabledTools?: string[] | null;
+    /** Custom system prompt that replaces the default (null = use default). Use with caution — overrides tool descriptions and guidelines. */
+    customSystemPrompt?: string | null;
+    /** List of instruction strings appended to the default system prompt (null = nothing appended). Each item is a separate instruction. */
+    appendSystemPrompt?: string[] | null;
 }
 
 /** Default values for per-conversation settings. Null fields inherit from global settings. */
@@ -47,6 +53,9 @@ export const DEFAULT_CONVERSATION_SETTINGS: ConversationSettings = {
     secrets: null,
     allowEnv: null,
     deleteWorkspaceWithConversation: true,
+    disabledTools: null,
+    customSystemPrompt: null,
+    appendSystemPrompt: null,
 };
 
 // --- Conversations ---

@@ -79,6 +79,20 @@
     let useCustomSecrets = $state(false);
     let secrets = $state<Array<{ key: string; value: string; hosts: string; editing?: boolean }>>([]);
 
+    // Tool toggles — track which built-in tools are disabled
+    let disabledTools = $state<Set<string>>(new Set());
+
+    /** The built-in tools that can be toggled on/off */
+    const BUILTIN_TOOLS = [
+        { name: "read", label: "Read", description: "Read file contents" },
+        { name: "write", label: "Write", description: "Create or overwrite files" },
+        { name: "edit", label: "Edit", description: "Make targeted edits to files" },
+        { name: "bash", label: "Bash", description: "Execute shell commands" },
+        { name: "grep", label: "Grep", description: "Search file contents with regex" },
+        { name: "find", label: "Find", description: "Find files by name pattern" },
+        { name: "ls", label: "List", description: "List directory contents" },
+    ] as const;
+
     // --- Load / Save ---
     async function loadSettings() {
         loading = true;
@@ -134,6 +148,13 @@
                 useCustomSecrets = false;
                 secrets = [];
             }
+
+            // Load disabled tools set
+            if (settings.disabledTools !== null && settings.disabledTools !== undefined) {
+                disabledTools = new Set(settings.disabledTools);
+            } else {
+                disabledTools = new Set();
+            }
         } catch (e) {
             error = e instanceof Error ? e.message : "Failed to load settings";
         } finally {
@@ -183,6 +204,9 @@
                 settings.secrets = null;
             }
 
+            // Save disabled tools
+            settings.disabledTools = disabledTools.size > 0 ? Array.from(disabledTools) : null;
+
             const result = await updateConversationSettings(conversationId, settings);
 
             if (result.restarted) {
@@ -228,7 +252,7 @@
                 {/if}
 
                 {#if saved}
-                    <p class="text-sm text-green-600">Settings saved{#if sandboxEnabledState !== null || allowNetState !== null || useCustomReadPaths || useCustomWritePaths || useCustomDomains || useCustomEnvVars || useCustomSecrets}. Session will restart on next interaction.{/if}</p>
+                    <p class="text-sm text-green-600">Settings saved{#if sandboxEnabledState !== null || allowNetState !== null || useCustomReadPaths || useCustomWritePaths || useCustomDomains || useCustomEnvVars || useCustomSecrets || disabledTools.size > 0}. Session will restart on next interaction.{/if}</p>
                 {/if}
 
                 <!-- Sandbox Enabled -->
@@ -259,6 +283,40 @@
                             >
                                 Off
                             </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Agent Tools -->
+                <div class="rounded-lg border p-4">
+                    <div class="space-y-3">
+                        <div>
+                            <Label class="text-base font-medium">Agent Tools</Label>
+                            <p class="text-sm text-muted-foreground mt-1">
+                                Toggle built-in tools on or off for this conversation.
+                            </p>
+                        </div>
+                        <div class="space-y-2">
+                            {#each BUILTIN_TOOLS as tool}
+                                <div class="flex items-center justify-between py-0.5">
+                                    <div class="space-y-0.5">
+                                        <Label class="text-sm font-medium">{tool.label}</Label>
+                                        <p class="text-xs text-muted-foreground">{tool.description}</p>
+                                    </div>
+                                    <Switch
+                                        checked={!disabledTools.has(tool.name)}
+                                        onCheckedChange={(checked: boolean) => {
+                                            if (checked) {
+                                                disabledTools.delete(tool.name);
+                                            } else {
+                                                disabledTools.add(tool.name);
+                                            }
+                                            // Trigger reactivity by assigning a new Set
+                                            disabledTools = new Set(disabledTools);
+                                        }}
+                                    />
+                                </div>
+                            {/each}
                         </div>
                     </div>
                 </div>

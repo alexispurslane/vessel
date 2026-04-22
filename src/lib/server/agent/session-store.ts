@@ -11,7 +11,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { createSandboxedCodingTools } from "./sandboxed-tools.js";
-import { createSessionSandbox, getSessionWorkDir, loadConversationSettingsFromDb } from "./sandbox-factory.js";
+import { createSessionSandbox, getSessionWorkDir, loadConversationSettingsFromDb, saveConversationSettingsToDb } from "./sandbox-factory.js";
 import type { Model as PiModel, Api } from "@mariozechner/pi-ai";
 import { getDb } from "../db/index.js";
 import { randomUUID } from "crypto";
@@ -525,8 +525,15 @@ export async function getOrCreateSession(conversationId: string): Promise<PiAgen
     // Per-conversation settings override global sandbox config.
     const sandbox = createSessionSandbox(conversationId, conversationSettings);
 
+    // Determine the effective CWD for the agent session.
+    // When sandboxing is enabled, the agent operates inside a sandbox workspace,
+    // so the CWD must be the sandbox directory (not the backend's process.cwd()).
+    // The CWD is embedded in the system prompt ("Current working directory") and
+    // used by tool definitions for path resolution.
+    const sessionWorkDir = sandbox ? getSessionWorkDir(conversationId) : process.cwd();
+
     const createOpts: Parameters<typeof createAgentSession>[0] = {
-        cwd: process.cwd(),
+        cwd: sessionWorkDir,
         agentDir: AGENT_DIR,
         sessionManager,
         authStorage: modelRegistry.authStorage,
@@ -540,33 +547,111 @@ export async function getOrCreateSession(conversationId: string): Promise<PiAgen
 
     const { session: agentSession } = await createAgentSession(createOpts);
 
-    // If sandbox is enabled, inject sandboxed tools as baseToolsOverride.
-    // We can't pass these via createAgentSession's `tools` option — it only extracts
-    // tool names and then creates fresh default tools internally, discarding our custom
-    // operations. Instead, we inject them as baseToolsOverride after construction.
-    //
-    // AgentSession._buildRuntime checks this field: when set, it uses these tools
-    // instead of creating default ones. We must set it and rebuild the runtime
-    // so the tool registry picks up our custom operations.
-    if (sandbox) {
-        const sessionWorkDir = getSessionWorkDir(conversationId);
-        const sandboxedTools = createSandboxedCodingTools(sessionWorkDir, sandbox);
-        const baseToolsOverride: Record<string, AgentTool<any>> = {};
-        for (const tool of sandboxedTools) {
-            baseToolsOverride[tool.name] = tool;
-        }
+    // Determine the set of disabled tool names from conversation settings.
+    // When a tool is disabled, it is excluded from the agent's available tools.
+    const disabledTools = new Set(conversationSettings?.disabledTools ?? []);
 
-        // _buildRuntime requires an options object with at least flagValues (a Map)
-        // and activeToolNames. When baseToolsOverride is set, defaultActiveToolNames
-        // is derived from its keys, so we just need to include our tool names.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (agentSession as any)._baseToolsOverride = baseToolsOverride;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (agentSession as any)._buildRuntime({
-            flagValues: new Map(),
-            activeToolNames: Object.keys(baseToolsOverride),
-            includeAllExtensionTools: true,
-        });
+    // When sandbox mode is active or tools are disabled, we need to customize the
+    // agent's tool set. The approach differs depending on the scenario:
+    //
+    // For DISABLED TOOLS only (no sandbox):
+    //   Simply call setActiveToolsByName with the filtered list. The default
+    //   tool definitions (with promptSnippet) are preserved, so the system prompt
+    //   still shows tool descriptions correctly.
+    //
+    // For SANDBOX MODE:
+    //   We need to replace the tool *execution* with sandboxed operations while
+    //   keeping the default tool *definitions* (which include promptSnippet for
+    //   the system prompt). We do this by patching the _toolRegistry entries with
+    //   our sandboxed AgentTool instances after the default _buildRuntime has run.
+    //   This preserves the _toolPromptSnippets map that was populated from the
+    //   definitions, so the system prompt shows tools correctly.
+    //
+    // Previously, we used _baseToolsOverride to inject custom tools, but that path
+    // calls createToolDefinitionFromAgentTool() which strips promptSnippet from
+    //   the definitions, causing "Available tools: (none)" in the system prompt.
+
+    if (sandbox) {
+        // Create sandboxed tools with custom operations
+        const sandboxedTools = createSandboxedCodingTools(sessionWorkDir, sandbox);
+        // Note: grep is intentionally omitted from sandboxed tools because its
+        // search runs directly on the host. If grep is not disabled and sandbox
+        // is on, we still don't include it for security consistency.
+
+        // Patch the tool registry: replace default tools with sandboxed versions.
+        // The registry holds AgentTool objects used for execution. By replacing
+        // just these (not the definitions), we keep promptSnippet intact for
+        // the system prompt while using sandboxed operations for execution.
+        const toolRegistry = (agentSession as any)._toolRegistry as Map<string, AgentTool<any>>;
+        for (const tool of sandboxedTools) {
+            toolRegistry.set(tool.name, tool);
+        }
+        // Also remove grep from the registry since sandboxed tools omit it
+        toolRegistry.delete("grep");
+
+        // Remove grep from the definition maps too, so it doesn't appear in
+        // getAllTools() or the Agent Info panel. These maps hold ToolDefinition
+        // objects (with promptSnippet, description, etc.) that getAllTools() reads
+        // from — they're separate from the registry's AgentTool execution objects.
+        (agentSession as any)._toolDefinitions.delete("grep");
+        (agentSession as any)._baseToolDefinitions.delete("grep");
+
+        // Filter out disabled tools by name
+        const desiredToolNames = sandboxedTools
+            .map((t) => t.name)
+            .filter((n) => !disabledTools.has(n));
+        agentSession.setActiveToolsByName(desiredToolNames);
+    } else if (disabledTools.size > 0) {
+        // No sandbox, just filter disabled tools
+        const allToolNames = agentSession.getActiveToolNames();
+        const filteredNames = allToolNames.filter((n) => !disabledTools.has(n));
+        agentSession.setActiveToolsByName(filteredNames);
+    }
+
+    // Apply custom/append system prompt — per-conversation overrides global.
+    // customSystemPrompt replaces the default prompt entirely.
+    // appendSystemPrompt adds to the default prompt.
+    // These are injected into the ResourceLoader so that _rebuildSystemPrompt picks
+    // them up on every rebuild (not just once). We then trigger a rebuild.
+
+    // Resolve customSystemPrompt: conversation override → global setting
+    let customSystemPrompt = conversationSettings?.customSystemPrompt ?? null;
+    if (customSystemPrompt === null) {
+        const globalRow = db.prepare("SELECT value FROM settings WHERE key = ?").get("agent.customSystemPrompt") as { value: string } | undefined;
+        customSystemPrompt = globalRow?.value ?? null;
+    }
+
+    // Resolve appendSystemPrompt: conversation override → global setting
+    // Supports string (legacy) and string[] (current) formats.
+    let rawAppend = conversationSettings?.appendSystemPrompt ?? null;
+    if (rawAppend === null) {
+        const globalRow = db.prepare("SELECT value FROM settings WHERE key = ?").get("agent.appendSystemPrompt") as { value: string } | undefined;
+        if (globalRow?.value) {
+            try {
+                rawAppend = JSON.parse(globalRow.value);
+            } catch {
+                rawAppend = null;
+            }
+        }
+    }
+    // Migrate legacy string-typed appendSystemPrompt to array
+    const appendSystemPrompt: string[] | null = rawAppend
+        ? Array.isArray(rawAppend)
+            ? rawAppend
+            : [rawAppend as string]
+        : null;
+    if (customSystemPrompt !== null || appendSystemPrompt !== null) {
+        const resourceLoader = agentSession.resourceLoader as any;
+        if (customSystemPrompt !== null) {
+            resourceLoader.systemPrompt = customSystemPrompt;
+        }
+        if (appendSystemPrompt !== null) {
+            resourceLoader.appendSystemPrompt = (appendSystemPrompt && appendSystemPrompt.length > 0)
+                ? appendSystemPrompt
+                : [];
+        }
+        // Rebuild the system prompt with the new values
+        agentSession.setActiveToolsByName(agentSession.getActiveToolNames());
     }
 
     // Subscribe to events and broadcast to SSE subscribers
@@ -722,6 +807,57 @@ export function restartSession(conversationId: string): boolean {
 }
 
 /**
+ * Update the system prompt for a live session without restarting it.
+ * Injects custom/append system prompt into the ResourceLoader and rebuilds
+ * the system prompt. The session picks up changes immediately on the next turn.
+ *
+ * Also persists the custom system prompt to the conversation_settings DB table.
+ */
+export function updateSessionSystemPrompt(
+    conversationId: string,
+    options: {
+        customSystemPrompt?: string | null;
+        appendSystemPrompt?: string[] | null;
+    }
+): boolean {
+    const session = sessions.get(conversationId);
+    if (!session) return false;
+
+    const resourceLoader = session.agentSession.resourceLoader as any;
+
+    if ("customSystemPrompt" in options) {
+        resourceLoader.systemPrompt = options.customSystemPrompt ?? undefined;
+    }
+    if ("appendSystemPrompt" in options) {
+        resourceLoader.appendSystemPrompt = (options.appendSystemPrompt && options.appendSystemPrompt.length > 0)
+            ? options.appendSystemPrompt
+            : [];
+    }
+
+    // Rebuild the system prompt with the new values
+    session.agentSession.setActiveToolsByName(
+        session.agentSession.getActiveToolNames()
+    );
+
+    // Persist to conversation settings in DB
+    const existingSettings = loadConversationSettingsFromDb(conversationId) ?? {};
+    if ("customSystemPrompt" in options) {
+        existingSettings.customSystemPrompt = options.customSystemPrompt ?? null;
+    }
+    if ("appendSystemPrompt" in options) {
+        existingSettings.appendSystemPrompt = options.appendSystemPrompt ?? null;
+    }
+    saveConversationSettingsToDb(conversationId, existingSettings);
+
+    // Keep the in-memory conversation settings in sync so that
+    // getSessionAgentInfo() reads the updated values without needing
+    // to re-read from the DB.
+    session.conversationSettings = existingSettings;
+
+    return true;
+}
+
+/**
  * Fully destroy a conversation: dispose in-memory session, delete the
  * pi session file, delete the workspace directory (if configured), and remove the DB row.
  * Only called when the user explicitly hits the trash icon.
@@ -859,6 +995,73 @@ export async function getSessionHistory(conversationId: string): Promise<{
         sessions.get(conversationId)!,
         row
     );
+}
+
+/**
+ * Get the current system prompt and available tools/skills for a conversation's
+ * active AgentSession. The session must be loaded in memory (getOrCreateSession
+ * handles this automatically).
+ */
+export async function getSessionAgentInfo(conversationId: string): Promise<{
+    systemPrompt: string;
+    customSystemPrompt: string | null;
+    appendSystemPrompt: string[] | null;
+    tools: Array<{
+        name: string;
+        description: string;
+        source: string;
+        scope: string;
+    }>;
+    skills: Array<{
+        name: string;
+        description: string;
+        source: string;
+        scope: string;
+        disableModelInvocation: boolean;
+    }>;
+} | null> {
+    // Ensure the session is loaded
+    const activeSession = sessions.get(conversationId);
+    if (!activeSession) {
+        return null;
+    }
+
+    const agentSession = activeSession.agentSession;
+
+    // Extract system prompt
+    const systemPrompt = agentSession.systemPrompt;
+
+    // Extract custom/append system prompts from conversation settings
+    const convSettings = activeSession.conversationSettings;
+    const customSystemPrompt = convSettings?.customSystemPrompt ?? null;
+    // Migrate legacy string-typed appendSystemPrompt to array
+    const rawAppend = convSettings?.appendSystemPrompt ?? null;
+    const appendSystemPrompt: string[] | null = rawAppend
+        ? Array.isArray(rawAppend)
+            ? rawAppend
+            : [rawAppend as string]
+        : null;
+
+    // Extract tools info
+    const allTools = agentSession.getAllTools();
+    const tools = allTools.map((t) => ({
+        name: t.name,
+        description: t.description,
+        source: t.sourceInfo.source,
+        scope: t.sourceInfo.scope,
+    }));
+
+    // Extract skills from the resource loader
+    const skillsResult = agentSession.resourceLoader.getSkills();
+    const skills = skillsResult.skills.map((s) => ({
+        name: s.name,
+        description: s.description,
+        source: s.sourceInfo?.source ?? "unknown",
+        scope: s.sourceInfo?.scope ?? "unknown",
+        disableModelInvocation: s.disableModelInvocation ?? false,
+    }));
+
+    return { systemPrompt, customSystemPrompt, appendSystemPrompt, tools, skills };
 }
 
 /**

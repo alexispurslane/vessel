@@ -197,6 +197,62 @@ export async function editAssistantMessage(
     );
 }
 
+// --- Agent Info ---
+
+export interface AgentToolInfo {
+    name: string;
+    description: string;
+    source: string;
+    scope: string;
+}
+
+export interface AgentSkillInfo {
+    name: string;
+    description: string;
+    source: string;
+    scope: string;
+    disableModelInvocation: boolean;
+}
+
+export interface AgentInfo {
+    systemPrompt: string;
+    tools: AgentToolInfo[];
+    skills: AgentSkillInfo[];
+    /** Custom system prompt from conversation settings (null = use default) */
+    customSystemPrompt?: string | null;
+    /** Appended system prompt instructions from conversation settings (null = nothing appended) */
+    appendSystemPrompt?: string[] | null;
+}
+
+export async function getSessionAgentInfo(conversationId: string): Promise<AgentInfo | null> {
+    try {
+        return await apiFetch<AgentInfo>(`/api/sessions/${conversationId}/agent-info`);
+    } catch (e) {
+        if (e instanceof ApiError && e.status === 404) {
+            return null;
+        }
+        throw e;
+    }
+}
+
+export interface UpdateSystemPromptResult {
+    success: boolean;
+    info: AgentInfo;
+}
+
+export async function updateSessionSystemPrompt(
+    conversationId: string,
+    options: {
+        customSystemPrompt?: string | null;
+        appendSystemPrompt?: string[] | null;
+    }
+): Promise<UpdateSystemPromptResult> {
+    return apiFetch<UpdateSystemPromptResult>(`/api/sessions/${conversationId}/agent-info`, {
+        method: "PATCH",
+        body: JSON.stringify(options),
+    });
+}
+
 // --- Session Tree DAG ---
 
 export interface SessionTreeNodeData {

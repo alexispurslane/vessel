@@ -29,9 +29,12 @@
     import { MessageDag } from "$lib/components/chat/index.js";
     import GitBranch from "@lucide/svelte/icons/git-branch";
     import Shield from "@lucide/svelte/icons/shield";
+    import FileText from "@lucide/svelte/icons/file-text";
     import { onMount } from "svelte";
+    import { fade } from "svelte/transition";
     import { goto } from "$app/navigation";
     import ConversationSecurityPanel from "$lib/components/conversation-settings/ConversationSecurityPanel.svelte";
+    import AgentInfoPanel from "$lib/components/conversation-settings/AgentInfoPanel.svelte";
 
     let id = $derived($page.params.id);
     const chat = getChat();
@@ -55,6 +58,34 @@
 
     // Security panel state
     let securityOpen = $state(false);
+    // Agent info panel state
+    let agentInfoOpen = $state(false);
+    // Top bar auto-hide state
+    let topBarVisible = $state(false);
+    let topBarTimeout: ReturnType<typeof setTimeout> | null = null;
+    const TOP_BAR_HIDE_DELAY = 2000; // ms before auto-hiding
+
+    function showTopBar() {
+        if (topBarTimeout) {
+            clearTimeout(topBarTimeout);
+            topBarTimeout = null;
+        }
+        topBarVisible = true;
+        // Schedule auto-hide
+        topBarTimeout = setTimeout(() => {
+            topBarVisible = false;
+            topBarTimeout = null;
+        }, TOP_BAR_HIDE_DELAY);
+    }
+
+    function hideTopBar() {
+        if (topBarTimeout) {
+            clearTimeout(topBarTimeout);
+            topBarTimeout = null;
+        }
+        topBarVisible = false;
+    }
+
     let dagNodes = $state<SessionTreeNodeData[]>([]);
     let dagLeafId = $state<string | null>(null);
     let dagLoading = $state(false);
@@ -275,6 +306,8 @@
         inputText = "";
         // Clear the draft from sessionStorage since the message has been sent
         sessionStorage.removeItem(draftKey(id));
+        // Hide the top bar when user sends a message
+        hideTopBar();
     }
 
     function handleAbort() {
@@ -348,31 +381,42 @@
     <title>Vessel - {conversationTitle}</title>
 </svelte:head>
 
-<div class="h-full w-full flex flex-col overflow-hidden">
+<div class="h-full w-full flex flex-col overflow-hidden" onmousemove={showTopBar}>
     <!-- Main content -->
-    <!-- Fixed-position top bar spanning full width, always at the right edge -->
-    <div class="shrink-0 flex items-center justify-end px-4 py-1.5 border-b h-9">
-        <div class="flex items-center gap-1">
-            <button
-                onclick={() => (securityOpen = !securityOpen)}
-                class="inline-flex items-center gap-1 text-[11px] {securityOpen ? 'text-foreground bg-muted' : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
-                aria-label="Toggle security panel"
-                title="Toggle security panel"
-            >
-                <Shield class="size-3" />
-                <span>Security</span>
-            </button>
-            <button
-                onclick={toggleDag}
-                class="inline-flex items-center gap-1 text-[11px] {dagOpen ? 'text-foreground bg-muted' : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
-                aria-label={dagOpen ? 'Close history view' : 'Open history view'}
-                title={dagOpen ? 'Close history view' : 'Open history view'}
-            >
-                <GitBranch class="size-3" />
-                <span>History</span>
-            </button>
+    <!-- Top bar: hidden by default, shows on mouse movement, auto-hides after timeout or on send -->
+    {#if topBarVisible}
+        <div class="shrink-0 flex items-center justify-end px-4 py-1.5 border-b h-9" transition:fade={{ duration: 150 }}>
+            <div class="flex items-center gap-1">
+                <button
+                    onclick={() => (securityOpen = !securityOpen)}
+                    class="inline-flex items-center gap-1 text-[11px] {securityOpen ? 'text-foreground bg-muted' : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
+                    aria-label="Toggle security panel"
+                    title="Toggle security panel"
+                >
+                    <Shield class="size-3" />
+                    <span>Security</span>
+                </button>
+                <button
+                    onclick={toggleDag}
+                    class="inline-flex items-center gap-1 text-[11px] {dagOpen ? 'text-foreground bg-muted' : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
+                    aria-label={dagOpen ? 'Close history view' : 'Open history view'}
+                    title={dagOpen ? 'Close history view' : 'Open history view'}
+                >
+                    <GitBranch class="size-3" />
+                    <span>History</span>
+                </button>
+                <button
+                    onclick={() => (agentInfoOpen = !agentInfoOpen)}
+                    class="inline-flex items-center gap-1 text-[11px] {agentInfoOpen ? 'text-foreground bg-muted' : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
+                    aria-label="Toggle agent info panel"
+                    title="Toggle agent info panel"
+                >
+                    <FileText class="size-3" />
+                    <span>Agent</span>
+                </button>
+            </div>
         </div>
-    </div>
+    {/if}
 
     <!-- Content area below the top bar -->
     <div class="flex-1 min-w-0 flex overflow-hidden">
@@ -498,6 +542,11 @@
         {#if securityOpen && id}
             <div class="w-80 border-l bg-background flex flex-col shrink-0">
                 <ConversationSecurityPanel conversationId={id} />
+            </div>
+        {/if}
+        {#if agentInfoOpen && id}
+            <div class="w-96 border-l bg-background flex flex-col shrink-0">
+                <AgentInfoPanel conversationId={id} />
             </div>
         {/if}
         {#if dagOpen}
