@@ -13,6 +13,10 @@
     import {
         getConversationSettings,
         updateConversationSettings,
+        listMcpServers,
+        type McpServerInfo,
+        getMcpServerStatus,
+        type McpServerStatus,
     } from "$lib/api.js";
     import type { ConversationSettings } from "$lib/types.js";
     import { reconnectStream } from "$lib/stores/chat.svelte.js";
@@ -58,6 +62,15 @@
     // Tool toggles — track which built-in tools are disabled
     // All tools are enabled by default; stored as a Set for easy lookup
     let disabledTools = $state<Set<string>>(new Set());
+
+    // MCP server state — tri-state like sandbox/network:
+    //   null  = Inherit (use per-server defaultEnabled from global settings)
+    //   true  = On (custom selection of MCP servers, persisted as an explicit list)
+    //   false = Off (no MCP servers at all, persisted as empty array)
+    let mcpState: boolean | null = $state(null);
+    let enabledMcpServers = $state<Set<string>>(new Set());
+    let availableMcpServers = $state<McpServerInfo[]>([]);
+    let mcpServerStatuses = $state<McpServerStatus[]>([]);
 
     /** The built-in tools that can be toggled on/off */
     const BUILTIN_TOOLS = [
@@ -132,6 +145,39 @@
             } else {
                 disabledTools = new Set();
             }
+
+            // Load MCP server state (tri-state: null=inherit, true=custom, false=off)
+            try {
+                availableMcpServers = await listMcpServers();
+            } catch {
+                availableMcpServers = [];
+            }
+
+            if (settings.enabledMcpServers === null || settings.enabledMcpServers === undefined) {
+                // No per-conversation override — inherit global defaults
+                mcpState = null;
+                // Pre-populate from global defaults so toggles are ready if user switches to On
+                enabledMcpServers = new Set(
+                    availableMcpServers
+                        .filter((s) => s.config.defaultEnabled !== false)
+                        .map((s) => s.name)
+                );
+            } else if (settings.enabledMcpServers.length === 0) {
+                // Explicitly off — no MCP servers
+                mcpState = false;
+                enabledMcpServers = new Set();
+            } else {
+                // Explicit custom list
+                mcpState = true;
+                enabledMcpServers = new Set(settings.enabledMcpServers);
+            }
+
+            // Load MCP server connection statuses from the active session
+            try {
+                mcpServerStatuses = await getMcpServerStatus(conversationId);
+            } catch {
+                mcpServerStatuses = [];
+            }
         } catch (e) {
             error = e instanceof Error ? e.message : "Failed to load settings";
         } finally {
@@ -183,6 +229,16 @@
 
             // Save disabled tools
             settings.disabledTools = disabledTools.size > 0 ? Array.from(disabledTools) : null;
+
+            // Save MCP server state (tri-state):
+            //   null  → null (inherit global defaults)
+            //   true  → explicit list of enabled server names
+            //   false → [] (off — no MCP servers at all)
+            settings.enabledMcpServers = mcpState === null
+                ? null
+                : mcpState === true
+                    ? Array.from(enabledMcpServers)
+                    : [];
 
             const result = await updateConversationSettings(conversationId, settings);
 
@@ -297,6 +353,83 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- MCP Servers -->
+                {#if availableMcpServers.length > 0}
+                    <div class="rounded-lg border p-3">
+                        <div class="space-y-2">
+                            <div>
+                                <Label class="text-sm font-medium">MCP Servers</Label>
+                                <p class="text-xs text-muted-foreground mt-0.5">
+                                    Control whether this conversation can use MCP servers.
+                                </p>
+                            </div>
+                            <div class="flex gap-1.5">
+                                <button
+                                    class="px-2.5 py-1 text-xs rounded-md border transition-colors {mcpState === null ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+                                    onclick={() => (mcpState = null)}
+                                >
+                                    Inherit
+                                </button>
+                                <button
+                                    class="px-2.5 py-1 text-xs rounded-md border transition-colors {mcpState === true ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+                                    onclick={() => (mcpState = true)}
+                                >
+                                    On
+                                </button>
+                                <button
+                                    class="px-2.5 py-1 text-xs rounded-md border transition-colors {mcpState === false ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+                                    onclick={() => (mcpState = false)}
+                                >
+                                    Off
+                                </button>
+                            </div>
+                            {#if mcpState === true}
+                                <div class="space-y-1.5 pt-1">
+                                    {#each availableMcpServers as server (server.name)}
+                                        {@const serverStatus = mcpServerStatuses.find((s) => s.name === server.name)}
+                                        <div class="flex items-center justify-between py-0.5">
+                                            <div class="space-y-0.5">
+                                                <div class="flex items-center gap-1.5">
+                                                    <Label class="text-xs font-medium">{server.name}</Label>
+                                                    {#if serverStatus}
+                                                        {#if serverStatus.status === 'connected'}
+                                                            <span class="inline-block h-1.5 w-1.5 rounded-full bg-green-500" title="Connected"></span>
+                                                        {:else if serverStatus.status === 'needs-auth'}
+                                                            <span class="inline-block h-1.5 w-1.5 rounded-full bg-yellow-500" title="Needs authentication"></span>
+                                                        {:else if serverStatus.status === 'closed'}
+                                                            <span class="inline-block h-1.5 w-1.5 rounded-full bg-red-500" title="Disconnected"></span>
+                                                        {:else}
+                                                            <span class="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground" title="Unknown"></span>
+                                                        {/if}
+                                                    {/if}
+                                                </div>
+                                                <p class="text-[10px] text-muted-foreground">
+                                                    {#if server.config.command}
+                                                        {server.config.command}{#if server.config.args?.length} {server.config.args.join(' ')}{/if}
+                                                    {:else if server.config.url}
+                                                        {server.config.url}
+                                                    {/if}
+                                                </p>
+                                            </div>
+                                            <Switch
+                                                checked={enabledMcpServers.has(server.name)}
+                                                onCheckedChange={(checked: boolean) => {
+                                                    if (checked) {
+                                                        enabledMcpServers.add(server.name);
+                                                    } else {
+                                                        enabledMcpServers.delete(server.name);
+                                                    }
+                                                    enabledMcpServers = new Set(enabledMcpServers);
+                                                }}
+                                            />
+                                        </div>
+                                    {/each}
+                                </div>
+                            {/if}
+                        </div>
+                    </div>
+                {/if}
 
                 {#if sandboxEnabledState !== false}
                     <!-- Extra Read Paths -->

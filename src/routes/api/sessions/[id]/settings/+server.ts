@@ -63,6 +63,9 @@ export const PUT: RequestHandler = async ({ params, request }) => {
     if ("allowEnv" in body) settings.allowEnv = body.allowEnv;
     if ("deleteWorkspaceWithConversation" in body) settings.deleteWorkspaceWithConversation = body.deleteWorkspaceWithConversation;
     if ("disabledTools" in body) settings.disabledTools = body.disabledTools;
+    if ("customSystemPrompt" in body) settings.customSystemPrompt = body.customSystemPrompt;
+    if ("appendSystemPrompt" in body) settings.appendSystemPrompt = body.appendSystemPrompt;
+    if ("enabledMcpServers" in body) settings.enabledMcpServers = body.enabledMcpServers;
 
     // Check what the old settings were to know if restart is needed
     const oldSettings = loadConversationSettingsFromDb(params.id);
@@ -71,7 +74,7 @@ export const PUT: RequestHandler = async ({ params, request }) => {
     saveConversationSettingsToDb(params.id, settings);
 
     // Determine if sandbox-affecting settings changed
-    const sandboxKeys: (keyof ConversationSettings)[] = [
+    const restartKeys: (keyof ConversationSettings)[] = [
         "sandboxEnabled",
         "extraReadPaths",
         "extraWritePaths",
@@ -80,9 +83,10 @@ export const PUT: RequestHandler = async ({ params, request }) => {
         "secrets",
         "allowEnv",
         "disabledTools",
+        "enabledMcpServers",
     ];
 
-    const sandboxChanged = sandboxKeys.some((key) => {
+    const settingsChanged = restartKeys.some((key) => {
         const oldVal = oldSettings?.[key];
         const newVal = settings[key];
         return JSON.stringify(oldVal) !== JSON.stringify(newVal);
@@ -91,7 +95,7 @@ export const PUT: RequestHandler = async ({ params, request }) => {
     // If sandbox-affecting settings changed, restart the in-memory session
     // so it picks up the new settings on next access
     let restarted = false;
-    if (sandboxChanged) {
+    if (settingsChanged) {
         restarted = restartSession(params.id);
     }
 

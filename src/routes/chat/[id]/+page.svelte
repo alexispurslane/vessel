@@ -429,11 +429,11 @@
     <title>Vessel - {conversationTitle}</title>
 </svelte:head>
 
-<div class="h-full w-full flex flex-col overflow-hidden" onmousemove={showTopBar}>
+<div class="h-full w-full flex flex-col overflow-hidden relative" onmousemove={showTopBar}>
     <!-- Main content -->
     <!-- Top bar: hidden by default, shows on mouse movement, auto-hides after timeout or on send -->
     {#if topBarVisible}
-        <div class="shrink-0 flex items-center justify-between px-4 py-1.5 border-b h-9" transition:fade={{ duration: 150 }}>
+        <div class="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-4 py-1.5 border-b h-9 bg-background/80 backdrop-blur-sm" transition:fade={{ duration: 150 }}>
             <!-- Left: Context usage + token counts -->
             <div class="flex items-center gap-3">
                 <TooltipProvider>

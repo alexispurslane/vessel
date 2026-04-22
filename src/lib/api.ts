@@ -418,6 +418,64 @@ export async function updateSettings(
     });
 }
 
+// --- MCP Servers ---
+
+/** MCP server entry matching the Claude-like JSON config syntax */
+export interface McpServerEntry {
+    command?: string;
+    args?: string[];
+    env?: Record<string, string>;
+    cwd?: string;
+    url?: string;
+    headers?: Record<string, string>;
+    auth?: "oauth" | "bearer" | false;
+    bearerToken?: string;
+    lifecycle?: "keep-alive" | "lazy" | "eager";
+    idleTimeout?: number;
+    exposeResources?: boolean;
+    directTools?: boolean | string[];
+    excludeTools?: string[];
+    debug?: boolean;
+    /** Whether this server is enabled by default in new conversations (default: true) */
+    defaultEnabled?: boolean;
+}
+
+export interface McpServerInfo {
+    name: string;
+    config: McpServerEntry;
+}
+
+export async function listMcpServers(): Promise<McpServerInfo[]> {
+    return apiFetch<McpServerInfo[]>("/api/mcp-servers");
+}
+
+export async function upsertMcpServer(
+    name: string,
+    config: McpServerEntry
+): Promise<{ success: boolean }> {
+    return apiFetch<{ success: boolean }>("/api/mcp-servers", {
+        method: "PUT",
+        body: JSON.stringify({ name, config }),
+    });
+}
+
+export async function deleteMcpServer(name: string): Promise<{ success: boolean }> {
+    return apiFetch<{ success: boolean }>("/api/mcp-servers", {
+        method: "DELETE",
+        body: JSON.stringify({ name }),
+    });
+}
+
+export interface McpServerStatus {
+    name: string;
+    status: "connected" | "closed" | "needs-auth" | "unknown";
+    toolCount?: number;
+}
+
+export async function getMcpServerStatus(conversationId: string): Promise<McpServerStatus[]> {
+    return apiFetch<McpServerStatus[]>(`/api/mcp-servers/status/${conversationId}`);
+}
+
 // --- Providers ---
 
 export async function listProviders(): Promise<ProviderInfo[]> {

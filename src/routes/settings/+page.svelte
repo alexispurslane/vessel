@@ -27,6 +27,11 @@
         getSettings,
         updateSettings,
         restartAllSessions,
+        listMcpServers,
+        upsertMcpServer,
+        deleteMcpServer,
+        type McpServerEntry,
+        type McpServerInfo,
     } from "$lib/api.js";
     import type { ProviderInfo, ModelInfo, CustomModelDef } from "$lib/types.js";
     import Key from "@lucide/svelte/icons/key";
@@ -39,6 +44,7 @@
     import Pencil from "@lucide/svelte/icons/pencil";
     import Shield from "@lucide/svelte/icons/shield";
     import FileText from "@lucide/svelte/icons/file-text";
+    import Plug from "@lucide/svelte/icons/plug";
     import X from "@lucide/svelte/icons/x";
     import PageLayout from "$lib/components/page-layout/index.svelte";
     import SystemPromptEditor from "$lib/components/conversation-settings/SystemPromptEditor.svelte";
@@ -341,6 +347,7 @@
         loadModels();
         loadCustomModels();
         loadAppSettings();
+        loadMcpServers();
     });
 
     // --- App settings state ---
@@ -598,6 +605,86 @@
         agentCustomSystemPrompt = "";
         agentNeedsSave = true;
     }
+
+    // --- MCP Servers state ---
+    let mcpServers = $state<McpServerInfo[]>([]);
+    let mcpLoading = $state(true);
+    let mcpError = $state<string | null>(null);
+    let showAddMcp = $state(false);
+    let editingMcpName = $state<string | null>(null);
+    let mcpName = $state("");
+    let mcpConfigJson = $state("");
+    let mcpSaving = $state(false);
+
+    async function loadMcpServers() {
+        mcpLoading = true;
+        mcpError = null;
+        try {
+            mcpServers = await listMcpServers();
+        } catch (e) {
+            mcpError = e instanceof Error ? e.message : "Failed to load MCP servers";
+        } finally {
+            mcpLoading = false;
+        }
+    }
+
+    function resetMcpForm() {
+        mcpName = "";
+        mcpConfigJson = "";
+        showAddMcp = false;
+        editingMcpName = null;
+    }
+
+    async function saveMcpServer() {
+        mcpError = null;
+        const name = mcpName.trim();
+        if (!name) {
+            mcpError = "Server name is required";
+            return;
+        }
+
+        let config: McpServerEntry;
+        try {
+            config = JSON.parse(mcpConfigJson);
+        } catch {
+            mcpError = "Invalid JSON configuration";
+            return;
+        }
+
+        if (!config.command && !config.url) {
+            mcpError = "Config must have either 'command' (stdio) or 'url' (HTTP)";
+            return;
+        }
+
+        mcpSaving = true;
+        try {
+            await upsertMcpServer(name, config);
+            await loadMcpServers();
+            resetMcpForm();
+        } catch (e) {
+            mcpError = e instanceof Error ? e.message : "Failed to save MCP server";
+        } finally {
+            mcpSaving = false;
+        }
+    }
+
+    const mcpConfigExample = '{ "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"] }';
+
+    async function removeMcpServer(name: string) {
+        try {
+            await deleteMcpServer(name);
+            await loadMcpServers();
+        } catch (e) {
+            mcpError = e instanceof Error ? e.message : "Failed to delete MCP server";
+        }
+    }
+
+    function editMcpServer(server: McpServerInfo) {
+        mcpName = server.name;
+        mcpConfigJson = JSON.stringify(server.config, null, 2);
+        editingMcpName = server.name;
+        showAddMcp = true;
+    }
 </script>
 
 <PageLayout title="Settings" onback={handleBack}>
@@ -609,6 +696,7 @@
             <TabsTrigger value="models"><Cpu class="mr-1.5 h-4 w-4" /> Models</TabsTrigger>
             <TabsTrigger value="sandbox"><Shield class="mr-1.5 h-4 w-4" /> Sandbox</TabsTrigger>
             <TabsTrigger value="agent"><FileText class="mr-1.5 h-4 w-4" /> Agent</TabsTrigger>
+            <TabsTrigger value="mcp"><Plug class="mr-1.5 h-4 w-4" /> MCP Servers</TabsTrigger>
         </TabsList>
 
         <!-- Defaults Tab -->
@@ -1426,6 +1514,134 @@
                                 </Button>
                             </div>
                         </div>
+                    {/if}
+                </CardContent>
+            </Card>
+        </TabsContent>
+
+        <!-- MCP Servers Tab -->
+        <TabsContent value="mcp">
+            <Card>
+                <CardHeader>
+                    <CardTitle>MCP Servers</CardTitle>
+                    <CardDescription
+                        >Configure MCP (Model Context Protocol) servers to give the agent access to external tools and resources. Uses the standard Claude-like <code
+                            class="rounded bg-muted px-1 py-0.5 text-xs font-mono"
+                            >mcpServers</code
+                        >
+                        JSON configuration syntax.</CardDescription
+                    >
+                </CardHeader>
+                <CardContent>
+                    {#if mcpLoading}
+                        <div class="flex items-center justify-center py-8">
+                            <Spinner class="h-6 w-6" />
+                        </div>
+                    {:else}
+                        {#if mcpServers.length > 0}
+                            <div class="mb-6 space-y-3">
+                                {#each mcpServers as server (server.name)}
+                                    <div class="rounded-lg border p-3">
+                                        <div class="flex items-center justify-between">
+                                            <div class="flex items-center gap-3">
+                                                <span class="font-medium">{server.name}</span>
+                                                {#if server.config.command}
+                                                    <Badge variant="outline" class="text-xs">stdio</Badge>
+                                                {:else if server.config.url}
+                                                    <Badge variant="outline" class="text-xs">http</Badge>
+                                                {/if}
+                                                <div class="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                                    <Switch
+                                                        checked={server.config.defaultEnabled !== false}
+                                                        onCheckedChange={(checked: boolean) => {
+                                                            server.config.defaultEnabled = checked;
+                                                            upsertMcpServer(server.name, server.config);
+                                                        }}
+                                                    />
+                                                    <span>{server.config.defaultEnabled !== false ? 'On by default' : 'Off by default'}</span>
+                                                </div>
+                                            </div>
+                                            <div class="flex items-center gap-1">
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onclick={() => editMcpServer(server)}
+                                                >
+                                                    <Pencil class="h-4 w-4" />
+                                                </Button>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onclick={() => removeMcpServer(server.name)}
+                                                >
+                                                    <Trash2 class="h-4 w-4" />
+                                                </Button>
+                                            </div>
+                                        </div>
+                                        {#if server.config.command}
+                                            <p class="mt-1 text-sm text-muted-foreground">
+                                                <code class="text-xs">{server.config.command}{#if server.config.args?.length} {server.config.args.join(' ')}{/if}</code>
+                                            </p>
+                                        {:else if server.config.url}
+                                            <p class="mt-1 text-sm text-muted-foreground">
+                                                <code class="text-xs">{server.config.url}</code>
+                                            </p>
+                                        {/if}
+                                    </div>
+                                {/each}
+                            </div>
+                            <Separator class="my-4" />
+                        {:else}
+                            <p class="mb-4 text-center text-muted-foreground">No MCP servers configured yet.</p>
+                        {/if}
+
+                        {#if mcpError}
+                            <p class="mb-4 text-sm text-destructive">{mcpError}</p>
+                        {/if}
+
+                        {#if showAddMcp}
+                            <div class="space-y-4 rounded-lg border p-4">
+                                <p class="font-medium">{editingMcpName ? 'Edit' : 'Add'} MCP Server</p>
+                                <div>
+                                    <Label for="mcp-name" class="mb-1">Name</Label>
+                                    <Input
+                                        id="mcp-name"
+                                        placeholder="e.g. filesystem, github"
+                                        bind:value={mcpName}
+                                        disabled={!!editingMcpName}
+                                    />
+                                </div>
+                                <div>
+                                    <Label for="mcp-config" class="mb-1">Configuration (JSON)</Label>
+                                    <p class="text-xs text-muted-foreground mb-1">
+                                        Standard MCP server config: <code class="text-xs">{mcpConfigExample}</code>
+                                    </p>
+                                    <textarea
+                                        id="mcp-config"
+                                        class="flex min-h-[120px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                        placeholder={mcpConfigExample}
+                                        bind:value={mcpConfigJson}
+                                    ></textarea>
+                                </div>
+                                <div class="flex gap-2">
+                                    <Button onclick={saveMcpServer} disabled={mcpSaving}>
+                                        {#if mcpSaving}
+                                            <Spinner class="mr-1.5 h-4 w-4" />
+                                        {:else if editingMcpName}
+                                            <Check class="mr-1.5 h-4 w-4" />
+                                        {:else}
+                                            <Plus class="mr-1.5 h-4 w-4" />
+                                        {/if}
+                                        {editingMcpName ? 'Update' : 'Add'} Server
+                                    </Button>
+                                    <Button variant="outline" onclick={resetMcpForm}>Cancel</Button>
+                                </div>
+                            </div>
+                        {:else}
+                            <Button variant="outline" onclick={() => (showAddMcp = true)}>
+                                <Plus class="mr-1.5 h-4 w-4" /> Add MCP Server
+                            </Button>
+                        {/if}
                     {/if}
                 </CardContent>
             </Card>

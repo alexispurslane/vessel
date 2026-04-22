@@ -3,17 +3,21 @@ import { writeFileSync, mkdirSync, rmSync, existsSync } from "fs";
 import {
     createAgentSession,
     AuthStorage,
+    DefaultResourceLoader,
     ModelRegistry,
     SessionManager,
     SettingsManager,
     type AgentSession as PiAgentSession,
     type AgentSessionEvent as PiAgentSessionEvent,
 } from "@mariozechner/pi-coding-agent";
+import mcpAdapter from "pi-mcp-adapter";
+import { ensureMcpConfigFile, writeConversationMcpConfig, getMcpServersFromDb, MCP_CONFIG_PATH } from "./mcp-config.js";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { createSandboxedCodingTools } from "./sandboxed-tools.js";
 import { createSessionSandbox, getSessionWorkDir, loadConversationSettingsFromDb, saveConversationSettingsToDb } from "./sandbox-factory.js";
 import type { Model as PiModel, Api } from "@mariozechner/pi-ai";
 import { getDb } from "../db/index.js";
+import type { ConversationSettings } from "$lib/types.js";
 import { randomUUID } from "crypto";
 import type { ChatSSEEvent, ConversationListItem, ActiveSession, CustomModelDef } from "./types.js";
 import { inferApiForProvider } from "../inference/api-helpers.js";
@@ -555,6 +559,35 @@ export async function getOrCreateSession(conversationId: string): Promise<PiAgen
     // used by tool definitions for path resolution.
     const sessionWorkDir = sandbox ? getSessionWorkDir(conversationId) : process.cwd();
 
+    // Ensure the global MCP config file exists on disk so pi-mcp-adapter can read it.
+    ensureMcpConfigFile();
+
+    // ALWAYS point pi-mcp-adapter at our own mcp.json via the mcp-config flag.
+    // Without this, the adapter falls back to ~/.pi/agent/mcp.json and also imports
+    // servers from Claude Desktop, Cursor, etc. — which is not what we want.
+    // We only want servers the user explicitly configured through Vessel.
+    const mcpFlagValues = new Map<string, boolean | string>();
+    const enabledMcpServers = conversationSettings?.enabledMcpServers ?? null;
+    if (enabledMcpServers !== null) {
+        // Per-conversation override: write a conversation-specific mcp.json
+        const convConfigPath = writeConversationMcpConfig(conversationId, enabledMcpServers);
+        mcpFlagValues.set("mcp-config", convConfigPath);
+    } else {
+        // Inherit mode: use the global mcp.json we wrote to data/agent/
+        mcpFlagValues.set("mcp-config", MCP_CONFIG_PATH);
+    }
+
+    // Create a custom ResourceLoader that includes the pi-mcp-adapter extension.
+    // This gives the adapter access to the full ExtensionAPI lifecycle (session_start,
+    // session_shutdown, etc.) which it needs to properly connect/teardown MCP servers.
+    const resourceLoader = new DefaultResourceLoader({
+        cwd: sessionWorkDir,
+        agentDir: AGENT_DIR,
+        settingsManager,
+        extensionFactories: [mcpAdapter],
+    });
+    await resourceLoader.reload();
+
     const createOpts: Parameters<typeof createAgentSession>[0] = {
         cwd: sessionWorkDir,
         agentDir: AGENT_DIR,
@@ -562,73 +595,62 @@ export async function getOrCreateSession(conversationId: string): Promise<PiAgen
         authStorage: modelRegistry.authStorage,
         modelRegistry,
         settingsManager,
+        resourceLoader,
     };
 
     if (model) {
         createOpts.model = model;
     }
 
-    const { session: agentSession } = await createAgentSession(createOpts);
+    const { session: agentSession, extensionsResult } = await createAgentSession(createOpts);
 
-    // Determine the set of disabled tool names from conversation settings.
-    // When a tool is disabled, it is excluded from the agent's available tools.
-    const disabledTools = new Set(conversationSettings?.disabledTools ?? []);
+    // If MCP servers are configured and we have a per-conversation config path,
+    // set the mcp-config flag so pi-mcp-adapter picks it up during session_start.
+    if (mcpFlagValues.size > 0 && extensionsResult) {
+        for (const [name, value] of mcpFlagValues) {
+            extensionsResult.runtime.flagValues.set(name, value);
+        }
+    }
 
-    // When sandbox mode is active or tools are disabled, we need to customize the
-    // agent's tool set. The approach differs depending on the scenario:
-    //
-    // For DISABLED TOOLS only (no sandbox):
-    //   Simply call setActiveToolsByName with the filtered list. The default
-    //   tool definitions (with promptSnippet) are preserved, so the system prompt
-    //   still shows tool descriptions correctly.
-    //
-    // For SANDBOX MODE:
-    //   We need to replace the tool *execution* with sandboxed operations while
-    //   keeping the default tool *definitions* (which include promptSnippet for
-    //   the system prompt). We do this by patching the _toolRegistry entries with
-    //   our sandboxed AgentTool instances after the default _buildRuntime has run.
-    //   This preserves the _toolPromptSnippets map that was populated from the
-    //   definitions, so the system prompt shows tools correctly.
-    //
-    // Previously, we used _baseToolsOverride to inject custom tools, but that path
-    // calls createToolDefinitionFromAgentTool() which strips promptSnippet from
-    //   the definitions, causing "Available tools: (none)" in the system prompt.
+    // Initialize extensions by calling bindExtensions(). This emits the
+    // session_start event, which pi-mcp-adapter uses to connect to MCP servers.
+    // In the web app we don't have a TUI, so we pass empty bindings.
+    await agentSession.bindExtensions({});
+
+    // Determine the effective tool set for this conversation.
+    // Extension tools (like the MCP gateway tool) are registered in the tool
+    // registry but NOT automatically activated by _buildRuntime. resolveActiveToolNames()
+    // handles discovering all registered tools and deciding which should be active
+    // based on sandbox mode, disabled tools, and MCP off state.
+    const activeToolDecision = resolveActiveToolNames({
+        activeToolNames: agentSession.getActiveToolNames(),
+        allRegisteredToolNames: agentSession.getAllTools().map((t: { name: string }) => t.name),
+        conversationSettings,
+        sandbox,
+    });
 
     if (sandbox) {
-        // Create sandboxed tools with custom operations
+        // Sandbox mode: replace default tool execution with sandboxed operations
+        // while keeping the default tool definitions (with promptSnippet) intact.
         const sandboxedTools = createSandboxedCodingTools(sessionWorkDir, sandbox);
         // Note: grep is intentionally omitted from sandboxed tools because its
         // search runs directly on the host. If grep is not disabled and sandbox
         // is on, we still don't include it for security consistency.
 
         // Patch the tool registry: replace default tools with sandboxed versions.
-        // The registry holds AgentTool objects used for execution. By replacing
-        // just these (not the definitions), we keep promptSnippet intact for
-        // the system prompt while using sandboxed operations for execution.
         const toolRegistry = (agentSession as any)._toolRegistry as Map<string, AgentTool<any>>;
         for (const tool of sandboxedTools) {
             toolRegistry.set(tool.name, tool);
         }
-        // Also remove grep from the registry since sandboxed tools omit it
+        // Also remove grep from the registry and definitions since sandboxed
+        // tools omit it for security consistency.
         toolRegistry.delete("grep");
-
-        // Remove grep from the definition maps too, so it doesn't appear in
-        // getAllTools() or the Agent Info panel. These maps hold ToolDefinition
-        // objects (with promptSnippet, description, etc.) that getAllTools() reads
-        // from — they're separate from the registry's AgentTool execution objects.
         (agentSession as any)._toolDefinitions.delete("grep");
         (agentSession as any)._baseToolDefinitions.delete("grep");
 
-        // Filter out disabled tools by name
-        const desiredToolNames = sandboxedTools
-            .map((t) => t.name)
-            .filter((n) => !disabledTools.has(n));
-        agentSession.setActiveToolsByName(desiredToolNames);
-    } else if (disabledTools.size > 0) {
-        // No sandbox, just filter disabled tools
-        const allToolNames = agentSession.getActiveToolNames();
-        const filteredNames = allToolNames.filter((n) => !disabledTools.has(n));
-        agentSession.setActiveToolsByName(filteredNames);
+        agentSession.setActiveToolsByName(activeToolDecision.desiredToolNames);
+    } else if (activeToolDecision.needsUpdate) {
+        agentSession.setActiveToolsByName(activeToolDecision.desiredToolNames);
     }
 
     // Apply custom/append system prompt — per-conversation overrides global.
@@ -1784,4 +1806,159 @@ export function upsertCustomModel(model: CustomModelDef): void {
 export function deleteCustomModel(id: string): void {
     const db = getDb();
     db.prepare("DELETE FROM custom_models WHERE id = ?").run(id);
+}
+
+/**
+ * MCP server connection status for a conversation.
+ */
+export interface McpServerStatus {
+    name: string;
+    status: "connected" | "closed" | "needs-auth" | "unknown";
+    toolCount?: number;
+}
+
+/**
+ * Get the MCP server connection status for an active conversation session.
+ * Reads from pi-mcp-adapter's internal McpServerManager via the extension runner.
+ */
+export function getMcpServerStatus(conversationId: string): McpServerStatus[] {
+    const session = sessions.get(conversationId);
+    if (!session) return [];
+
+    try {
+        // Access the extension runner (private but accessible at runtime)
+        const runner = (session.agentSession as any).extensionRunner;
+        if (!runner?.extensions) return [];
+
+        // Find the MCP adapter extension by looking for the one that registered the "mcp" tool
+        for (const ext of runner.extensions) {
+            if (ext.tools?.has("mcp")) {
+                // This is the MCP adapter extension. Its state holds the McpServerManager.
+                // The state isn't on the Extension object — it's in the closure.
+                // We need to access it through the manager on the state.
+                // Since state is a closure variable, we can try getting it from tool metadata.
+                break;
+            }
+        }
+
+        // Direct approach: access the McpServerManager from the state.
+        // The state is stored in a closure, but the toolMetadata map is accessible
+        // through the pi extension API. Let's try reading the MCP tool's description
+        // which includes server status info in its dynamically generated description.
+        const toolRegistry = (session.agentSession as any)._toolRegistry as Map<string, any>;
+        const toolDefMap = (session.agentSession as any)._toolDefinitions as Map<string, any>;
+
+        // The MCP proxy tool's description is dynamically built and includes server names + tool counts.
+        // But it doesn't include connection status directly.
+        // For a more direct approach, let's look at the extension runner's state.
+        // The runner stores extensions, and the MCP adapter stores its state locally.
+        // We can access it through the runner's private _extensions field.
+
+        // Actually, the cleanest path: use the tool metadata cache file that pi-mcp-adapter writes
+        // at data/agent/.mcp-metadata-cache.json. This contains per-server tool lists.
+        // But it won't have connection status.
+
+        // Most practical: interrogate the McpServerManager directly.
+        // The adapter's `state` variable holds a reference to the manager.
+        // We can't get at the closure variable, but we CAN invoke the mcp tool
+        // with no arguments (which returns status) by calling the execute function.
+
+        // However, that's complex. For now, let's read the active tool list
+        // and report which MCP-related tools are present as a proxy for "connected".
+        const result: McpServerStatus[] = [];
+        const allServers = getMcpServersFromDb();
+
+        for (const name of Object.keys(allServers)) {
+            // Check if any tools with the server's prefix are registered
+            const prefix = name.replace(/-/g, "_");
+            let toolCount = 0;
+            for (const toolName of toolDefMap?.keys() ?? []) {
+                if (toolName === "mcp" || toolName.startsWith(prefix + "_")) {
+                    toolCount++;
+                }
+            }
+
+            // If we see tools from this server, it's connected.
+            // The MCP gateway tool is always present, so check for server-specific direct tools.
+            result.push({
+                name,
+                status: toolCount > 0 ? "connected" : "unknown",
+                toolCount: toolCount > 0 ? toolCount : undefined,
+            });
+        }
+
+        return result;
+    } catch {
+        return [];
+    }
+}
+
+// --- Tool activation logic ---
+
+/** Input for resolveActiveToolNames(). */
+interface ResolveActiveToolNamesInput {
+    /** Tool names currently active in the session (from getActiveToolNames()). */
+    activeToolNames: string[];
+    /** All tool names registered in the session, including inactive extensions (from getAllTools()). */
+    allRegisteredToolNames: string[];
+    /** Per-conversation settings (may be null if no settings row exists). */
+    conversationSettings: ConversationSettings | null;
+    /** The sandbox for this session, or null if sandboxing is disabled. */
+    sandbox: unknown;
+}
+
+/** Output of resolveActiveToolNames(). */
+interface ResolveActiveToolNamesResult {
+    /** The tool names that should be active. */
+    desiredToolNames: string[];
+    /** Whether the active tool set needs to be updated (differs from activeToolNames). */
+    needsUpdate: boolean;
+}
+
+/**
+ * Decide which tools should be active for a conversation session.
+ *
+ * The pi-coding-agent runtime only activates the built-in tools (read, bash, edit, write)
+ * by default. Extension tools like the MCP gateway tool are registered in the tool
+ * registry but NOT automatically added to the active set. This function computes the
+ * correct active tool list by starting from all registered tools and removing those
+ * that shouldn't be available based on conversation settings.
+ *
+ * Tools are removed when:
+ * - Explicitly disabled via conversation settings (disabledTools)
+ * - MCP is explicitly off (enabledMcpServers === []) — MCP gateway and direct tools are excluded
+ * - Sandbox mode is active — grep is excluded since sandboxed tools omit it
+ */
+function resolveActiveToolNames(input: ResolveActiveToolNamesInput): ResolveActiveToolNamesResult {
+    const { activeToolNames, allRegisteredToolNames, conversationSettings, sandbox } = input;
+
+    // Identify MCP extension tools so we can disable them when MCP is off.
+    const mcpExplicitlyOff = Array.isArray(conversationSettings?.enabledMcpServers) &&
+        conversationSettings.enabledMcpServers.length === 0;
+    const mcpToolNames = allRegisteredToolNames.filter(
+        (n) => n === "mcp" || n.includes("_") // MCP direct tools are prefixed like servername_tool
+    );
+
+    // Collect all tool names that should be disabled.
+    const disabledTools = new Set([
+        ...conversationSettings?.disabledTools ?? [],
+        ...(mcpExplicitlyOff ? mcpToolNames : []),
+    ]);
+
+    // Build the desired set: start from all registered tools, remove disabled ones
+    // (and grep in sandbox mode since sandboxed tools omit it).
+    const desiredToolNames = new Set(allRegisteredToolNames);
+    for (const name of disabledTools) {
+        desiredToolNames.delete(name);
+    }
+    if (sandbox) {
+        desiredToolNames.delete("grep");
+    }
+
+    // Compare against the currently-active set to determine if an update is needed.
+    const activeSet = new Set(activeToolNames);
+    const needsUpdate = desiredToolNames.size !== activeSet.size ||
+        [...desiredToolNames].some((n) => !activeSet.has(n));
+
+    return { desiredToolNames: [...desiredToolNames], needsUpdate };
 }

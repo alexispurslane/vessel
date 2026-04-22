@@ -41,6 +41,8 @@ export interface ConversationSettings {
     customSystemPrompt?: string | null;
     /** List of instruction strings appended to the default system prompt (null = nothing appended). Each item is a separate instruction. */
     appendSystemPrompt?: string[] | null;
+    /** MCP server names to enable for this conversation (null = use per-server defaultEnabled, empty = none) */
+    enabledMcpServers?: string[] | null;
 }
 
 /** Default values for per-conversation settings. Null fields inherit from global settings. */
@@ -56,6 +58,7 @@ export const DEFAULT_CONVERSATION_SETTINGS: ConversationSettings = {
     disabledTools: null,
     customSystemPrompt: null,
     appendSystemPrompt: null,
+    enabledMcpServers: null,
 };
 
 // --- Conversations ---
