@@ -16,6 +16,12 @@
         ContextMenuTrigger,
         ContextMenuSeparator,
     } from "$lib/components/ui/context-menu/index.js";
+    import {
+        Tooltip,
+        TooltipContent,
+        TooltipProvider,
+        TooltipTrigger,
+    } from "$lib/components/ui/tooltip/index.js";
     import { Spinner } from "$lib/components/ui/spinner/index.js";
     import Send from "@lucide/svelte/icons/send";
     import StopCircle from "@lucide/svelte/icons/stop-circle";
@@ -164,15 +170,22 @@
     <!-- Model selector button -->
     {#if models.length > 0}
         <DropdownMenu>
-            <DropdownMenuTrigger
-                class="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-muted text-foreground transition-colors cursor-pointer"
-                aria-label="Select model"
-            >
-                <Cpu class="size-4" />
-                {#if modelIsNonDefault}
-                    <span class="absolute top-1 right-1 size-2 rounded-full bg-primary"></span>
-                {/if}
-            </DropdownMenuTrigger>
+            <TooltipProvider>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <DropdownMenuTrigger
+                            class="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-muted text-foreground transition-colors cursor-pointer"
+                            aria-label="Select model"
+                        >
+                            <Cpu class="size-4" />
+                            {#if modelIsNonDefault}
+                                <span class="absolute top-1 right-1 size-2 rounded-full bg-primary"></span>
+                            {/if}
+                        </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>Model: {getModelDisplayName(selectedModelId)}</TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
             <DropdownMenuContent align="start">
                 {#each Object.entries(modelsByProvider()) as [provider, providerModels] (provider)}
                     <DropdownMenuGroup>

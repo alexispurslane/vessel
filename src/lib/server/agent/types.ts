@@ -57,4 +57,8 @@ export interface ActiveSession {
     /** Per-conversation settings that override global sandbox settings. */
     conversationSettings?: ConversationSettings;
     disposeTimer?: ReturnType<typeof setTimeout>;
+    /** Bounded circular buffer of recent SSE events for replay on reconnect.
+     *  When a subscriber connects with a lastEventId, we replay all buffered
+     *  events after that ID so they don't miss anything during a page reload. */
+    eventBuffer: ChatSSEEvent[];
 }

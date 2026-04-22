@@ -13,6 +13,71 @@ import {
 import type { ChatMessage } from "$lib/types.js";
 import { setActiveConversation, updateConversationTitleAndTags } from "./conversations.svelte.js";
 
+// --- sessionStorage helpers ---
+
+/** Key for persisting the in-progress streaming message */
+function streamingKey(conversationId: string) {
+    return `vessel-streaming:${conversationId}`;
+}
+
+/** Key for persisting the last SSE event ID (for replay on reconnect) */
+function lastEventIdKey(conversationId: string) {
+    return `vessel-last-event-id:${conversationId}`;
+}
+
+interface SavedStreamingMessage {
+    id: string;
+    content: string;
+    thinking?: string;
+    thinkingStreaming?: boolean;
+    model?: string;
+    modelProvider?: string;
+    toolCalls?: Array<{ toolName: string; status: string; output?: string; isError?: boolean }>;
+    usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number };
+    timestamp: number;
+}
+
+function saveStreamingMessage(conversationId: string, msg: ChatMessage | null) {
+    try {
+        if (!msg || !msg.streaming) {
+            sessionStorage.removeItem(streamingKey(conversationId));
+            return;
+        }
+        const saved: SavedStreamingMessage = {
+            id: msg.id,
+            content: msg.content,
+            thinking: msg.thinking,
+            thinkingStreaming: msg.thinkingStreaming,
+            model: msg.model,
+            modelProvider: msg.modelProvider,
+            toolCalls: msg.toolCalls,
+            usage: msg.usage,
+            timestamp: msg.timestamp,
+        };
+        sessionStorage.setItem(streamingKey(conversationId), JSON.stringify(saved));
+    } catch {
+        // sessionStorage may be unavailable (private browsing, quota, etc.)
+    }
+}
+
+function loadStreamingMessage(conversationId: string): SavedStreamingMessage | null {
+    try {
+        const raw = sessionStorage.getItem(streamingKey(conversationId));
+        if (!raw) return null;
+        return JSON.parse(raw) as SavedStreamingMessage;
+    } catch {
+        return null;
+    }
+}
+
+function clearStreamingMessage(conversationId: string) {
+    try {
+        sessionStorage.removeItem(streamingKey(conversationId));
+    } catch {
+        // ignore
+    }
+}
+
 let messages = $state<ChatMessage[]>([]);
 let connected = $state(false);
 let generating = $state(false);
@@ -58,6 +123,14 @@ export function getChat() {
         /** Whether a navigate (delete/edit) operation is in progress */
         get navigating() {
             return navigating;
+        },
+        /** Total input tokens across all assistant messages in this conversation */
+        get totalInputTokens() {
+            return messages.reduce((sum, m) => sum + (m.usage?.input ?? 0), 0);
+        },
+        /** Total output tokens across all assistant messages in this conversation */
+        get totalOutputTokens() {
+            return messages.reduce((sum, m) => sum + (m.usage?.output ?? 0), 0);
         },
     };
 }
@@ -106,6 +179,7 @@ export async function connectStream(conversationId: string): Promise<void> {
                         output: tc.output,
                     })) ?? [],
                 isError: msg.isError,
+                usage: msg.usage,
                 streaming: false,
                 thinkingStreaming: false,
             });
@@ -139,10 +213,79 @@ export async function connectStream(conversationId: string): Promise<void> {
     // Re-check after await — if a newer connectStream superseded us, bail out
     if (thisGeneration !== connectGeneration) return;
 
-    const es = new EventSource(`/api/sessions/${conversationId}/stream`);
+    // Restore saved in-progress streaming message from sessionStorage.
+    // This handles the case where the user reloaded mid-generation — the
+    // partially-streamed content won't be in the server's history yet (it
+    // hasn't been committed to JSONL), so we restore it from sessionStorage.
+    const savedStreaming = loadStreamingMessage(conversationId);
+    if (savedStreaming) {
+        // Only restore if no message with this ID already exists in history
+        // (the server may have finished and committed the message since we saved it)
+        const alreadyInHistory = messages.some((m) => m.id === savedStreaming.id);
+        if (!alreadyInHistory) {
+            messages.push({
+                id: savedStreaming.id,
+                role: "assistant",
+                content: savedStreaming.content,
+                timestamp: savedStreaming.timestamp,
+                thinking: savedStreaming.thinking,
+                thinkingStreaming: savedStreaming.thinkingStreaming ?? false,
+                model: savedStreaming.model,
+                modelProvider: savedStreaming.modelProvider,
+                toolCalls:
+                    savedStreaming.toolCalls?.map((tc) => ({
+                        toolName: tc.toolName,
+                        status: tc.status as "running" | "completed" | "error",
+                        output: tc.output,
+                        isError: tc.isError,
+                    })) ?? [],
+                streaming: true,
+            });
+            streamingMessageId = savedStreaming.id;
+            generating = true;
+        }
+    }
+
+    // Read the last SSE event ID from sessionStorage for replay.
+    // The browser's EventSource only sends Last-Event-Id on automatic reconnection
+    // (not on a new page load), so we pass it as a query parameter for the server
+    // to replay missed events.
+    let storedLastEventId: string | null = null;
+    try {
+        storedLastEventId = sessionStorage.getItem(lastEventIdKey(conversationId));
+    } catch {
+        // ignore
+    }
+    const streamUrl = storedLastEventId
+        ? `/api/sessions/${conversationId}/stream?lastEventId=${encodeURIComponent(storedLastEventId)}`
+        : `/api/sessions/${conversationId}/stream`;
+
+    const es = new EventSource(streamUrl);
 
     /** Returns true if this connection has been superseded by a newer connectStream call. */
     const isStale = () => thisGeneration !== connectGeneration;
+
+    // Track the last SSE event ID for replay on reconnect.
+    // We persist it to sessionStorage so it survives page reloads.
+    function trackEventId(event: MessageEvent) {
+        const id = event.lastEventId;
+        if (id) {
+            try {
+                sessionStorage.setItem(lastEventIdKey(conversationId), id);
+            } catch {
+                // ignore
+            }
+        }
+    }
+
+    // Persist the current streaming message to sessionStorage.
+    // Called after every mutation to the streaming message.
+    function persistStreamingState() {
+        if (streamingMessageId) {
+            const msg = messages.find((m) => m.id === streamingMessageId);
+            saveStreamingMessage(conversationId, msg ?? null);
+        }
+    }
 
     es.addEventListener("connected", () => {
         if (isStale()) return;
@@ -152,6 +295,7 @@ export async function connectStream(conversationId: string): Promise<void> {
 
     es.addEventListener("message_start", (e: MessageEvent) => {
         if (isStale()) return;
+        trackEventId(e);
         try {
             const data = JSON.parse(e.data);
             if (data?.message?.role && data.message.role !== "assistant") {
@@ -241,15 +385,19 @@ export async function connectStream(conversationId: string): Promise<void> {
                     // Extract model info
                     if (data.message.model) msg.model = data.message.model;
                     if (data.message.provider) msg.modelProvider = data.message.provider;
+                    // Extract usage info
+                    if (data.message.usage) msg.usage = data.message.usage;
                 }
             }
         } catch {
             // ignore parse errors
         }
+        persistStreamingState();
     });
 
     es.addEventListener("message_update", (e: MessageEvent) => {
         if (isStale()) return;
+        trackEventId(e);
         if (!streamingMessageId) return;
         const msg = messages.find((m) => m.id === streamingMessageId);
         if (!msg) return;
@@ -302,6 +450,8 @@ export async function connectStream(conversationId: string): Promise<void> {
                 // Extract model info from the final message
                 if (data.message?.model) msg.model = data.message.model;
                 if (data.message?.provider) msg.modelProvider = data.message.provider;
+                // Extract usage info from the final message
+                if (data.message?.usage) msg.usage = data.message.usage;
             } else if (data?.type === "error") {
                 // Pi error event (timeout, rate limit, rejection, etc.)
                 msg.streaming = false;
@@ -324,10 +474,12 @@ export async function connectStream(conversationId: string): Promise<void> {
                 msg.content += e.data;
             }
         }
+        persistStreamingState();
     });
 
     es.addEventListener("message_end", (e: MessageEvent) => {
         if (isStale()) return;
+        trackEventId(e);
         // message_end data includes { type: "message_end", message: AgentMessage }
         // pi emits message_end for ALL message types, including toolResult —
         // we must skip non-assistant messages to avoid treating tool output as chat text
@@ -372,6 +524,8 @@ export async function connectStream(conversationId: string): Promise<void> {
                         if (!msg.model && data.message.model) msg.model = data.message.model;
                         if (!msg.modelProvider && data.message.provider)
                             msg.modelProvider = data.message.provider;
+                        // Extract usage info
+                        if (!msg.usage && data.message.usage) msg.usage = data.message.usage;
                     }
                 } catch {
                     // ignore
@@ -387,10 +541,12 @@ export async function connectStream(conversationId: string): Promise<void> {
         }
         streamingMessageId = null;
         generating = false;
+        clearStreamingMessage(conversationId);
     });
 
     es.addEventListener("tool_execution_start", (e: MessageEvent) => {
         if (isStale()) return;
+        trackEventId(e);
         // Tool execution can happen outside of a streaming message (e.g., after message_end)
         // Create a new assistant message if we don't have one
         if (!streamingMessageId) {
@@ -419,10 +575,12 @@ export async function connectStream(conversationId: string): Promise<void> {
         } catch {
             // ignore parse errors
         }
+        persistStreamingState();
     });
 
     es.addEventListener("tool_execution_update", (e: MessageEvent) => {
         if (isStale()) return;
+        trackEventId(e);
         if (!streamingMessageId) return;
         const msg = messages.find((m) => m.id === streamingMessageId);
         if (!msg?.toolCalls?.length) return;
@@ -437,10 +595,12 @@ export async function connectStream(conversationId: string): Promise<void> {
         } catch {
             // ignore
         }
+        persistStreamingState();
     });
 
     es.addEventListener("tool_execution_end", (e: MessageEvent) => {
         if (isStale()) return;
+        trackEventId(e);
         if (!streamingMessageId) return;
         const msg = messages.find((m) => m.id === streamingMessageId);
         if (!msg?.toolCalls?.length) return;
@@ -469,10 +629,12 @@ export async function connectStream(conversationId: string): Promise<void> {
                 msg.streaming = false;
                 msg.thinkingStreaming = false;
                 streamingMessageId = null;
+                clearStreamingMessage(conversationId);
             }
         } catch {
             // ignore
         }
+        persistStreamingState();
     });
 
     es.addEventListener("turn_start", () => {
@@ -505,6 +667,7 @@ export async function connectStream(conversationId: string): Promise<void> {
             }
             streamingMessageId = null;
         }
+        clearStreamingMessage(conversationId);
 
         // Auto-generate title after first response if not already done
         if (!titleGenerationRequested && currentConversationId) {
@@ -748,6 +911,7 @@ export async function reloadMessages(): Promise<void> {
                     output: tc.output,
                 })) ?? [],
             isError: msg.isError,
+            usage: msg.usage,
             streaming: false,
             thinkingStreaming: false,
         }));

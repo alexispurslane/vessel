@@ -171,6 +171,14 @@ export interface ChatMessage {
     streaming?: boolean;
     /** Whether this message represents an error from the provider */
     isError?: boolean;
+    /** Token usage data from the model provider (assistant messages only) */
+    usage?: {
+        input: number;
+        output: number;
+        cacheRead: number;
+        cacheWrite: number;
+        totalTokens: number;
+    };
 }
 
 /** Info about a tool call being executed */

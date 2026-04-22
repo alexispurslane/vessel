@@ -32,6 +32,12 @@ const MODELS_JSON_PATH = resolve(DATA_DIR, "models.json");
  */
 const SESSION_DISPOSE_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
 
+/** Maximum number of SSE events to keep in the replay buffer per session.
+ *  This limits memory usage while still covering the typical duration of a
+ *  page reload (a few seconds). At ~10 events/second during streaming, 500
+ *  events covers ~50 seconds — more than enough for a reload. */
+const EVENT_BUFFER_MAX_SIZE = 500;
+
 /** Monotonically increasing event ID for SSE Last-Event-Id support */
 let eventCounter = 0n;
 
@@ -251,8 +257,23 @@ function broadcast(sessionKey: string, event: ChatSSEEvent): void {
     const session = sessions.get(sessionKey);
     if (!session) return;
 
+    // Buffer the event for replay on reconnect
+    session.eventBuffer.push(event);
+    // Evict oldest events when the buffer exceeds the max size
+    if (session.eventBuffer.length > EVENT_BUFFER_MAX_SIZE) {
+        session.eventBuffer.splice(0, session.eventBuffer.length - EVENT_BUFFER_MAX_SIZE);
+    }
+
     for (const [, subscriber] of session.subscribers) {
         subscriber.send(event);
+    }
+
+    // After broadcasting an agent_end event, check if the session should be
+    // disposed. If the generation just finished and the user has already
+    // navigated away (no subscribers), the session was protected from disposal
+    // while streaming — now it's safe to clean up.
+    if (event.event === "agent_end" && session.subscribers.size === 0) {
+        scheduleDispose(sessionKey);
     }
 }
 
@@ -311,6 +332,7 @@ function serializeMessage(message: unknown): unknown {
             model: msg.model,
             stopReason: msg.stopReason,
             errorMessage: msg.errorMessage,
+            usage: msg.usage ?? undefined,
             timestamp: msg.timestamp,
         };
     }
@@ -396,6 +418,7 @@ function scheduleDispose(conversationId: string): void {
     session.disposeTimer = setTimeout(() => {
         const s = sessions.get(conversationId);
         if (!s || s.subscribers.size > 0) return; // someone reconnected
+        if (s.agentSession.isStreaming) return; // still generating — don't dispose
 
         // Clean up
         s.unsubscribe();
@@ -671,6 +694,7 @@ export async function getOrCreateSession(conversationId: string): Promise<PiAgen
         unsubscribe,
         sandbox,
         conversationSettings: conversationSettings ?? undefined,
+        eventBuffer: [],
     });
 
     return agentSession;
@@ -701,6 +725,28 @@ export function subscribe(
             scheduleDispose(conversationId);
         }
     };
+}
+
+/**
+ * Get buffered SSE events after the given event ID.
+ * Used to replay missed events when a client reconnects after a page reload.
+ * Returns an empty array if the event ID is not found in the buffer
+ * (i.e., it's too old and was evicted, or the session doesn't exist).
+ */
+export function getBufferedEventsAfter(conversationId: string, lastEventId: string): ChatSSEEvent[] {
+    const session = sessions.get(conversationId);
+    if (!session) return [];
+
+    const idx = session.eventBuffer.findIndex((e) => e.id === lastEventId);
+    if (idx === -1) {
+        // Event ID not in buffer — it was evicted or is from a previous session.
+        // Return nothing; the client will get a "connected" event and can
+        // reload history to catch up.
+        return [];
+    }
+
+    // Return all events after the matched event ID
+    return session.eventBuffer.slice(idx + 1);
 }
 
 /**
@@ -766,9 +812,16 @@ export async function abortSession(conversationId: string): Promise<void> {
  * - Idle timeout (scheduleDispose): all subscribers disconnected
  * - Browser session end (via /api/sessions/release endpoint)
  */
-export function disposeSession(conversationId: string): void {
+export function disposeSession(conversationId: string, options?: { force?: boolean }): void {
     const session = sessions.get(conversationId);
     if (!session) return;
+
+    // Don't dispose if the agent is actively generating — the user may reload
+    // the page and we need the session (and its event buffer) to stay alive
+    // so we can replay missed events. Disposal will be retried when the
+    // generation finishes and all subscribers disconnect.
+    // Force disposal is allowed for explicit conversation deletion.
+    if (!options?.force && session.agentSession.isStreaming) return;
 
     // Clear any pending disposal timer
     if (session.disposeTimer) {
@@ -792,6 +845,11 @@ export function disposeSession(conversationId: string): void {
 export function restartSession(conversationId: string): boolean {
     const session = sessions.get(conversationId);
     if (!session) return false;
+
+    // Don't restart mid-generation — the user may reload and need the
+    // session (and event buffer) alive. The restart will happen naturally
+    // when the session is next loaded after the generation completes.
+    if (session.agentSession.isStreaming) return false;
 
     // Clear any pending disposal timer
     if (session.disposeTimer) {
@@ -863,8 +921,8 @@ export function updateSessionSystemPrompt(
  * Only called when the user explicitly hits the trash icon.
  */
 export async function destroyConversation(conversationId: string): Promise<void> {
-    // 1. Dispose in-memory session if loaded
-    disposeSession(conversationId);
+    // 1. Dispose in-memory session if loaded (force: the user explicitly deleted the conversation)
+    disposeSession(conversationId, { force: true });
 
     // Load per-conversation settings before deleting DB rows
     const convSettings = loadConversationSettingsFromDb(conversationId);
@@ -926,8 +984,12 @@ export async function destroyConversation(conversationId: string): Promise<void>
  */
 export function restartAllSessions(): number {
     const ids = [...sessions.keys()];
+    let restarted = 0;
     for (const id of ids) {
         const session = sessions.get(id)!;
+
+        // Don't restart mid-generation — skip streaming sessions
+        if (session.agentSession.isStreaming) continue;
 
         // Clear any pending disposal timer
         if (session.disposeTimer) {
@@ -938,12 +1000,13 @@ export function restartAllSessions(): number {
         session.unsubscribe();
         session.agentSession.dispose();
         sessions.delete(id);
+        restarted++;
     }
 
-    if (ids.length > 0) {
-        console.log(`Restarted ${ids.length} session(s) — they will be re-created on next access`);
+    if (restarted > 0) {
+        console.log(`Restarted ${restarted} session(s) — they will be re-created on next access`);
     }
-    return ids.length;
+    return restarted;
 }
 
 /**
@@ -966,6 +1029,13 @@ export async function getSessionHistory(conversationId: string): Promise<{
             output?: string;
         }>;
         isError?: boolean;
+        usage?: {
+            input: number;
+            output: number;
+            cacheRead: number;
+            cacheWrite: number;
+            totalTokens: number;
+        };
         timestamp: number;
     }>;
     model: { provider: string; modelId: string } | null;
@@ -1089,6 +1159,13 @@ function buildHistoryFromSession(
             output?: string;
         }>;
         isError?: boolean;
+        usage?: {
+            input: number;
+            output: number;
+            cacheRead: number;
+            cacheWrite: number;
+            totalTokens: number;
+        };
         timestamp: number;
     }>;
     model: { provider: string; modelId: string } | null;
@@ -1110,6 +1187,13 @@ function buildHistoryFromSession(
             output?: string;
         }>;
         isError?: boolean;
+        usage?: {
+            input: number;
+            output: number;
+            cacheRead: number;
+            cacheWrite: number;
+            totalTokens: number;
+        };
         timestamp: number;
     }> = [];
 
@@ -1213,6 +1297,15 @@ function buildHistoryFromSession(
                 : undefined;
         const isError = role === "assistant" && !!msg.errorMessage;
 
+        // Extract usage data from assistant messages
+        const usage = role === "assistant" && msg.usage ? {
+            input: (msg.usage as Record<string, unknown>).input as number ?? 0,
+            output: (msg.usage as Record<string, unknown>).output as number ?? 0,
+            cacheRead: (msg.usage as Record<string, unknown>).cacheRead as number ?? 0,
+            cacheWrite: (msg.usage as Record<string, unknown>).cacheWrite as number ?? 0,
+            totalTokens: (msg.usage as Record<string, unknown>).totalTokens as number ?? 0,
+        } : undefined;
+
         const msgIndex = messages.length;
         messages.push({
             id: entry.id,
@@ -1223,6 +1316,7 @@ function buildHistoryFromSession(
             modelProvider,
             toolCalls: extractedToolCalls.length > 0 ? extractedToolCalls : undefined,
             isError: isError || undefined,
+            usage,
             timestamp: (msg.timestamp as number) ?? 0,
         });
 

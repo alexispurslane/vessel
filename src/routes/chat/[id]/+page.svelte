@@ -21,7 +21,6 @@
         ThinkingGroup,
     } from "$lib/components/chat/index.js";
     import { ScrollArea } from "$lib/components/ui/scroll-area";
-    import { Spinner } from "$lib/components/ui/spinner/index.js";
     import Bot from "@lucide/svelte/icons/bot";
     import { listModels, getSessionTree, setSessionLeaf } from "$lib/api.js";
     import type { ModelInfo, RenderItem, ThinkingGroup as ThinkingGroupType } from "$lib/types.js";
@@ -33,6 +32,16 @@
     import { onMount } from "svelte";
     import { fade } from "svelte/transition";
     import { goto } from "$app/navigation";
+    import { ContextUsageRing } from "$lib/components/ui/context-usage-ring";
+    import ArrowUp from "@lucide/svelte/icons/arrow-up";
+    import ArrowDown from "@lucide/svelte/icons/arrow-down";
+    import {
+        Tooltip,
+        TooltipContent,
+        TooltipProvider,
+        TooltipTrigger,
+    } from "$lib/components/ui/tooltip";
+    import { Skeleton } from "$lib/components/ui/skeleton";
     import ConversationSecurityPanel from "$lib/components/conversation-settings/ConversationSecurityPanel.svelte";
     import AgentInfoPanel from "$lib/components/conversation-settings/AgentInfoPanel.svelte";
 
@@ -89,6 +98,35 @@
     let dagNodes = $state<SessionTreeNodeData[]>([]);
     let dagLeafId = $state<string | null>(null);
     let dagLoading = $state(false);
+
+    // Context window usage fraction (based on currently selected model)
+    let contextUsageFraction = $derived.by(() => {
+        const model = availableModels.find((m) => m.id === selectedModelId);
+        if (!model || model.contextWindow <= 0) return 0;
+        const totalTokens = chat.totalInputTokens + chat.totalOutputTokens;
+        return totalTokens / model.contextWindow;
+    });
+
+    // Format token counts with k/M suffixes
+    function formatTokens(n: number): string {
+        if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
+        if (n >= 1_000) return (n / 1_000).toFixed(1).replace(/\.0$/, "") + "k";
+        return String(n);
+    }
+
+    // Whether we're waiting for the model to start responding
+    // (generating is true but no assistant message has visible content yet)
+    let waitingForResponse = $derived.by(() => {
+        if (!chat.generating) return false;
+        // Check if any assistant message is currently streaming with content
+        const streamingMsg = chat.messages.find((m) => m.streaming);
+        if (!streamingMsg) return true; // no streaming message at all yet
+        // If the streaming message has no content, thinking, or tool calls, we're still waiting
+        if (!streamingMsg.content?.trim() && !streamingMsg.thinking && !streamingMsg.thinkingStreaming && !(streamingMsg.toolCalls && streamingMsg.toolCalls.length > 0)) {
+            return true;
+        }
+        return false;
+    });
 
     /** Whether an assistant message is "intermediate" — thinking/tool calls only, no visible text for the user.
      *  These get grouped into ThinkingGroups in the render layer.
@@ -229,9 +267,15 @@
         }
     });
 
-    // Persist in-progress message to sessionStorage so it survives page reloads
+    // Persist in-progress message to sessionStorage so it survives page reloads.
+    // We skip clearing sessionStorage until after the draft has been restored
+    // (or we've confirmed no draft exists) — otherwise the $effect fires on page
+    // load with inputText="" and deletes the saved draft before connectStream
+    // can restore it.
+    let draftRestored = $state(false);
+
     $effect(() => {
-        if (id) {
+        if (id && draftRestored) {
             const key = draftKey(id);
             if (inputText.trim()) {
                 sessionStorage.setItem(key, inputText);
@@ -244,6 +288,8 @@
     // Connect to SSE stream on mount and when the conversation id changes; disconnect on cleanup
     $effect(() => {
         const currentId = id;
+        // Reset the draft-restored flag — the new conversation's draft hasn't been restored yet
+        draftRestored = false;
         if (currentId) {
             connectStream(currentId).then(() => {
                 // After connecting (which loads history), set model selector to last used model
@@ -257,6 +303,8 @@
                 if (saved) {
                     inputText = saved;
                 }
+                // Now that we've attempted the restore, allow the $effect to manage sessionStorage
+                draftRestored = true;
 
                 // If an initial message was passed (e.g., from the home page), send it now
                 const initialMessage = $page.url.searchParams.get("initialMessage");
@@ -385,35 +433,89 @@
     <!-- Main content -->
     <!-- Top bar: hidden by default, shows on mouse movement, auto-hides after timeout or on send -->
     {#if topBarVisible}
-        <div class="shrink-0 flex items-center justify-end px-4 py-1.5 border-b h-9" transition:fade={{ duration: 150 }}>
+        <div class="shrink-0 flex items-center justify-between px-4 py-1.5 border-b h-9" transition:fade={{ duration: 150 }}>
+            <!-- Left: Context usage + token counts -->
+            <div class="flex items-center gap-3">
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <div class="flex items-center gap-1.5">
+                                <ContextUsageRing fraction={contextUsageFraction} size={22} strokeWidth={2.5} />
+                            </div>
+                        </TooltipTrigger>
+                        <TooltipContent>Context window: {Math.round(contextUsageFraction * 100)}% used</TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <div class="flex items-center gap-1 text-[11px] text-muted-foreground">
+                                <ArrowUp class="size-3" />
+                                <span>{formatTokens(chat.totalInputTokens)}</span>
+                            </div>
+                        </TooltipTrigger>
+                        <TooltipContent>Input tokens: {chat.totalInputTokens.toLocaleString()}</TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <div class="flex items-center gap-1 text-[11px] text-muted-foreground">
+                                <ArrowDown class="size-3" />
+                                <span>{formatTokens(chat.totalOutputTokens)}</span>
+                            </div>
+                        </TooltipTrigger>
+                        <TooltipContent>Output tokens: {chat.totalOutputTokens.toLocaleString()}</TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+            </div>
+            <!-- Right: Action buttons -->
             <div class="flex items-center gap-1">
-                <button
-                    onclick={() => (securityOpen = !securityOpen)}
-                    class="inline-flex items-center gap-1 text-[11px] {securityOpen ? 'text-foreground bg-muted' : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
-                    aria-label="Toggle security panel"
-                    title="Toggle security panel"
-                >
-                    <Shield class="size-3" />
-                    <span>Security</span>
-                </button>
-                <button
-                    onclick={toggleDag}
-                    class="inline-flex items-center gap-1 text-[11px] {dagOpen ? 'text-foreground bg-muted' : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
-                    aria-label={dagOpen ? 'Close history view' : 'Open history view'}
-                    title={dagOpen ? 'Close history view' : 'Open history view'}
-                >
-                    <GitBranch class="size-3" />
-                    <span>History</span>
-                </button>
-                <button
-                    onclick={() => (agentInfoOpen = !agentInfoOpen)}
-                    class="inline-flex items-center gap-1 text-[11px] {agentInfoOpen ? 'text-foreground bg-muted' : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
-                    aria-label="Toggle agent info panel"
-                    title="Toggle agent info panel"
-                >
-                    <FileText class="size-3" />
-                    <span>Agent</span>
-                </button>
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <button
+                                onclick={() => (securityOpen = !securityOpen)}
+                                class="inline-flex items-center gap-1 text-[11px] {securityOpen ? 'text-foreground bg-muted' : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
+                                aria-label="Toggle security panel"
+                            >
+                                <Shield class="size-3" />
+                                <span>Security</span>
+                            </button>
+                        </TooltipTrigger>
+                        <TooltipContent>Security settings</TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <button
+                                onclick={toggleDag}
+                                class="inline-flex items-center gap-1 text-[11px] {dagOpen ? 'text-foreground bg-muted' : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
+                                aria-label={dagOpen ? 'Close history view' : 'Open history view'}
+                            >
+                                <GitBranch class="size-3" />
+                                <span>History</span>
+                            </button>
+                        </TooltipTrigger>
+                        <TooltipContent>Message history</TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <button
+                                onclick={() => (agentInfoOpen = !agentInfoOpen)}
+                                class="inline-flex items-center gap-1 text-[11px] {agentInfoOpen ? 'text-foreground bg-muted' : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
+                                aria-label="Toggle agent info panel"
+                            >
+                                <FileText class="size-3" />
+                                <span>Agent</span>
+                            </button>
+                        </TooltipTrigger>
+                        <TooltipContent>Agent configuration</TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
             </div>
         </div>
     {/if}
@@ -500,6 +602,26 @@
                         </div>
                     {/if}
                 {/each}
+
+                <!-- Skeleton placeholder while waiting for model to start responding -->
+                {#if waitingForResponse}
+                    <div class="flex w-full justify-start">
+                        <div class="flex gap-3 w-[min(75%,65ch)] font-serif">
+                            <ChatAvatar
+                                role="assistant"
+                                isConsecutive={false}
+                                model={chat.lastModel?.modelId}
+                                modelProvider={chat.lastModel?.provider}
+                                {getModelDisplayName}
+                                hasContent={false}
+                            />
+                            <div class="min-w-0 flex-1 flex flex-col gap-2 py-1">
+                                <Skeleton class="h-4 w-3/4" />
+                                <Skeleton class="h-4 w-1/2" />
+                            </div>
+                        </div>
+                    </div>
+                {/if}
             {/if}
         </div>
     </ScrollArea>
@@ -527,11 +649,6 @@
                     <span class="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-pulse"
                     ></span>
                     Connecting...
-                </span>
-            {:else if chat.generating}
-                <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <Spinner class="size-3" />
-                    Generating...
                 </span>
             {/if}
         </div>

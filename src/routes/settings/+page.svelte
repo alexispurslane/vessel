@@ -186,7 +186,7 @@
         editingModelId = null;
         showAddModel = true;
         // Switch to the custom models tab so the user sees the form
-        activeTab = "custom";
+        activeTab = "models";
     }
 
     function isModelAdded(modelId: string): boolean {
