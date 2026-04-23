@@ -58,11 +58,12 @@ export const PUT: RequestHandler = async ({ params, request }) => {
     if ("extraReadPaths" in body) settings.extraReadPaths = body.extraReadPaths;
     if ("extraWritePaths" in body) settings.extraWritePaths = body.extraWritePaths;
     if ("allowNet" in body) settings.allowNet = body.allowNet;
+    if ("allowAllDomains" in body) settings.allowAllDomains = body.allowAllDomains;
     if ("allowedNetDomains" in body) settings.allowedNetDomains = body.allowedNetDomains;
     if ("secrets" in body) settings.secrets = body.secrets;
     if ("allowEnv" in body) settings.allowEnv = body.allowEnv;
     if ("deleteWorkspaceWithConversation" in body) settings.deleteWorkspaceWithConversation = body.deleteWorkspaceWithConversation;
-    if ("disabledTools" in body) settings.disabledTools = body.disabledTools;
+    if ("agentMode" in body) settings.agentMode = body.agentMode;
     if ("customSystemPrompt" in body) settings.customSystemPrompt = body.customSystemPrompt;
     if ("appendSystemPrompt" in body) settings.appendSystemPrompt = body.appendSystemPrompt;
     if ("enabledMcpServers" in body) settings.enabledMcpServers = body.enabledMcpServers;
@@ -79,10 +80,11 @@ export const PUT: RequestHandler = async ({ params, request }) => {
         "extraReadPaths",
         "extraWritePaths",
         "allowNet",
+        "allowAllDomains",
         "allowedNetDomains",
         "secrets",
         "allowEnv",
-        "disabledTools",
+        "agentMode",
         "enabledMcpServers",
     ];
 

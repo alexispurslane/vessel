@@ -14,7 +14,8 @@ import mcpAdapter from "pi-mcp-adapter";
 import { ensureMcpConfigFile, writeConversationMcpConfig, getMcpServersFromDb, MCP_CONFIG_PATH } from "./mcp-config.js";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { createSandboxedCodingTools } from "./sandboxed-tools.js";
-import { createSessionSandbox, getSessionWorkDir, loadConversationSettingsFromDb, saveConversationSettingsToDb } from "./sandbox-factory.js";
+import { createFetchTool } from "./sandboxed-fetch-tool.js";
+import { createSessionSandbox, getSessionWorkDir, loadConversationSettingsFromDb, saveConversationSettingsToDb, isNetworkAllowed, getEffectiveAgentMode } from "./sandbox-factory.js";
 import type { Model as PiModel, Api } from "@mariozechner/pi-ai";
 import { getDb } from "../db/index.js";
 import type { ConversationSettings } from "$lib/types.js";
@@ -385,12 +386,13 @@ function formatEventPayload(event: PiAgentSessionEvent): unknown {
                 toolResults: "toolResults" in event ? event.toolResults : undefined,
             };
         case "tool_execution_start":
-            return { type: event.type, toolName: event.toolName, toolCallId: event.toolCallId };
+            return { type: event.type, toolName: event.toolName, toolCallId: event.toolCallId, args: event.args };
         case "tool_execution_update":
             return {
                 type: event.type,
                 toolName: event.toolName,
                 toolCallId: event.toolCallId,
+                args: event.args,
                 output: extractToolOutput(event.partialResult),
             };
         case "tool_execution_end":
@@ -622,12 +624,54 @@ export async function getOrCreateSession(conversationId: string): Promise<PiAgen
     // registry but NOT automatically activated by _buildRuntime. resolveActiveToolNames()
     // handles discovering all registered tools and deciding which should be active
     // based on sandbox mode, disabled tools, and MCP off state.
+    //
+    // The fetch tool is registered later (below) so it's not in getAllTools() yet.
+    // We append it to allRegisteredToolNames so resolveActiveToolNames() knows about
+    // it for toggle/disabled logic.
+    //
+    // Identify MCP/extension tools by their sourceInfo.source — tools from extensions
+    // (like pi-mcp-adapter) have source "local", while built-in tools have "builtin" and
+    // SDK-injected tools (like our fetch tool) have "sdk".
+    const allAgentTools = agentSession.getAllTools() as Array<{ name: string; sourceInfo: { source: string; scope: string } }>;
+    const mcpToolNames = new Set(
+        allAgentTools
+            .filter((t) => t.sourceInfo.source !== "builtin" && t.sourceInfo.source !== "sdk")
+            .map((t) => t.name)
+    );
     const activeToolDecision = resolveActiveToolNames({
         activeToolNames: agentSession.getActiveToolNames(),
-        allRegisteredToolNames: agentSession.getAllTools().map((t: { name: string }) => t.name),
+        allRegisteredToolNames: [
+            ...allAgentTools.map((t) => t.name),
+            "fetch",
+        ],
         conversationSettings,
         sandbox,
+        mcpToolNames,
+        effectiveAgentMode: getEffectiveAgentMode(conversationSettings),
+        networkAllowed: isNetworkAllowed(conversationSettings),
     });
+
+    // Register Vessel-specific tools (fetch) into the agent session.
+    // These aren't part of pi-coding-agent's built-in set, so we need to inject
+    // them into all three internal maps:
+    //   _toolRegistry      — used by setActiveToolsByName() to resolve tool objects
+    //   _toolDefinitions    — used by getAllTools() / getSessionAgentInfo() to list available tools
+    //   _baseToolDefinitions — used by _refreshToolRegistry() to rebuild maps from scratch
+    // Without all three, the tool would be callable but invisible in the UI/agent-info.
+    const fetchTool = sandbox
+        ? createFetchTool({ sandbox })
+        : createFetchTool();
+    const toolRegistry = (agentSession as any)._toolRegistry as Map<string, AgentTool<any>>;
+    const toolDefinitions = (agentSession as any)._toolDefinitions as Map<string, any>;
+    const baseToolDefinitions = (agentSession as any)._baseToolDefinitions as Map<string, any>;
+    toolRegistry.set(fetchTool.name, fetchTool);
+    // Wrap as a tool definition entry with sourceInfo so getAllTools() / getSessionAgentInfo() sees it.
+    // Using source "sdk" matches how pi-coding-agent tags SDK-registered custom tools.
+    toolDefinitions.set(fetchTool.name, {
+        definition: fetchTool,
+        sourceInfo: { path: `<sdk:${fetchTool.name}>`, source: "sdk", scope: "user", origin: "top-level" },
+    });
+    baseToolDefinitions.set(fetchTool.name, fetchTool);
 
     if (sandbox) {
         // Sandbox mode: replace default tool execution with sandboxed operations
@@ -638,15 +682,14 @@ export async function getOrCreateSession(conversationId: string): Promise<PiAgen
         // is on, we still don't include it for security consistency.
 
         // Patch the tool registry: replace default tools with sandboxed versions.
-        const toolRegistry = (agentSession as any)._toolRegistry as Map<string, AgentTool<any>>;
         for (const tool of sandboxedTools) {
             toolRegistry.set(tool.name, tool);
         }
         // Also remove grep from the registry and definitions since sandboxed
         // tools omit it for security consistency.
         toolRegistry.delete("grep");
-        (agentSession as any)._toolDefinitions.delete("grep");
-        (agentSession as any)._baseToolDefinitions.delete("grep");
+        toolDefinitions.delete("grep");
+        baseToolDefinitions.delete("grep");
 
         agentSession.setActiveToolsByName(activeToolDecision.desiredToolNames);
     } else if (activeToolDecision.needsUpdate) {
@@ -1049,6 +1092,7 @@ export async function getSessionHistory(conversationId: string): Promise<{
             toolName: string;
             status: string;
             output?: string;
+            arguments?: Record<string, unknown>;
         }>;
         isError?: boolean;
         usage?: {
@@ -1179,6 +1223,7 @@ function buildHistoryFromSession(
             toolName: string;
             status: string;
             output?: string;
+            arguments?: Record<string, unknown>;
         }>;
         isError?: boolean;
         usage?: {
@@ -1207,6 +1252,7 @@ function buildHistoryFromSession(
             toolName: string;
             status: string;
             output?: string;
+            arguments?: Record<string, unknown>;
         }>;
         isError?: boolean;
         usage?: {
@@ -1279,6 +1325,7 @@ function buildHistoryFromSession(
             status: string;
             output?: string;
             toolCallId?: string;
+            arguments?: Record<string, unknown>;
         }> = [];
 
         if (Array.isArray(msg.content)) {
@@ -1295,6 +1342,7 @@ function buildHistoryFromSession(
                         toolName: (block.name as string) ?? "unknown",
                         status: "completed",
                         toolCallId: block.id as string,
+                        arguments: block.arguments as Record<string, unknown> | undefined,
                     });
                 }
             }
@@ -1905,6 +1953,12 @@ interface ResolveActiveToolNamesInput {
     conversationSettings: ConversationSettings | null;
     /** The sandbox for this session, or null if sandboxing is disabled. */
     sandbox: unknown;
+    /** Names of MCP/extension tools (from sourceInfo.source !== "builtin" && !== "sdk"). */
+    mcpToolNames: Set<string>;
+    /** Effective agent mode for this conversation ("agent" = all tools, "chat" = no tools). */
+    effectiveAgentMode: "agent" | "chat";
+    /** Whether network access is effectively allowed for this conversation. */
+    networkAllowed: boolean;
 }
 
 /** Output of resolveActiveToolNames(). */
@@ -1918,32 +1972,46 @@ interface ResolveActiveToolNamesResult {
 /**
  * Decide which tools should be active for a conversation session.
  *
- * The pi-coding-agent runtime only activates the built-in tools (read, bash, edit, write)
- * by default. Extension tools like the MCP gateway tool are registered in the tool
- * registry but NOT automatically added to the active set. This function computes the
- * correct active tool list by starting from all registered tools and removing those
- * that shouldn't be available based on conversation settings.
+ * Uses the effective agent mode to determine which tools are available:
+ * - "agent" mode: all non-MCP tools enabled (read, bash, edit, write, glob, grep, fetch)
+ * - "chat" mode: no tools enabled (plain conversation)
  *
- * Tools are removed when:
- * - Explicitly disabled via conversation settings (disabledTools)
- * - MCP is explicitly off (enabledMcpServers === []) — MCP gateway and direct tools are excluded
- * - Sandbox mode is active — grep is excluded since sandboxed tools omit it
+ * Additional rules:
+ * - MCP tools are removed when MCP is explicitly off (enabledMcpServers === [])
+ * - Sandbox mode removes grep since sandboxed tools omit it
+ * - The fetch tool is automatically disabled when network permissions are off
  */
 function resolveActiveToolNames(input: ResolveActiveToolNamesInput): ResolveActiveToolNamesResult {
-    const { activeToolNames, allRegisteredToolNames, conversationSettings, sandbox } = input;
+    const { activeToolNames, allRegisteredToolNames, conversationSettings, sandbox, mcpToolNames, effectiveAgentMode, networkAllowed } = input;
 
     // Identify MCP extension tools so we can disable them when MCP is off.
     const mcpExplicitlyOff = Array.isArray(conversationSettings?.enabledMcpServers) &&
         conversationSettings.enabledMcpServers.length === 0;
-    const mcpToolNames = allRegisteredToolNames.filter(
-        (n) => n === "mcp" || n.includes("_") // MCP direct tools are prefixed like servername_tool
-    );
 
     // Collect all tool names that should be disabled.
-    const disabledTools = new Set([
-        ...conversationSettings?.disabledTools ?? [],
-        ...(mcpExplicitlyOff ? mcpToolNames : []),
-    ]);
+    const disabledTools = new Set<string>();
+
+    // Chat mode: disable all non-MCP built-in and SDK tools.
+    // In chat mode, the agent is used as a plain conversation with no tools.
+    if (effectiveAgentMode === "chat") {
+        for (const name of allRegisteredToolNames) {
+            if (!mcpToolNames.has(name)) {
+                disabledTools.add(name);
+            }
+        }
+    }
+
+    // MCP off: disable MCP tools
+    if (mcpExplicitlyOff) {
+        for (const name of mcpToolNames) {
+            disabledTools.add(name);
+        }
+    }
+
+    // Fetch tool is auto-disabled when network is off
+    if (!networkAllowed) {
+        disabledTools.add("fetch");
+    }
 
     // Build the desired set: start from all registered tools, remove disabled ones
     // (and grep in sandbox mode since sandboxed tools omit it).

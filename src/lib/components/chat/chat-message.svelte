@@ -1,9 +1,6 @@
 <script lang="ts">
     import SvelteMarkdown from "@humanspeak/svelte-markdown";
     import { Spinner } from "$lib/components/ui/spinner/index.js";
-    import Wrench from "@lucide/svelte/icons/wrench";
-    import Check from "@lucide/svelte/icons/check";
-    import X from "@lucide/svelte/icons/x";
     import Brain from "@lucide/svelte/icons/brain";
     import ChevronDown from "@lucide/svelte/icons/chevron-down";
     import ChevronUp from "@lucide/svelte/icons/chevron-up";
@@ -13,7 +10,8 @@
     import Pencil from "@lucide/svelte/icons/pencil";
     import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
     import CodeBlock from "$lib/components/chat/code-block.svelte";
-    import type { ChatMessage as ChatMessageType, ToolCallInfo } from "$lib/types.js";
+    import ToolCall from "$lib/components/chat/tool-call.svelte";
+    import type { ChatMessage as ChatMessageType } from "$lib/types.js";
 
     interface Props {
         /** The chat message data */
@@ -306,30 +304,7 @@
     {#if msg.toolCalls && msg.toolCalls.length > 0}
         <div class="flex flex-col gap-1">
             {#each msg.toolCalls as tool, i (msg.id + "-tool-" + i)}
-                <details class="group rounded-lg border bg-background text-sm">
-                    <summary
-                        class="flex items-center gap-2 px-3 py-1.5 cursor-pointer select-none hover:bg-muted/50 transition-colors rounded-lg text-xs"
-                    >
-                        <Wrench class="size-3 text-muted-foreground shrink-0" />
-                        <span class="font-medium truncate">{tool.toolName}</span>
-                        <span class="ml-auto shrink-0 flex items-center">
-                            {#if tool.status === "running"}
-                                <Spinner class="size-3" />
-                            {:else if tool.status === "completed"}
-                                <Check class="size-3.5 text-green-600 dark:text-green-400" />
-                            {:else if tool.status === "error"}
-                                <X class="size-3.5 text-destructive" />
-                            {/if}
-                        </span>
-                    </summary>
-                    {#if tool.output}
-                        <div
-                            class="border-t px-3 py-2 text-xs text-muted-foreground font-mono whitespace-pre-wrap break-all max-h-48 overflow-auto"
-                        >
-                            {tool.output}
-                        </div>
-                    {/if}
-                </details>
+                <ToolCall toolCall={tool} />
             {/each}
         </div>
     {/if}

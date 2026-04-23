@@ -32,7 +32,7 @@ interface SavedStreamingMessage {
     thinkingStreaming?: boolean;
     model?: string;
     modelProvider?: string;
-    toolCalls?: Array<{ toolName: string; status: string; output?: string; isError?: boolean }>;
+    toolCalls?: Array<{ toolName: string; status: string; output?: string; isError?: boolean; arguments?: Record<string, unknown> }>;
     usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number };
     timestamp: number;
 }
@@ -177,6 +177,7 @@ export async function connectStream(conversationId: string): Promise<void> {
                         toolName: tc.toolName,
                         status: tc.status as "running" | "completed" | "error",
                         output: tc.output,
+                        arguments: tc.arguments,
                     })) ?? [],
                 isError: msg.isError,
                 usage: msg.usage,
@@ -571,6 +572,7 @@ export async function connectStream(conversationId: string): Promise<void> {
             msg.toolCalls.push({
                 toolName: data.toolName ?? "unknown",
                 status: "running",
+                arguments: data.args ?? undefined,
             });
         } catch {
             // ignore parse errors
@@ -909,6 +911,7 @@ export async function reloadMessages(): Promise<void> {
                     toolName: tc.toolName,
                     status: tc.status as "running" | "completed" | "error",
                     output: tc.output,
+                    arguments: tc.arguments,
                 })) ?? [],
             isError: msg.isError,
             usage: msg.usage,

@@ -51,3 +51,33 @@ export type WithoutChild<T> = T extends { child?: any } ? Omit<T, "child"> : T;
 export type WithoutChildren<T> = T extends { children?: any } ? Omit<T, "children"> : T;
 export type WithoutChildrenOrChild<T> = WithoutChildren<WithoutChild<T>>;
 export type WithElementRef<T, U extends HTMLElement = HTMLElement> = T & { ref?: U | null };
+
+/**
+ * Format a tool argument value into a compact display string.
+ * Strips escape characters from strings, replaces newlines with spaces,
+ * and truncates long values with an ellipsis.
+ */
+export function formatArgValue(value: unknown, maxLen = 40): string {
+    if (value === null) return "null";
+    if (value === undefined) return "undefined";
+    if (typeof value === "string") {
+        const cleaned = value
+            .replace(/\\n/g, " ")
+            .replace(/\n/g, " ")
+            .replace(/\\t/g, " ")
+            .replace(/\\"/g, '"')
+            .trim();
+        if (cleaned.length > maxLen) return cleaned.slice(0, maxLen) + "…";
+        return cleaned || '""';
+    }
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+    if (Array.isArray(value)) {
+        const s = JSON.stringify(value);
+        return s.length > maxLen ? s.slice(0, maxLen) + "…" : s;
+    }
+    if (typeof value === "object") {
+        const s = JSON.stringify(value);
+        return s.length > maxLen ? "{…}" : s;
+    }
+    return String(value);
+}

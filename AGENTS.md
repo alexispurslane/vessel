@@ -9,3 +9,4 @@
     - Direct, provider-agnostic model requests (for text or structured data)
     - Usually, used for secondary model usage (for e.g. summarizing things, or generating titles and tags, in the UI)
 3. Prefer putting model inference calls of all sorts (whether direct or agentic) on the backend, and then sending results and/or SSE events to the front end. This way, we don't lose AI inferencing results if the user reloads the page
+4. Always prefer shadcn-provided tooltips over built-in HTML tooltips

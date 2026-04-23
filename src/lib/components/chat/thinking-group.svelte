@@ -1,12 +1,12 @@
 <script lang="ts">
     import SvelteMarkdown from "@humanspeak/svelte-markdown";
     import { Spinner } from "$lib/components/ui/spinner/index.js";
-    import Wrench from "@lucide/svelte/icons/wrench";
-    import Check from "@lucide/svelte/icons/check";
-    import X from "@lucide/svelte/icons/x";
     import Brain from "@lucide/svelte/icons/brain";
     import ChevronDown from "@lucide/svelte/icons/chevron-down";
+    import Trash2 from "@lucide/svelte/icons/trash-2";
+    import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
     import CodeBlock from "$lib/components/chat/code-block.svelte";
+    import ToolCall from "$lib/components/chat/tool-call.svelte";
     import type { ThinkingGroup } from "$lib/types.js";
 
     interface Props {
@@ -16,9 +16,15 @@
         thinkingIsOpen?: boolean;
         /** Callback when the thinking dropdown is toggled */
         onthinkingtoggle?: (open: boolean) => void;
+        /** Callback to delete this group (navigate back to before the first message in the group) */
+        ondelete?: (messageId: string, role: string) => void;
+        /** Callback to regenerate this group (navigate back and re-send) */
+        onregenerate?: (messageId: string, role: string) => void;
+        /** Whether a navigation operation is in progress */
+        navigating?: boolean;
     }
 
-    let { group, thinkingIsOpen, onthinkingtoggle }: Props = $props();
+    let { group, thinkingIsOpen, onthinkingtoggle, ondelete, onregenerate, navigating = false }: Props = $props();
 
     /** Custom renderers for SvelteMarkdown */
     const renderers = {
@@ -26,6 +32,8 @@
     };
 
     let thinkingEl: HTMLDivElement | undefined = $state();
+    let confirmDelete = $state(false);
+    let confirmDeleteTimer: ReturnType<typeof setTimeout> | undefined;
 
     // Auto-scroll thinking block to bottom as streaming tokens arrive
     $effect(() => {
@@ -43,6 +51,32 @@
         onthinkingtoggle?.(el.open);
     }
 
+    function handleDelete() {
+        if (confirmDelete) {
+            // Second click — actually delete
+            confirmDelete = false;
+            if (confirmDeleteTimer) clearTimeout(confirmDeleteTimer);
+            // Delete uses the first message ID in the group — navigating back
+            // to before it removes the entire group from the branch
+            const firstId = group.messageIds[0];
+            if (firstId) ondelete?.(firstId, "assistant");
+        } else {
+            // First click — show confirmation
+            confirmDelete = true;
+            // Auto-cancel confirmation after 3 seconds
+            confirmDeleteTimer = setTimeout(() => {
+                confirmDelete = false;
+            }, 3000);
+        }
+    }
+
+    function handleRegenerate() {
+        // Regenerate uses the first message ID in the group — navigating back
+        // to before it and re-sending the preceding user message
+        const firstId = group.messageIds[0];
+        if (firstId) onregenerate?.(firstId, "assistant");
+    }
+
     /** Count tool calls in the group */
     let toolCallCount = $derived(
         group.steps.filter((s) => s.type === "toolCall").length
@@ -52,9 +86,14 @@
     let thinkingStreaming = $derived(
         group.steps.some((s) => s.type === "thinking" && s.streaming)
     );
+
+    /** Whether to show the action bar */
+    let showActions = $derived(
+        !group.streaming && !navigating && (onregenerate || ondelete)
+    );
 </script>
 
-<div class="flex flex-col gap-1.5 w-full font-sans">
+<div class="flex flex-col gap-1.5 w-full font-sans group/tg">
     <details
         class="group rounded-lg border bg-background text-sm"
         open={thinkingIsOpen ?? group.streaming}
@@ -96,33 +135,45 @@
                         />
                     </div>
                 {:else if step.type === "toolCall" && step.toolCall}
-                    {@const tc = step.toolCall}
-                    <details class="group/tc rounded border bg-muted/30 text-xs my-1">
-                        <summary
-                            class="flex items-center gap-2 px-2 py-1 cursor-pointer select-none hover:bg-muted/50 transition-colors rounded text-xs"
-                        >
-                            <Wrench class="size-3 text-muted-foreground shrink-0" />
-                            <span class="font-medium truncate">{tc.toolName}</span>
-                            <span class="ml-auto shrink-0 flex items-center">
-                                {#if tc.status === "running"}
-                                    <Spinner class="size-3" />
-                                {:else if tc.status === "completed"}
-                                    <Check class="size-3.5 text-green-600 dark:text-green-400" />
-                                {:else if tc.status === "error"}
-                                    <X class="size-3.5 text-destructive" />
-                                {/if}
-                            </span>
-                        </summary>
-                        {#if tc.output}
-                            <div
-                                class="border-t px-2 py-1 text-xs text-muted-foreground font-mono whitespace-pre-wrap break-all max-h-48 overflow-auto"
-                            >
-                                {tc.output}
-                            </div>
-                        {/if}
-                    </details>
+                    <ToolCall toolCall={step.toolCall} compact={true} />
                 {/if}
             {/each}
         </div>
     </details>
+
+    <!-- Action bar at bottom, visible on hover -->
+    {#if showActions}
+        <div class="flex justify-end gap-1 opacity-0 group-hover/tg:opacity-100 transition-opacity">
+            {#if onregenerate}
+                <button
+                    onclick={() => handleRegenerate()}
+                    class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
+                    aria-label="Regenerate response"
+                    title="Regenerate response"
+                >
+                    <RotateCcw class="size-3" />
+                </button>
+            {/if}
+            {#if ondelete}
+                <button
+                    onclick={() => handleDelete()}
+                    class="inline-flex items-center gap-1 text-[11px] transition-colors cursor-pointer px-1.5 py-0.5 rounded {confirmDelete ? 'text-destructive bg-destructive/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}"
+                    aria-label={confirmDelete ? 'Confirm delete' : 'Delete message'}
+                    title={confirmDelete ? 'Click again to confirm deletion' : 'Delete message'}
+                >
+                    <Trash2 class="size-3" />
+                    {#if confirmDelete}
+                        <span class="text-[10px] font-medium">Confirm?</span>
+                    {/if}
+                </button>
+            {/if}
+        </div>
+    {:else if navigating}
+        <div class="flex justify-end gap-1 mt-0">
+            <span class="inline-flex items-center gap-1 text-[11px] text-muted-foreground px-1.5 py-0.5">
+                <Spinner class="size-3" />
+                Updating...
+            </span>
+        </div>
+    {/if}
 </div>

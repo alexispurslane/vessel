@@ -423,6 +423,8 @@
     let sandboxEnabled = $state(true);
     let sandboxSnapshotEnabled = $state(true);
     let sandboxAllowNet = $state(false);
+    let sandboxAllowAllDomains = $state(false);
+    let defaultAgentMode = $state<"agent" | "chat">("agent");
     let sandboxSettingsLoading = $state(false);
     let sandboxSettingsSaved = $state(false);
     let sandboxSettingsError = $state<string | null>(null);
@@ -471,6 +473,8 @@
         try {
             sandboxEnabled = appSettings["sandbox.enabled"] !== "false";
             sandboxAllowNet = appSettings["sandbox.allowNet"] === "true";
+            sandboxAllowAllDomains = appSettings["sandbox.allowAllDomains"] === "true";
+            defaultAgentMode = (appSettings["sandbox.defaultAgentMode"] as "agent" | "chat") || "agent";
             loadPillListsFromSettings();
             loadSecretsFromSettings();
             sandboxSnapshotEnabled = appSettings["sandbox.snapshotEnabled"] !== "false";
@@ -500,6 +504,8 @@
             await updateSettings({
                 "sandbox.enabled": sandboxEnabled ? "true" : "false",
                 "sandbox.allowNet": sandboxAllowNet ? "true" : "false",
+                "sandbox.allowAllDomains": sandboxAllowAllDomains ? "true" : "false",
+                "sandbox.defaultAgentMode": defaultAgentMode,
                 "sandbox.secrets": JSON.stringify(secretsObj),
                 "sandbox.snapshotEnabled": sandboxSnapshotEnabled ? "true" : "false",
                 ...pillLists,
@@ -1308,6 +1314,32 @@
                                 <Switch bind:checked={sandboxEnabled} />
                             </div>
 
+                            <!-- Default Agent Mode -->
+                            <div class="rounded-lg border p-4">
+                                <div class="space-y-3">
+                                    <div>
+                                        <Label class="text-base font-medium">Default Mode</Label>
+                                        <p class="text-sm text-muted-foreground mt-1">
+                                            Agent mode enables all tools by default. Chat mode disables tools for plain conversation. Individual conversations can override this.
+                                        </p>
+                                    </div>
+                                    <div class="flex gap-2">
+                                        <button
+                                            class="px-3 py-1.5 text-sm rounded-md border transition-colors {defaultAgentMode === 'agent' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+                                            onclick={() => (defaultAgentMode = 'agent')}
+                                        >
+                                            Agent
+                                        </button>
+                                        <button
+                                            class="px-3 py-1.5 text-sm rounded-md border transition-colors {defaultAgentMode === 'chat' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+                                            onclick={() => (defaultAgentMode = 'chat')}
+                                        >
+                                            Chat
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
                             {#if sandboxEnabled}
                                 <!-- Extra Read Paths -->
                                 <div class="rounded-lg border p-4 space-y-3">
@@ -1362,24 +1394,38 @@
                                     {#if sandboxAllowNet}
                                         <Separator />
 
-                                        <div class="space-y-3">
-                                            <div>
-                                                <Label class="text-sm font-medium">Allowed Domains</Label>
-                                                <p class="text-xs text-muted-foreground mt-0.5"
-                                                    >Leave empty to allow all domains. Otherwise, only these
-                                                    domains will be accessible.</p
+                                        <div class="flex items-center justify-between">
+                                            <div class="space-y-0.5">
+                                                <Label class="text-sm font-medium">Allow All Domains</Label>
+                                                <p class="text-xs text-muted-foreground"
+                                                    >When enabled, tools can access any domain. When disabled, only
+                                                    explicitly allowed domains are accessible.</p
                                                 >
                                             </div>
-
-                                            <PillList
-                                                items={allowedDomains}
-                                                labelKey="domain"
-                                                onChange={(items) => (allowedDomains = items)}
-                                                addPlaceholder="example.com"
-                                                addButtonLabel="Add Domain"
-                                                inputWidth="w-36"
-                                            />
+                                            <Switch bind:checked={sandboxAllowAllDomains} />
                                         </div>
+
+                                        {#if !sandboxAllowAllDomains}
+                                            <Separator />
+
+                                            <div class="space-y-3">
+                                                <div>
+                                                    <Label class="text-sm font-medium">Allowed Domains</Label>
+                                                    <p class="text-xs text-muted-foreground mt-0.5"
+                                                        >Only these domains will be accessible by sandboxed tools.</p
+                                                    >
+                                                </div>
+
+                                                <PillList
+                                                    items={allowedDomains}
+                                                    labelKey="domain"
+                                                    onChange={(items) => (allowedDomains = items)}
+                                                    addPlaceholder="example.com"
+                                                    addButtonLabel="Add Domain"
+                                                    inputWidth="w-36"
+                                                />
+                                            </div>
+                                        {/if}
 
                                         <Separator />
 

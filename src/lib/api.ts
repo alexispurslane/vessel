@@ -300,6 +300,7 @@ export interface MessageHistoryItem {
         toolName: string;
         status: string;
         output?: string;
+        arguments?: Record<string, unknown>;
     }>;
     isError?: boolean;
     usage?: {

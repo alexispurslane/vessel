@@ -63,7 +63,7 @@
     });
 </script>
 
-<div class="relative group/code rounded-lg overflow-hidden border bg-background my-3">
+<div class="relative group/code rounded-lg overflow-hidden border bg-background my-3 max-w-[60ch]">
     {#if lang}
         <div
             class="flex items-center justify-between px-4 py-1.5 text-[11px] text-muted-foreground bg-muted/50 border-b"

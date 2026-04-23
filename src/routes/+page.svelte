@@ -7,6 +7,16 @@
     import { Button } from "$lib/components/ui/button/index.js";
     import { Spinner } from "$lib/components/ui/spinner/index.js";
     import MessageSquare from "@lucide/svelte/icons/message-square";
+    import Box from "@lucide/svelte/icons/box";
+    import Globe from "@lucide/svelte/icons/globe";
+    import Puzzle from "@lucide/svelte/icons/puzzle";
+    import Wrench from "@lucide/svelte/icons/wrench";
+    import {
+        Tooltip,
+        TooltipContent,
+        TooltipProvider,
+        TooltipTrigger,
+    } from "$lib/components/ui/tooltip/index.js";
 
     import { listModels } from "$lib/api.js";
     import type { ModelInfo } from "$lib/types.js";
@@ -16,6 +26,12 @@
     const settingsStore = getSettingsStore();
     let inputValue = $state("");
     let isCreating = $state(false);
+
+    // Sandbox quick-toggle states (defaults match global settings)
+    let sandboxOn = $state(true);
+    let netAllDomainsOn = $state(false);
+    let mcpServersOn = $state(true);
+    let agentMode: "agent" | "chat" = $state("agent");
     let availableModels = $state<ModelInfo[]>([]);
     let selectedModelId = $state(""); // Just the model ID
 
@@ -62,6 +78,11 @@
             if (selectedModelId) {
                 url += `&initialModel=${encodeURIComponent(selectedModelId)}`;
             }
+            // Sandbox quick-toggle query params (always send state so conversation gets explicit settings)
+            url += `&sandboxOn=${sandboxOn}`;
+            url += `&netAllDomainsOn=${netAllDomainsOn}`;
+            url += `&mcpServersOn=${mcpServersOn}`;
+            url += `&agentMode=${agentMode}`;
             goto(url);
         } else {
             isCreating = false;
@@ -99,6 +120,73 @@
                 defaultModelId={settingsStore.defaultModel}
                 onsend={handleStartChat}
             />
+
+            <!-- Sandbox quick-toggle buttons -->
+            <div class="flex items-center gap-1 mt-2">
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <button
+                                type="button"
+                                class="inline-flex items-center justify-center size-7 rounded-md transition-colors {sandboxOn ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+                                onclick={() => (sandboxOn = !sandboxOn)}
+                                aria-label="Toggle sandbox"
+                            >
+                                <Box class="size-4" />
+                            </button>
+                        </TooltipTrigger>
+                        <TooltipContent>Sandbox</TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <button
+                                type="button"
+                                class="inline-flex items-center justify-center size-7 rounded-md transition-colors {netAllDomainsOn ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+                                onclick={() => (netAllDomainsOn = !netAllDomainsOn)}
+                                aria-label="Toggle network & all domains"
+                            >
+                                <Globe class="size-4" />
+                            </button>
+                        </TooltipTrigger>
+                        <TooltipContent>Network &amp; all domains</TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <button
+                                type="button"
+                                class="inline-flex items-center justify-center size-7 rounded-md transition-colors {mcpServersOn ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+                                onclick={() => (mcpServersOn = !mcpServersOn)}
+                                aria-label="Toggle MCP servers"
+                            >
+                                <Puzzle class="size-4" />
+                            </button>
+                        </TooltipTrigger>
+                        <TooltipContent>MCP servers</TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <button
+                                type="button"
+                                class="inline-flex items-center justify-center size-7 rounded-md transition-colors {agentMode === 'agent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+                                onclick={() => (agentMode = agentMode === 'agent' ? 'chat' : 'agent')}
+                                aria-label="Toggle agent/chat mode"
+                            >
+                                <Wrench class="size-4" />
+                            </button>
+                        </TooltipTrigger>
+                        <TooltipContent>{agentMode === 'agent' ? 'Agent mode (tools on)' : 'Chat mode (tools off)'}</TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+            </div>
         </div>
 
         <!-- Recent Chats -->

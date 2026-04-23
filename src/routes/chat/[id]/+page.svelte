@@ -22,8 +22,8 @@
     } from "$lib/components/chat/index.js";
     import { ScrollArea } from "$lib/components/ui/scroll-area";
     import Bot from "@lucide/svelte/icons/bot";
-    import { listModels, getSessionTree, setSessionLeaf } from "$lib/api.js";
-    import type { ModelInfo, RenderItem, ThinkingGroup as ThinkingGroupType } from "$lib/types.js";
+    import { listModels, getSessionTree, setSessionLeaf, updateConversationSettings } from "$lib/api.js";
+    import type { ConversationSettings, ModelInfo, RenderItem, ThinkingGroup as ThinkingGroupType } from "$lib/types.js";
     import type { SessionTreeNodeData } from "$lib/api.js";
     import { MessageDag } from "$lib/components/chat/index.js";
     import GitBranch from "@lucide/svelte/icons/git-branch";
@@ -291,7 +291,7 @@
         // Reset the draft-restored flag — the new conversation's draft hasn't been restored yet
         draftRestored = false;
         if (currentId) {
-            connectStream(currentId).then(() => {
+            connectStream(currentId).then(async () => {
                 // After connecting (which loads history), set model selector to last used model
                 if (chat.lastModel) {
                     selectedModelId = chat.lastModel.modelId;
@@ -315,6 +315,41 @@
                     if (modelId) {
                         selectedModelId = modelId;
                     }
+
+                    // Apply any sandbox quick-toggle settings from the home page before sending.
+                    // Each param is always present (true or false) matching the toggle state.
+                    // We set conversation-level overrides so the session picks them up.
+                    const sandboxSettings: ConversationSettings = {};
+                    const sandboxOnParam = $page.url.searchParams.get("sandboxOn");
+                    const netAllDomainsOnParam = $page.url.searchParams.get("netAllDomainsOn");
+                    const mcpServersOnParam = $page.url.searchParams.get("mcpServersOn");
+                    const agentModeParam = $page.url.searchParams.get("agentMode");
+
+                    if (sandboxOnParam !== null) sandboxSettings.sandboxEnabled = sandboxOnParam === "true";
+                    if (netAllDomainsOnParam === "true") {
+                        sandboxSettings.allowNet = true;
+                        sandboxSettings.allowAllDomains = true;
+                    } else if (netAllDomainsOnParam === "false") {
+                        sandboxSettings.allowNet = false;
+                        sandboxSettings.allowAllDomains = false;
+                    }
+                    // null = use per-server defaultEnabled (effectively "on" for servers not explicitly disabled)
+                    // []  = explicitly no MCP servers
+                    if (mcpServersOnParam === "true") sandboxSettings.enabledMcpServers = null;
+                    else if (mcpServersOnParam === "false") sandboxSettings.enabledMcpServers = [];
+                    // Agent mode: "agent" = all tools, "chat" = no tools
+                    if (agentModeParam === "agent") sandboxSettings.agentMode = "agent";
+                    else if (agentModeParam === "chat") sandboxSettings.agentMode = "chat";
+
+                    // Apply sandbox settings if any were specified
+                    if (Object.keys(sandboxSettings).length > 0) {
+                        try {
+                            await updateConversationSettings(currentId, sandboxSettings);
+                        } catch {
+                            // Best-effort; don't block sending the message
+                        }
+                    }
+
                     send(initialMessage, modelId);
                     // Clear the draft and the URL params to avoid re-sending on refresh/reconnect
                     sessionStorage.removeItem(draftKey(currentId));
@@ -423,7 +458,17 @@
             loadDagData();
         }
     });
+
+    /** ESC pressed anywhere on the page cancels in-progress AI inference */
+    function handleGlobalKeydown(e: KeyboardEvent) {
+        if (e.key === "Escape" && chat.generating) {
+            e.preventDefault();
+            abort();
+        }
+    }
 </script>
+
+<svelte:window onkeydown={handleGlobalKeydown} />
 
 <svelte:head>
     <title>Vessel - {conversationTitle}</title>
@@ -560,6 +605,9 @@
                                         group={item}
                                         thinkingIsOpen={thinkingOpen[item.id]}
                                         onthinkingtoggle={(open) => (thinkingOpen[item.id] = open)}
+                                        ondelete={handleDeleteMessage}
+                                        onregenerate={handleEditMessage}
+                                        navigating={chat.navigating}
                                     />
                                 </div>
                             </div>

@@ -27,7 +27,9 @@ export interface ConversationSettings {
     extraWritePaths?: string[] | null;
     /** Whether network access is allowed (null = use global default) */
     allowNet?: boolean | null;
-    /** Allowed network domains when allowNet is truthy (null = use global default) */
+    /** Whether all domains are allowed when network is on (null = use global default, true = all domains, false = specific domains only) */
+    allowAllDomains?: boolean | null;
+    /** Allowed network domains when allowNet is truthy and allowAllDomains is false (null = use global default) */
     allowedNetDomains?: string[] | null;
     /** Secrets to inject into the sandbox (null = use global default) */
     secrets?: Record<string, { value: string; hosts: string[] }> | null;
@@ -35,8 +37,8 @@ export interface ConversationSettings {
     allowEnv?: string[] | null;
     /** Whether to delete the workspace when the conversation is trashed */
     deleteWorkspaceWithConversation?: boolean;
-    /** Built-in agent tools to disable for this conversation (null = none disabled, use all default tools) */
-    disabledTools?: string[] | null;
+    /** Conversation mode: "agent" = all tools enabled, "chat" = no tools (plain chat). null = inherit global default. */
+    agentMode?: "agent" | "chat" | null;
     /** Custom system prompt that replaces the default (null = use default). Use with caution — overrides tool descriptions and guidelines. */
     customSystemPrompt?: string | null;
     /** List of instruction strings appended to the default system prompt (null = nothing appended). Each item is a separate instruction. */
@@ -51,11 +53,12 @@ export const DEFAULT_CONVERSATION_SETTINGS: ConversationSettings = {
     extraReadPaths: null,
     extraWritePaths: null,
     allowNet: null,
+    allowAllDomains: null,
     allowedNetDomains: null,
     secrets: null,
     allowEnv: null,
     deleteWorkspaceWithConversation: true,
-    disabledTools: null,
+    agentMode: null,
     customSystemPrompt: null,
     appendSystemPrompt: null,
     enabledMcpServers: null,
@@ -190,6 +193,8 @@ export interface ToolCallInfo {
     status: "running" | "completed" | "error";
     output?: string;
     isError?: boolean;
+    /** The arguments the tool was called with, as parsed JSON */
+    arguments?: Record<string, unknown>;
 }
 
 /** A single step within a thinking group — either a thinking text chunk or a tool call */

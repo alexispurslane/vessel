@@ -11,6 +11,17 @@
  * So AI provider domains and API keys are irrelevant here — they never traverse
  * the sandbox boundary.
  *
+ * Sandbox dependencies:
+ *
+ * The sandbox does NOT get read access to the project's own source code or
+ * node_modules. Instead, a dedicated `data/deps` directory contains a minimal
+ * node_modules with only the packages that sandboxed tools need (e.g. happy-dom
+ * for the fetch tool). This keeps the sandbox's attack surface small — the
+ * agent can't read Vessel's source code or its full dependency tree.
+ *
+ * `ensureSandboxDeps()` is called at sandbox creation time to set up this
+ * directory if it doesn't exist yet (or if the deps are out of date).
+ *
  * Settings are stored in the DB `settings` table under keys prefixed with `sandbox.`
  * and are loaded when creating a new sandbox. See the "Sandbox" tab in Settings
  * for the UI to configure these.
@@ -18,7 +29,8 @@
 
 import { Sandbox, type SecretConfig } from "zerobox";
 import { resolve } from "path";
-import { mkdirSync } from "fs";
+import { mkdirSync, existsSync, readFileSync, writeFileSync } from "fs";
+import { execSync } from "child_process";
 import { getDb } from "../db/index.js";
 import type { ConversationSettings } from "$lib/types.js";
 
@@ -26,6 +38,38 @@ import type { ConversationSettings } from "$lib/types.js";
 
 const DATA_DIR = resolve(process.cwd(), "data");
 const SESSIONS_DIR = resolve(DATA_DIR, "sessions");
+
+/**
+ * Dedicated dependency directory for sandboxed tool execution.
+ *
+ * Contains a minimal node_modules with packages that sandboxed tools need
+ * (e.g. happy-dom). This is the ONLY filesystem path (beyond the session
+ * workspace) that sandboxes can read from — they do NOT get access to the
+ * project's own source code or its full node_modules.
+ */
+export const SANDBOX_DEPS_DIR = resolve(DATA_DIR, "deps");
+
+/**
+ * Path to the lockfile that tracks which dependencies are installed in
+ * SANDBOX_DEPS_DIR. Used by ensureSandboxDeps() to detect when deps
+ * are out of date and need re-installing.
+ */
+const SANDBOX_DEPS_LOCKFILE = resolve(SANDBOX_DEPS_DIR, ".installed-deps.json");
+
+/**
+ * Packages that sandboxed tools need access to.
+ *
+ * When a sandboxed tool runs `require("happy-dom")` or similar, it resolves
+ * from SANDBOX_DEPS_DIR/node_modules/.
+ *
+ * Add new entries here when sandboxed tools need additional npm packages.
+ * After changing this list, existing sandboxes will pick up the new deps
+ * on the next `ensureSandboxDeps()` call (triggered at sandbox creation).
+ */
+const SANDBOX_DEPS_PACKAGES: Record<string, string> = {
+    "happy-dom": "^20.9.0",
+    "defuddle": "^0.18.1",
+};
 
 // --- DB settings keys ---
 
@@ -39,7 +83,9 @@ export const SANDBOX_SETTINGS_KEYS = {
     EXTRA_WRITE_PATHS: "sandbox.extraWritePaths",
     /** Whether network access is allowed ("true"/"false") */
     ALLOW_NET: "sandbox.allowNet",
-    /** JSON array of allowed network domains (used when allowNet is true) */
+    /** Whether all domains are allowed when network is on ("true"/"false") */
+    ALLOW_ALL_DOMAINS: "sandbox.allowAllDomains",
+    /** JSON array of allowed network domains (used when allowNet is true and allowAllDomains is false) */
     ALLOWED_NET_DOMAINS: "sandbox.allowedNetDomains",
     /** JSON object of secrets: { ENV_VAR_NAME: { value: string, hosts: string[] } } */
     SECRETS: "sandbox.secrets",
@@ -54,16 +100,93 @@ export const SANDBOX_SETTINGS_KEYS = {
 export interface SandboxPolicy {
     /** Paths the agent can write to (in addition to its session workspace) */
     extraWritePaths?: string[];
-    /** Paths the agent can read from (in addition to project cwd and session workspace) */
+    /** Paths the agent can read from (in addition to deps dir and session workspace) */
     extraReadPaths?: string[];
     /** Whether to allow network access for tool execution */
     allowNet?: boolean | string[];
+    /** Whether to allow all domains when network is on (false = use specific domains from allowNet) */
+    allowAllDomains?: boolean;
     /** Whether to snapshot filesystem changes for audit/undo */
     snapshot: boolean;
     /** Secrets to inject (env var name → { value, hosts }) */
     secrets?: Record<string, SecretConfig>;
     /** Environment variable names to allow in the sandbox */
     allowEnv?: string[];
+}
+
+// --- Sandbox dependency setup ---
+
+/**
+ * Ensure that the sandbox dependency directory exists and is up to date.
+ *
+ * Creates `data/deps/node_modules/` with the packages listed in
+ * SANDBOX_DEPS_PACKAGES. If the directory already exists and the
+ * installed versions match the lockfile, this is a no-op.
+ *
+ * Called at sandbox creation time so that deps are guaranteed to be
+ * available before any sandboxed tool tries to require() them.
+ */
+export function ensureSandboxDeps(): void {
+    const nodeModulesDir = resolve(SANDBOX_DEPS_DIR, "node_modules");
+
+    // Check if we need to install/update deps
+    const needsInstall = !existsSync(nodeModulesDir) || !existsSync(SANDBOX_DEPS_LOCKFILE);
+
+    if (!needsInstall) {
+        // Compare installed deps against the current spec
+        try {
+            const installed = JSON.parse(readFileSync(SANDBOX_DEPS_LOCKFILE, "utf-8")) as Record<string, string>;
+            const specKeys = Object.keys(SANDBOX_DEPS_PACKAGES).sort().join(",");
+            const installedKeys = Object.keys(installed).sort().join(",");
+            if (specKeys !== installedKeys) {
+                // Deps list has changed — reinstall
+                installSandboxDeps();
+                return;
+            }
+        } catch {
+            // Lockfile is corrupted — reinstall
+            installSandboxDeps();
+            return;
+        }
+        // Deps are up to date
+        return;
+    }
+
+    installSandboxDeps();
+}
+
+/**
+ * Run npm install for sandbox dependencies and write the lockfile.
+ */
+function installSandboxDeps(): void {
+    // Ensure the directory exists
+    mkdirSync(SANDBOX_DEPS_DIR, { recursive: true });
+
+    // Write a minimal package.json for npm install
+    const packageJson = {
+        name: "vessel-sandbox-deps",
+        private: true,
+        description: "Dependencies for Vessel's sandboxed tool execution. Managed by ensureSandboxDeps() — do not edit.",
+        dependencies: { ...SANDBOX_DEPS_PACKAGES },
+    };
+    writeFileSync(
+        resolve(SANDBOX_DEPS_DIR, "package.json"),
+        JSON.stringify(packageJson, null, 2)
+    );
+
+    // Install deps
+    execSync("npm install --omit=dev --no-audit --no-fund", {
+        cwd: SANDBOX_DEPS_DIR,
+        stdio: "pipe",
+    });
+
+    // Write the lockfile so we can detect stale installs
+    writeFileSync(
+        SANDBOX_DEPS_LOCKFILE,
+        JSON.stringify(SANDBOX_DEPS_PACKAGES)
+    );
+
+    console.log(`[sandbox] Installed deps to ${SANDBOX_DEPS_DIR}`);
 }
 
 // --- DB helpers ---
@@ -116,6 +239,7 @@ export function loadSandboxPolicyFromDb(conversationSettings?: ConversationSetti
         []
     );
     const globalAllowNetRaw = getSetting(SANDBOX_SETTINGS_KEYS.ALLOW_NET);
+    const globalAllowAllDomains = getSetting(SANDBOX_SETTINGS_KEYS.ALLOW_ALL_DOMAINS) === "true";
     const globalAllowedNetDomains = getJsonSetting<string[]>(
         SANDBOX_SETTINGS_KEYS.ALLOWED_NET_DOMAINS,
         []
@@ -136,6 +260,9 @@ export function loadSandboxPolicyFromDb(conversationSettings?: ConversationSetti
     const allowEnv = conversationSettings?.allowEnv ?? globalAllowEnv;
     const secrets = conversationSettings?.secrets ?? globalSecrets;
 
+    // Determine allowAllDomains: conversation override takes precedence
+    const allowAllDomains = conversationSettings?.allowAllDomains ?? globalAllowAllDomains;
+
     // Determine allowNet: conversation override takes precedence
     let allowNet: boolean | string[];
     if (conversationSettings?.allowNet !== null && conversationSettings?.allowNet !== undefined) {
@@ -143,26 +270,35 @@ export function loadSandboxPolicyFromDb(conversationSettings?: ConversationSetti
         if (conversationSettings.allowNet === false) {
             allowNet = false;
         } else {
-            // allowNet is true-ish — use conversation domains if set, else global domains, else true
-            const domains = conversationSettings.allowedNetDomains ?? globalAllowedNetDomains;
-            allowNet = domains.length > 0 ? domains : true;
+            // allowNet is true-ish
+            if (allowAllDomains) {
+                // All domains allowed
+                allowNet = true;
+            } else {
+                // Use specific domains: conversation domains if set, else global domains
+                const domains = conversationSettings.allowedNetDomains ?? globalAllowedNetDomains;
+                allowNet = domains.length > 0 ? domains : true;
+            }
         }
     } else {
         // Use global allowNet
         if (globalAllowNetRaw === "true") {
-            allowNet = globalAllowedNetDomains.length > 0 ? globalAllowedNetDomains : true;
+            if (allowAllDomains) {
+                // All domains allowed
+                allowNet = true;
+            } else {
+                allowNet = globalAllowedNetDomains.length > 0 ? globalAllowedNetDomains : true;
+            }
         } else {
             allowNet = false;
         }
     }
 
-    // Determine allowedNetDomains for secrets host matching
-    const allowedNetDomains = conversationSettings?.allowedNetDomains ?? globalAllowedNetDomains;
-
     return {
         extraReadPaths,
         extraWritePaths,
         allowNet,
+        allowAllDomains,
         snapshot: snapshotEnabled,
         secrets: Object.keys(secrets).length > 0 ? secrets : undefined,
         allowEnv,
@@ -176,9 +312,12 @@ export function loadSandboxPolicyFromDb(conversationSettings?: ConversationSetti
  *
  * The sandbox isolates the agent's tool execution so that:
  * - Writes are confined to the session workspace
- * - Reads are allowed from the project cwd and session workspace
+ * - Reads are allowed from the deps directory (happy-dom, etc.) and session workspace
  * - Network is denied by default (AI inference runs outside the sandbox)
  * - Filesystem changes are snapshotted for audit
+ *
+ * The sandbox does NOT get read access to the project's source code or its
+ * full node_modules — only the curated deps in data/deps/node_modules.
  *
  * Returns null if sandboxing is disabled in settings.
  */
@@ -191,27 +330,31 @@ export function createSessionSandbox(
     // If policy is null, sandboxing is disabled
     if (policy === null) return null;
 
+    // Ensure sandbox deps are installed before creating the sandbox
+    ensureSandboxDeps();
+
     const sessionWorkDir = resolve(SESSIONS_DIR, conversationId, "workspace");
     mkdirSync(sessionWorkDir, { recursive: true });
 
-    const projectCwd = process.cwd();
-
     const sandbox = Sandbox.create({
         cwd: sessionWorkDir,
-        // Allow reads from the project and session workspace
-        allowRead: [projectCwd, sessionWorkDir, ...(policy.extraReadPaths ?? [])],
+        // Allow reads from the sandbox deps directory and session workspace.
+        // NOT from process.cwd() — sandboxes should not read Vessel's source.
+        allowRead: [SANDBOX_DEPS_DIR, sessionWorkDir, ...(policy.extraReadPaths ?? [])],
         // Allow writes only to the session workspace (plus any extra paths)
         allowWrite: [sessionWorkDir, ...(policy.extraWritePaths ?? [])],
-        // Block writes to .git to prevent accidental repo corruption
-        denyWrite: [resolve(projectCwd, ".git")],
         // Network: configured by policy (false, true, or specific domains)
         allowNet: policy.allowNet ?? false,
         // Snapshot filesystem changes for audit/undo
         snapshot: policy.snapshot,
         snapshotPaths: [sessionWorkDir],
         snapshotExclude: ["node_modules", ".git"],
-        // Environment: configured by policy
+        // Environment: configured by policy, plus NODE_PATH so require() resolves
+        // from the sandbox deps directory inside sandboxed node processes
         allowEnv: policy.allowEnv ?? ["PATH", "HOME", "USER", "SHELL", "TERM", "LANG", "NODE_ENV"],
+        env: {
+            NODE_PATH: resolve(SANDBOX_DEPS_DIR, "node_modules"),
+        },
         // Secrets: optional credential injection
         secrets: policy.secrets,
     });
@@ -242,6 +385,32 @@ export function loadConversationSettingsFromDb(conversationId: string): Conversa
     } catch {
         return null;
     }
+}
+
+/**
+ * Determine whether network access is effectively allowed for a conversation.
+ *
+ * This checks the global and per-conversation settings to determine if
+ * network access is enabled, regardless of sandbox state. Used by
+ * resolveActiveToolNames() to auto-disable the fetch tool when network
+ * is off.
+ */
+export function isNetworkAllowed(conversationSettings?: ConversationSettings | null): boolean {
+    const globalAllowNetRaw = getSetting(SANDBOX_SETTINGS_KEYS.ALLOW_NET);
+    const effectiveAllowNet = conversationSettings?.allowNet ?? (globalAllowNetRaw === "true");
+    return effectiveAllowNet;
+}
+
+/**
+ * Determine the effective agent mode for a conversation.
+ *
+ * Returns "agent" (all tools enabled) or "chat" (no tools).
+ * Per-conversation agentMode overrides the global default. A null
+ * conversation agentMode means "inherit global".
+ */
+export function getEffectiveAgentMode(conversationSettings?: ConversationSettings | null): "agent" | "chat" {
+    const globalMode = getSetting("sandbox.defaultAgentMode") || "agent";
+    return conversationSettings?.agentMode ?? (globalMode as "agent" | "chat") ?? "agent";
 }
 
 /**

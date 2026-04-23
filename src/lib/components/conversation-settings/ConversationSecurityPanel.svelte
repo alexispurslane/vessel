@@ -40,6 +40,8 @@
     let sandboxEnabledState: boolean | null = $state(null);
     // Tri-state for allowNet: null = inherit global, true = on, false = off
     let allowNetState: boolean | null = $state(null);
+    // Tri-state for allowAllDomains: null = inherit global, true = all domains, false = specific domains only
+    let allowAllDomainsState: boolean | null = $state(null);
     // deleteWorkspaceWithConversation: boolean
     let deleteWorkspaceWithConversation = $state(true);
 
@@ -59,9 +61,8 @@
     let useCustomSecrets = $state(false);
     let secrets = $state<Array<{ key: string; value: string; hosts: string; editing?: boolean }>>([]);
 
-    // Tool toggles — track which built-in tools are disabled
-    // All tools are enabled by default; stored as a Set for easy lookup
-    let disabledTools = $state<Set<string>>(new Set());
+    // Conversation mode: "agent" = all tools, "chat" = no tools, null = inherit global
+    let agentMode: "agent" | "chat" | null = $state(null);
 
     // MCP server state — tri-state like sandbox/network:
     //   null  = Inherit (use per-server defaultEnabled from global settings)
@@ -72,17 +73,6 @@
     let availableMcpServers = $state<McpServerInfo[]>([]);
     let mcpServerStatuses = $state<McpServerStatus[]>([]);
 
-    /** The built-in tools that can be toggled on/off */
-    const BUILTIN_TOOLS = [
-        { name: "read", label: "Read", description: "Read file contents" },
-        { name: "write", label: "Write", description: "Create or overwrite files" },
-        { name: "edit", label: "Edit", description: "Make targeted edits to files" },
-        { name: "bash", label: "Bash", description: "Execute shell commands" },
-        { name: "grep", label: "Grep", description: "Search file contents with regex" },
-        { name: "find", label: "Find", description: "Find files by name pattern" },
-        { name: "ls", label: "List", description: "List directory contents" },
-    ] as const;
-
     // --- Load / Save ---
     async function loadSettings() {
         loading = true;
@@ -92,6 +82,7 @@
 
             sandboxEnabledState = settings.sandboxEnabled ?? null;
             allowNetState = settings.allowNet ?? null;
+            allowAllDomainsState = settings.allowAllDomains ?? null;
             deleteWorkspaceWithConversation = settings.deleteWorkspaceWithConversation ?? true;
 
             if (settings.extraReadPaths !== null && settings.extraReadPaths !== undefined) {
@@ -139,12 +130,8 @@
                 secrets = [];
             }
 
-            // Load disabled tools set
-            if (settings.disabledTools !== null && settings.disabledTools !== undefined) {
-                disabledTools = new Set(settings.disabledTools);
-            } else {
-                disabledTools = new Set();
-            }
+            // Load agent mode
+            agentMode = settings.agentMode ?? null;
 
             // Load MCP server state (tri-state: null=inherit, true=custom, false=off)
             try {
@@ -178,6 +165,7 @@
             } catch {
                 mcpServerStatuses = [];
             }
+
         } catch (e) {
             error = e instanceof Error ? e.message : "Failed to load settings";
         } finally {
@@ -194,6 +182,7 @@
 
             settings.sandboxEnabled = sandboxEnabledState;
             settings.allowNet = allowNetState;
+            settings.allowAllDomains = allowAllDomainsState;
             settings.deleteWorkspaceWithConversation = deleteWorkspaceWithConversation;
 
             settings.extraReadPaths = useCustomReadPaths
@@ -227,8 +216,8 @@
                 settings.secrets = null;
             }
 
-            // Save disabled tools
-            settings.disabledTools = disabledTools.size > 0 ? Array.from(disabledTools) : null;
+            // Save agent mode
+            settings.agentMode = agentMode;
 
             // Save MCP server state (tri-state):
             //   null  → null (inherit global defaults)
@@ -285,7 +274,7 @@
                 {/if}
 
                 {#if saved}
-                    <p class="text-xs text-green-600">Settings saved{#if sandboxEnabledState !== null || allowNetState !== null || useCustomReadPaths || useCustomWritePaths || useCustomDomains || useCustomEnvVars || useCustomSecrets || disabledTools.size > 0}. Session will restart on next interaction.{/if}</p>
+                    <p class="text-xs text-green-600">Settings saved{#if sandboxEnabledState !== null || allowNetState !== null || useCustomReadPaths || useCustomWritePaths || useCustomDomains || useCustomEnvVars || useCustomSecrets || agentMode !== null}. Session will restart on next interaction.{/if}</p>
                 {/if}
 
                 <!-- Sandbox Enabled -->
@@ -320,36 +309,34 @@
                     </div>
                 </div>
 
-                <!-- Agent Tools -->
+                <!-- Agent Mode -->
                 <div class="rounded-lg border p-3">
                     <div class="space-y-2">
                         <div>
-                            <Label class="text-sm font-medium">Agent Tools</Label>
+                            <Label class="text-sm font-medium">Mode</Label>
                             <p class="text-xs text-muted-foreground mt-0.5">
-                                Toggle built-in tools on or off for this conversation.
+                                Agent mode enables all tools (read, write, bash, fetch, etc.). Chat mode disables tools for plain conversation.
                             </p>
                         </div>
-                        <div class="space-y-1.5">
-                            {#each BUILTIN_TOOLS as tool}
-                                <div class="flex items-center justify-between py-0.5">
-                                    <div class="space-y-0.5">
-                                        <Label class="text-xs font-medium">{tool.label}</Label>
-                                        <p class="text-[10px] text-muted-foreground">{tool.description}</p>
-                                    </div>
-                                    <Switch
-                                        checked={!disabledTools.has(tool.name)}
-                                        onCheckedChange={(checked: boolean) => {
-                                            if (checked) {
-                                                disabledTools.delete(tool.name);
-                                            } else {
-                                                disabledTools.add(tool.name);
-                                            }
-                                            // Trigger reactivity by assigning a new Set
-                                            disabledTools = new Set(disabledTools);
-                                        }}
-                                    />
-                                </div>
-                            {/each}
+                        <div class="flex gap-1.5">
+                            <button
+                                class="px-2.5 py-1 text-xs rounded-md border transition-colors {agentMode === null ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+                                onclick={() => (agentMode = null)}
+                            >
+                                Inherit
+                            </button>
+                            <button
+                                class="px-2.5 py-1 text-xs rounded-md border transition-colors {agentMode === 'agent' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+                                onclick={() => (agentMode = 'agent')}
+                            >
+                                Agent
+                            </button>
+                            <button
+                                class="px-2.5 py-1 text-xs rounded-md border transition-colors {agentMode === 'chat' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+                                onclick={() => (agentMode = 'chat')}
+                            >
+                                Chat
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -508,27 +495,60 @@
                         </div>
 
                         {#if allowNetState === true}
-                            <div class="mt-3 space-y-2">
-                                <div class="flex items-center justify-between">
-                                    <div>
-                                        <Label class="text-xs font-medium">Allowed Domains</Label>
-                                        <p class="text-xs text-muted-foreground mt-0.5">
-                                            {useCustomDomains ? "Custom domains" : "Inheriting global"}
-                                        </p>
-                                    </div>
-                                    <Switch bind:checked={useCustomDomains} />
+                            <Separator class="my-2" />
+
+                            <div class="space-y-2">
+                                <div>
+                                    <Label class="text-xs font-medium">Domain Access</Label>
+                                    <p class="text-xs text-muted-foreground mt-0.5">
+                                        {allowAllDomainsState === null ? "Inheriting global" : allowAllDomainsState ? "All domains" : "Specific domains only"}
+                                    </p>
                                 </div>
-                                {#if useCustomDomains}
-                                    <PillList
-                                        items={allowedDomains}
-                                        labelKey="domain"
-                                        onChange={(items) => (allowedDomains = items)}
-                                        addPlaceholder="example.com"
-                                        addButtonLabel="Add"
-                                        inputWidth="w-36"
-                                    />
-                                {/if}
+                                <div class="flex gap-1.5">
+                                    <button
+                                        class="px-2.5 py-1 text-xs rounded-md border transition-colors {allowAllDomainsState === null ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+                                        onclick={() => (allowAllDomainsState = null)}
+                                    >
+                                        Inherit
+                                    </button>
+                                    <button
+                                        class="px-2.5 py-1 text-xs rounded-md border transition-colors {allowAllDomainsState === true ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+                                        onclick={() => (allowAllDomainsState = true)}
+                                    >
+                                        All Domains
+                                    </button>
+                                    <button
+                                        class="px-2.5 py-1 text-xs rounded-md border transition-colors {allowAllDomainsState === false ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+                                        onclick={() => (allowAllDomainsState = false)}
+                                    >
+                                        Specific
+                                    </button>
+                                </div>
                             </div>
+
+                            {#if allowAllDomainsState === false}
+                                <div class="mt-2 space-y-2">
+                                    <div class="flex items-center justify-between">
+                                        <div>
+                                            <Label class="text-xs font-medium">Allowed Domains</Label>
+                                            <p class="text-xs text-muted-foreground mt-0.5">
+                                                {useCustomDomains ? "Custom domains" : "Inheriting global"}
+                                            </p>
+                                        </div>
+                                        <Switch bind:checked={useCustomDomains} />
+                                    </div>
+                                    {#if useCustomDomains}
+                                        <PillList
+                                            items={allowedDomains}
+                                            labelKey="domain"
+                                            onChange={(items) => (allowedDomains = items)}
+                                            addPlaceholder="example.com"
+                                            addButtonLabel="Add"
+                                            inputWidth="w-36"
+                                        />
+                                    {/if}
+                                </div>
+                            {/if}
 
                             <Separator class="my-3" />
 

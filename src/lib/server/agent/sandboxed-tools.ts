@@ -24,12 +24,13 @@ import {
     createSandboxedFindOps,
     createSandboxedLsOps,
 } from "./sandboxed-ops.js";
+import { createFetchTool } from "./sandboxed-fetch-tool.js";
 
 /**
- * Create the standard set of coding tools (bash, read, write, edit, find, ls)
+ * Create the standard set of coding tools (bash, read, write, edit, find, ls, fetch)
  * with all operations routed through the given zerobox sandbox.
  *
- * This is the sandboxed equivalent of `createCodingTools(cwd)`.
+ * This is the sandboxed equivalent of `createCodingTools(cwd)` + fetch.
  *
  * Note: The grep tool is intentionally omitted because its GrepOperations
  * interface only exposes helper hooks (isDirectory, readFile) — the actual
@@ -56,6 +57,9 @@ export function createSandboxedCodingTools(cwd: string, sandbox: Sandbox): Agent
         }),
         createLsTool(cwd, {
             operations: createSandboxedLsOps(sandbox),
+        }),
+        createFetchTool({
+            sandbox,
         }),
     ];
 }
