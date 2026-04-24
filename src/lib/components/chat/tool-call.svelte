@@ -58,5 +58,13 @@
         >
             {toolCall.output}
         </div>
+    {:else if toolCall.status !== "running"}
+        <div
+            class={compact
+                ? "border-t px-2 py-1 text-xs text-muted-foreground/60 italic"
+                : "border-t px-3 py-2 text-xs text-muted-foreground/60 italic"}
+        >
+            No output
+        </div>
     {/if}
 </details>

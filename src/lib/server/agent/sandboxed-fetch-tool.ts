@@ -32,6 +32,18 @@ import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { TextContent } from "@mariozechner/pi-ai";
 import type { Sandbox, CommandOutput } from "zerobox";
 
+// --- User Agent ---
+
+/**
+ * A realistic Chrome-on-Windows user agent string.
+ *
+ * By default happy-dom advertises itself with a `HappyDOM` user agent,
+ * which some sites detect and block. Spoofing a common browser avoids
+ * this without any downside for content extraction.
+ */
+const CHROME_WINDOWS_UA =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
 // --- Schema ---
 
 const fetchSchema = Type.Object({
@@ -70,6 +82,58 @@ export interface FetchToolOptions {
     sandbox?: Sandbox;
 }
 
+// --- CAPTCHA detection ---
+
+/**
+ * Check the rendered document for signs of a CAPTCHA or anti-bot challenge page.
+ *
+ * Detects common indicators across major providers:
+ * - **Cloudflare**: "Just a moment" title, `#challenge-running`, `#challenge-stage`
+ * - **reCAPTCHA**: `.g-recaptcha`, Google recaptcha iframes
+ * - **hCaptcha**: `.h-captcha`, hcaptcha iframes
+ * - **Turnstile**: `.cf-turnstile`, `[data-sitekey]` on Turnstile containers
+ * - **Generic**: very short body with keywords like "captcha", "verify", "access denied"
+ */
+function detectCaptcha(document: any): boolean {
+    // --- Cloudflare challenge page ---
+    const title = (document.title || "").toLowerCase();
+    if (title.includes("just a moment") || title.includes("attention required")) return true;
+
+    if (document.querySelector("#challenge-running") || document.querySelector("#challenge-stage")) return true;
+
+    // Cloudflare Turnstile widget
+    if (document.querySelector(".cf-turnstile")) return true;
+
+    // --- reCAPTCHA ---
+    if (document.querySelector(".g-recaptcha")) return true;
+    if (document.querySelector('iframe[src*="google.com/recaptcha"]')) return true;
+
+    // --- hCaptcha ---
+    if (document.querySelector(".h-captcha")) return true;
+    if (document.querySelector('iframe[src*="hcaptcha.com"]')) return true;
+
+    // --- Generic heuristics ---
+    // If the body is very short and contains captcha/verification keywords,
+    // it's likely a challenge page rather than real content.
+    const bodyText = (document.body?.textContent || "").trim();
+    if (bodyText.length > 0 && bodyText.length < 500) {
+        const lower = bodyText.toLowerCase();
+        if (
+            lower.includes("captcha") ||
+            lower.includes("verify you") ||
+            lower.includes("verify you are human") ||
+            lower.includes("are you a robot") ||
+            lower.includes("are you human") ||
+            lower.includes("access denied") ||
+            lower.includes("blocked") && lower.includes("bot")
+        ) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // --- Sandboxed fetch function (injected as inline JS string) ---
 
 /**
@@ -97,6 +161,7 @@ export interface FetchToolOptions {
  */
 function buildFetchJs(url: string, timeoutSeconds: number): string {
     const urlJson = JSON.stringify(url);
+    const uaJson = JSON.stringify(CHROME_WINDOWS_UA);
     // The promise rejection is handled by the process — unhandled rejections
     // cause a non-zero exit code, which we catch in fetchPageInSandbox.
     return `
@@ -107,12 +172,32 @@ const { Defuddle } = require(path.join(process.env.NODE_PATH, "defuddle", "dist"
     let browser;
     try {
         browser = new Browser({
-            settings: { errorCapture: BrowserErrorCaptureEnum.processLevel },
+            settings: {
+                errorCapture: BrowserErrorCaptureEnum.processLevel,
+                navigator: { userAgent: ${uaJson} },
+            },
         });
         const page = browser.newPage();
         await page.goto(${urlJson});
         await page.waitUntilComplete();
         const document = page.mainFrame.document;
+        // --- CAPTCHA detection ---
+        let captchaDetected = false;
+        const docTitle = (document.title || "").toLowerCase();
+        if (docTitle.includes("just a moment") || docTitle.includes("attention required")) captchaDetected = true;
+        if (document.querySelector("#challenge-running") || document.querySelector("#challenge-stage")) captchaDetected = true;
+        if (document.querySelector(".cf-turnstile")) captchaDetected = true;
+        if (document.querySelector(".g-recaptcha")) captchaDetected = true;
+        if (document.querySelector('iframe[src*="google.com/recaptcha"]')) captchaDetected = true;
+        if (document.querySelector(".h-captcha")) captchaDetected = true;
+        if (document.querySelector('iframe[src*="hcaptcha.com"]')) captchaDetected = true;
+        if (!captchaDetected) {
+            const bodyText = (document.body?.textContent || "").trim();
+            if (bodyText.length > 0 && bodyText.length < 500) {
+                const lower = bodyText.toLowerCase();
+                if (lower.includes("captcha") || lower.includes("verify you") || lower.includes("are you a robot") || lower.includes("are you human") || lower.includes("access denied") || (lower.includes("blocked") && lower.includes("bot"))) captchaDetected = true;
+            }
+        }
         // Replace img and SVG elements with paragraphs containing their alt text
         // before passing to defuddle. Huge SVGs (diagrams, icons, charts) dump
         // pages of markup into the output. For <img>, use the alt attribute.
@@ -145,7 +230,7 @@ const { Defuddle } = require(path.join(process.env.NODE_PATH, "defuddle", "dist"
         const defuddleResult = await Defuddle(document, ${urlJson}, { markdown: true, removeImages: true });
         const content = defuddleResult.content;
         const title = defuddleResult.title || document.title;
-        const result = JSON.stringify({ content, title });
+        const result = JSON.stringify({ content, title, captchaDetected });
         console.log(result);
     } finally {
         if (browser) await browser.close();
@@ -192,18 +277,23 @@ function replaceImagesWithAltText(document: any): void {
 
 // --- Local (non-sandboxed) fetch ---
 
-async function fetchPageLocally(url: string, timeout: number = 30): Promise<{ content: string; title: string }> {
+async function fetchPageLocally(url: string, timeout: number = 30): Promise<{ content: string; title: string; captchaDetected: boolean }> {
     const { Browser, BrowserErrorCaptureEnum } = await import(/* @vite-ignore */ "happy-dom");
     const { Defuddle } = await import(/* @vite-ignore */ "defuddle/node");
     let browser: InstanceType<typeof Browser> | undefined;
     try {
         browser = new Browser({
-            settings: { errorCapture: BrowserErrorCaptureEnum.processLevel },
+            settings: {
+                errorCapture: BrowserErrorCaptureEnum.processLevel,
+                navigator: { userAgent: CHROME_WINDOWS_UA },
+            },
         }) as InstanceType<typeof Browser>;
         const page = browser.newPage();
         await page.goto(url);
         await page.waitUntilComplete();
         const document = page.mainFrame.document;
+        // Check for CAPTCHA/anti-bot challenge pages before extracting content
+        const captchaDetected = detectCaptcha(document as any);
         // Replace img and SVG elements with paragraphs containing their alt text
         // before passing to defuddle. Huge SVGs (diagrams, icons, charts) dump
         // pages of markup into the output. For <img>, use the alt attribute.
@@ -213,7 +303,7 @@ async function fetchPageLocally(url: string, timeout: number = 30): Promise<{ co
         const defuddleResult = await Defuddle(document as any, url, { markdown: true, removeImages: true });
         const content = defuddleResult.content;
         const title = defuddleResult.title || document.title;
-        return { content, title };
+        return { content, title, captchaDetected };
     } finally {
         if (browser) await browser.close();
     }
@@ -221,7 +311,7 @@ async function fetchPageLocally(url: string, timeout: number = 30): Promise<{ co
 
 // --- Sandboxed fetch ---
 
-async function fetchPageInSandbox(sandbox: Sandbox, url: string, timeout: number = 30): Promise<{ content: string; title: string }> {
+async function fetchPageInSandbox(sandbox: Sandbox, url: string, timeout: number = 30): Promise<{ content: string; title: string; captchaDetected: boolean }> {
     const jsCode = buildFetchJs(url, timeout);
     // sandbox.exec is used instead of sandbox.js because we need to pass
     // --use-env-proxy to the Node process. Node.js fetch doesn't respect
@@ -247,10 +337,10 @@ async function fetchPageInSandbox(sandbox: Sandbox, url: string, timeout: number
 
     try {
         const parsed = JSON.parse(result.stdout.trim());
-        return { content: parsed.content, title: parsed.title ?? "" };
+        return { content: parsed.content, title: parsed.title ?? "", captchaDetected: !!parsed.captchaDetected };
     } catch {
         // If JSON parsing fails, return raw stdout as the content
-        return { content: result.stdout, title: "" };
+        return { content: result.stdout, title: "", captchaDetected: false };
     }
 }
 
@@ -341,9 +431,28 @@ export function createFetchTool(options?: FetchToolOptions): AgentTool<typeof fe
             }
 
             try {
-                const { content, title } = sandbox
+                const { content, title, captchaDetected } = sandbox
                     ? await fetchPageInSandbox(sandbox, url, effectiveTimeout)
                     : await fetchPageLocally(url, effectiveTimeout);
+
+                // Throwing causes the agent loop to mark the tool call as isError,
+                // which is the correct semantic for a failed fetch.
+                if (captchaDetected) {
+                    throw new Error(
+                        "CAPTCHA or anti-bot challenge page detected. " +
+                        "The site is blocking automated access and the page content could not be retrieved."
+                    );
+                }
+
+                // Treat effectively empty content as a failure too — the page didn't
+                // return usable text, so the agent should know it got nothing.
+                if (!content || content.trim().length === 0) {
+                    throw new Error(
+                        "The page returned no readable content. " +
+                        "The site may be blocking automated access, require JavaScript that happy-dom doesn't support, " +
+                        "or the page may be empty."
+                    );
+                }
 
                 const { content: truncatedContent, truncated } = truncateContent(content);
 
