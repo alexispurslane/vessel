@@ -284,6 +284,79 @@ function extractToolOutput(partialResult: unknown): string | undefined {
 }
 
 /**
+ * Serialize the streaming assistant message for a stream_recovery event.
+ *
+ * Unlike `serializeMessage`, this enriches tool calls with execution results
+ * (status, output, isError) by cross-referencing ToolResultMessage entries
+ * from the full conversation state. Without this, a reconnecting client would
+ * see all tool calls stuck as "running" even if they completed before the
+ * disconnect — because tool execution results live in separate
+ * ToolResultMessage entries, not in the streaming AssistantMessage itself.
+ *
+ * @param streamingMessage  The partial AssistantMessage from AgentState.streamingMessage
+ * @param allMessages       All messages in the current agent state (includes ToolResultMessages)
+ */
+function serializeStreamingMessageForRecovery(
+    streamingMessage: unknown,
+    allMessages: unknown[]
+): unknown {
+    // First, do the standard serialization
+    const base = serializeMessage(streamingMessage) as Record<string, unknown>;
+    const toolCalls = base.toolCalls as Array<Record<string, unknown>> | undefined;
+
+    if (!toolCalls || toolCalls.length === 0) {
+        // No tool calls — nothing to enrich
+        return base;
+    }
+
+    // Build a lookup from toolCallId → ToolResultMessage for quick matching.
+    // We only need results for tool calls in the streaming message.
+    const streamingToolCallIds = new Set(
+        toolCalls.map((tc) => tc.id).filter((id): id is string => typeof id === "string")
+    );
+
+    const toolResultsById = new Map<string, { output?: string; isError: boolean }>();
+    for (const msg of allMessages) {
+        if (!msg || typeof msg !== "object") continue;
+        const m = msg as Record<string, unknown>;
+        if (m.role !== "toolResult") continue;
+        const toolCallId = m.toolCallId as string | undefined;
+        if (!toolCallId || !streamingToolCallIds.has(toolCallId)) continue;
+
+        // Extract text output from the ToolResultMessage's content array
+        const output = extractToolOutput(m);
+        toolResultsById.set(toolCallId, {
+            output,
+            isError: !!m.isError,
+        });
+    }
+
+    // Enrich each tool call with its result
+    const enrichedToolCalls = toolCalls.map((tc) => {
+        const id = tc.id as string | undefined;
+        const result = id ? toolResultsById.get(id) : undefined;
+        if (result) {
+            return {
+                ...tc,
+                status: result.isError ? "error" : "completed",
+                output: result.output,
+                isError: result.isError || undefined,
+            };
+        }
+        // No result found — tool is still running (or hasn't started executing yet)
+        return {
+            ...tc,
+            status: "running" as const,
+        };
+    });
+
+    return {
+        ...base,
+        toolCalls: enrichedToolCalls,
+    };
+}
+
+/**
  * Serialize a pi AgentMessage for SSE transmission.
  * Extracts text content from the content array and strips non-serializable fields.
  */
@@ -733,10 +806,25 @@ export async function getOrCreateSession(conversationId: string): Promise<PiAgen
 
     // Subscribe to events and broadcast to SSE subscribers
     const unsubscribe = agentSession.subscribe((event: PiAgentSessionEvent) => {
+        const session = sessions.get(conversationId);
+
+        // Track turn generation for stream recovery — increment on each
+        // message_start so the client can distinguish different streaming turns
+        if (session && event.type === "message_start") {
+            session.turnGeneration++;
+        }
+
         const sseEvent: ChatSSEEvent = {
             event: event.type,
             data: formatEventPayload(event),
         };
+
+        // Embed turnGeneration in streaming events so the client can correlate
+        // them with stream_recovery and avoid processing stale deltas
+        if (session && (event.type === "message_start" || event.type === "message_update" || event.type === "message_end")) {
+            (sseEvent.data as Record<string, unknown>).turnGeneration = session.turnGeneration;
+        }
+
         broadcast(conversationId, sseEvent);
     });
 
@@ -763,6 +851,7 @@ export async function getOrCreateSession(conversationId: string): Promise<PiAgen
         },
         sandbox,
         conversationSettings: conversationSettings ?? undefined,
+        turnGeneration: 0,
     });
 
     return agentSession;
@@ -785,6 +874,26 @@ export function subscribe(
     // New subscriber — cancel any pending disposal
     cancelDispose(conversationId);
     session.subscribers.set(subscriberId, { send });
+
+    // If the session is actively streaming, send a recovery snapshot so the
+    // reconnecting client can display the partial in-flight message.
+    // The subscriber is registered FIRST so any subsequent deltas broadcast
+    // after this point will also be delivered — and the snapshot already
+    // includes all content accumulated up to this synchronous point, so no
+    // deltas are lost. (Node.js single-threaded model guarantees this.)
+    if (session.agentSession.isStreaming) {
+        const state = session.agentSession.state;
+        const streamingMsg = state.streamingMessage;
+        if (streamingMsg) {
+            send({
+                event: "stream_recovery",
+                data: {
+                    message: serializeStreamingMessageForRecovery(streamingMsg, state.messages),
+                    turnGeneration: session.turnGeneration,
+                },
+            });
+        }
+    }
 
     return () => {
         session.subscribers.delete(subscriberId);

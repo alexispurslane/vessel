@@ -58,6 +58,11 @@ let lastModel: { provider: string; modelId: string } | null = null;
 /** Whether we've already requested title generation for this conversation */
 let titleGenerationRequested = false;
 
+/** Turn generation from the last stream_recovery event. Used to skip stale
+ *  message_update deltas that were already incorporated into the recovery snapshot.
+ *  Reset on message_end/agent_end/disconnect. */
+let recoveryTurnGeneration: number | null = null;
+
 /** Whether a navigate (delete/edit) operation is in progress */
 let navigating = $state(false);
 
@@ -116,6 +121,7 @@ export async function connectStream(conversationId: string): Promise<void> {
     error = null;
     insideThinkingTag = false;
     titleGenerationRequested = false;
+    recoveryTurnGeneration = null;
 
     currentConversationId = conversationId;
     setActiveConversation(conversationId);
@@ -189,6 +195,52 @@ export async function connectStream(conversationId: string): Promise<void> {
         console.log(`[chat] SSE 'connected' event received`);
         connected = true;
         error = null;
+    });
+
+    es.addEventListener("stream_recovery", (e: MessageEvent) => {
+        if (isStale()) return;
+        console.log(`[chat] SSE 'stream_recovery' event received`);
+        try {
+            const data = JSON.parse(e.data);
+            if (data?.message) {
+                generating = true;
+                recoveryTurnGeneration = data.turnGeneration ?? null;
+
+                const id = `assistant-recovered-${Date.now()}`;
+                setStreamingMessageId(id, "stream_recovery");
+
+                // Extract text content — serializeMessage returns content as string[]
+                const text = extractTextFromContent(data.message.content) || "";
+                // Thinking is already extracted by serializeMessage into a separate field
+                const thinking = data.message.thinking ?? undefined;
+                // Map tool calls from the enriched recovery format.
+                // serializeStreamingMessageForRecovery adds status/output/isError
+                // by cross-referencing ToolResultMessage entries, so completed
+                // tools show up correctly instead of being stuck as "running".
+                const toolCalls = (data.message.toolCalls ?? []).map((tc: any) => ({
+                    toolName: tc.name ?? tc.toolName,
+                    status: (tc.status ?? "running") as "running" | "completed" | "error",
+                    arguments: tc.arguments,
+                    output: tc.output,
+                    isError: tc.isError,
+                }));
+
+                messages.push({
+                    id,
+                    role: "assistant",
+                    content: text,
+                    timestamp: data.message.timestamp ?? Date.now(),
+                    thinking: thinking,
+                    thinkingStreaming: !!thinking,
+                    model: data.message.model,
+                    modelProvider: data.message.provider,
+                    toolCalls,
+                    streaming: true,
+                });
+            }
+        } catch {
+            // ignore parse errors
+        }
     });
 
     es.addEventListener("message_start", (e: MessageEvent) => {
@@ -378,6 +430,8 @@ export async function connectStream(conversationId: string): Promise<void> {
     es.addEventListener("message_end", (e: MessageEvent) => {
         if (isStale()) return;
         console.log(`[chat] SSE 'message_end': lastEventId=${e.lastEventId}`);
+        // Recovery is no longer relevant — the message is finalized
+        recoveryTurnGeneration = null;
         // message_end data includes { type: "message_end", message: AgentMessage }
         // pi emits message_end for ALL message types, including toolResult —
         // we must skip non-assistant messages to avoid treating tool output as chat text
@@ -546,6 +600,7 @@ export async function connectStream(conversationId: string): Promise<void> {
         if (isStale()) return;
         console.log(`[chat] SSE 'agent_end' event received`);
         generating = false;
+        recoveryTurnGeneration = null;
         const msg = getStreamingMsg();
         if (msg) {
             msg.streaming = false;
@@ -759,6 +814,7 @@ export function disconnectStream(): void {
     currentConversationId = null;
     insideThinkingTag = false;
     lastModel = null;
+    recoveryTurnGeneration = null;
 }
 
 /**
@@ -986,6 +1042,7 @@ export function clearMessages(): void {
     insideThinkingTag = false;
     lastModel = null;
     titleGenerationRequested = false;
+    recoveryTurnGeneration = null;
 }
 
 /**

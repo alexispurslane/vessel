@@ -57,4 +57,8 @@ export interface ActiveSession {
     /** Per-conversation settings that override global sandbox settings. */
     conversationSettings?: ConversationSettings;
     disposeTimer?: ReturnType<typeof setTimeout>;
+    /** Monotonically increasing counter, incremented on each message_start event.
+     *  Embedded in streaming SSE events so the client can distinguish different
+     *  streaming turns and filter stale deltas after stream_recovery. */
+    turnGeneration: number;
 }

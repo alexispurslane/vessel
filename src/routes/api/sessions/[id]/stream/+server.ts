@@ -42,16 +42,17 @@ export const GET: RequestHandler = async ({ params, request, url }) => {
                 }
             }, 30_000);
 
-            // Subscribe to agent events
-            const unsubscribe = subscribe(conversationId, subscriberId, send);
-            console.log(`[stream] Subscribed ${subscriberId} to ${conversationId}`);
-
-            // Send initial connection event
+            // Send initial connection event FIRST so the client knows the link is up
+            // before any potential stream_recovery event arrives
             send({
                 event: "connected",
                 data: { conversationId, timestamp: Date.now() },
             });
             console.log(`[stream] Sent 'connected' event to client`);
+
+            // Subscribe to agent events (may send stream_recovery if a message is in-flight)
+            const unsubscribe = subscribe(conversationId, subscriberId, send);
+            console.log(`[stream] Subscribed ${subscriberId} to ${conversationId}`);
 
             // Clean up on disconnect
             request.signal.addEventListener("abort", () => {
