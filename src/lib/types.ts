@@ -102,8 +102,6 @@ export interface ConversationDetail {
 
 /** A single SSE event pushed to the client */
 export interface ChatSSEEvent {
-    /** Monotonically increasing ID for Last-Event-Id reconnection */
-    id: string;
     /** The pi event type (message_update, tool_execution_start, etc.) */
     event: string;
     /** Serialized event payload */
@@ -157,6 +155,14 @@ export interface ModelInfo {
 
 // --- Chat UI (client-only, but defined here for consistency) ---
 
+/** A page fetched by the agent's fetch tool during a turn */
+export interface FetchedPage {
+    url: string;
+    title: string;
+    contentLength: number;
+    truncated: boolean;
+}
+
 /** A chat message in the UI */
 export interface ChatMessage {
     id: string;
@@ -185,6 +191,8 @@ export interface ChatMessage {
         cacheWrite: number;
         totalTokens: number;
     };
+    /** Pages fetched by the agent's fetch tool since the last assistant message */
+    fetchedPages?: FetchedPage[];
 }
 
 /** Info about a tool call being executed */

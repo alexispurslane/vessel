@@ -29,7 +29,7 @@
     import GitBranch from "@lucide/svelte/icons/git-branch";
     import Shield from "@lucide/svelte/icons/shield";
     import FileText from "@lucide/svelte/icons/file-text";
-    import { onMount } from "svelte";
+    import { onMount, untrack } from "svelte";
     import { fade } from "svelte/transition";
     import { goto } from "$app/navigation";
     import { ContextUsageRing } from "$lib/components/ui/context-usage-ring";
@@ -285,82 +285,93 @@
         }
     });
 
-    // Connect to SSE stream on mount and when the conversation id changes; disconnect on cleanup
+    // Connect to SSE stream on mount and when the conversation id changes; disconnect on cleanup.
+    // Use untrack() so reactive reads inside connectStream/disconnectStream
+    // (e.g. reading `generating`, `currentConversationId`) don't become
+    // dependencies of this effect — only `id` is tracked.
+    // Without untrack, the effect would re-run every time `generating`
+    // changes during streaming, creating an infinite disconnect/reconnect loop.
     $effect(() => {
         const currentId = id;
         // Reset the draft-restored flag — the new conversation's draft hasn't been restored yet
         draftRestored = false;
         if (currentId) {
-            connectStream(currentId).then(async () => {
-                // After connecting (which loads history), set model selector to last used model
-                if (chat.lastModel) {
-                    selectedModelId = chat.lastModel.modelId;
-                    defaultApplied = true; // prevent default from overwriting conversation model
-                }
-
-                // Restore in-progress draft from sessionStorage if one exists
-                const saved = sessionStorage.getItem(draftKey(currentId));
-                if (saved) {
-                    inputText = saved;
-                }
-                // Now that we've attempted the restore, allow the $effect to manage sessionStorage
-                draftRestored = true;
-
-                // If an initial message was passed (e.g., from the home page), send it now
-                const initialMessage = $page.url.searchParams.get("initialMessage");
-                const initialModel = $page.url.searchParams.get("initialModel");
-                if (initialMessage) {
-                    // Use the model ID directly — provider is resolved automatically
-                    const modelId = initialModel || selectedModelId;
-                    if (modelId) {
-                        selectedModelId = modelId;
+            untrack(() => {
+                connectStream(currentId).then(async () => {
+                    // After connecting (which loads history), set model selector to last used model
+                    if (chat.lastModel) {
+                        selectedModelId = chat.lastModel.modelId;
+                        defaultApplied = true; // prevent default from overwriting conversation model
                     }
 
-                    // Apply any sandbox quick-toggle settings from the home page before sending.
-                    // Each param is always present (true or false) matching the toggle state.
-                    // We set conversation-level overrides so the session picks them up.
-                    const sandboxSettings: ConversationSettings = {};
-                    const sandboxOnParam = $page.url.searchParams.get("sandboxOn");
-                    const netAllDomainsOnParam = $page.url.searchParams.get("netAllDomainsOn");
-                    const mcpServersOnParam = $page.url.searchParams.get("mcpServersOn");
-                    const agentModeParam = $page.url.searchParams.get("agentMode");
-
-                    if (sandboxOnParam !== null) sandboxSettings.sandboxEnabled = sandboxOnParam === "true";
-                    if (netAllDomainsOnParam === "true") {
-                        sandboxSettings.allowNet = true;
-                        sandboxSettings.allowAllDomains = true;
-                    } else if (netAllDomainsOnParam === "false") {
-                        sandboxSettings.allowNet = false;
-                        sandboxSettings.allowAllDomains = false;
+                    // Restore in-progress draft from sessionStorage if one exists
+                    const saved = sessionStorage.getItem(draftKey(currentId));
+                    if (saved) {
+                        inputText = saved;
                     }
-                    // null = use per-server defaultEnabled (effectively "on" for servers not explicitly disabled)
-                    // []  = explicitly no MCP servers
-                    if (mcpServersOnParam === "true") sandboxSettings.enabledMcpServers = null;
-                    else if (mcpServersOnParam === "false") sandboxSettings.enabledMcpServers = [];
-                    // Agent mode: "agent" = all tools, "chat" = no tools
-                    if (agentModeParam === "agent") sandboxSettings.agentMode = "agent";
-                    else if (agentModeParam === "chat") sandboxSettings.agentMode = "chat";
+                    // Now that we've attempted the restore, allow the $effect to manage sessionStorage
+                    draftRestored = true;
 
-                    // Apply sandbox settings if any were specified
-                    if (Object.keys(sandboxSettings).length > 0) {
-                        try {
-                            await updateConversationSettings(currentId, sandboxSettings);
-                        } catch {
-                            // Best-effort; don't block sending the message
+                    // If an initial message was passed (e.g., from the home page), send it now
+                    const initialMessage = $page.url.searchParams.get("initialMessage");
+                    const initialModel = $page.url.searchParams.get("initialModel");
+                    if (initialMessage) {
+                        // Use the model ID directly — provider is resolved automatically
+                        const modelId = initialModel || selectedModelId;
+                        if (modelId) {
+                            selectedModelId = modelId;
                         }
-                    }
 
-                    send(initialMessage, modelId);
-                    // Clear the draft and the URL params to avoid re-sending on refresh/reconnect
-                    sessionStorage.removeItem(draftKey(currentId));
-                    goto(`/chat/${currentId}`, { replaceState: true });
-                }
+                        // Apply any sandbox quick-toggle settings from the home page before sending.
+                        // Each param is always present (true or false) matching the toggle state.
+                        // We set conversation-level overrides so the session picks them up.
+                        const sandboxSettings: ConversationSettings = {};
+                        const sandboxOnParam = $page.url.searchParams.get("sandboxOn");
+                        const netAllDomainsOnParam = $page.url.searchParams.get("netAllDomainsOn");
+                        const mcpServersOnParam = $page.url.searchParams.get("mcpServersOn");
+                        const agentModeParam = $page.url.searchParams.get("agentMode");
+
+                        if (sandboxOnParam !== null) sandboxSettings.sandboxEnabled = sandboxOnParam === "true";
+                        if (netAllDomainsOnParam === "true") {
+                            sandboxSettings.allowNet = true;
+                            sandboxSettings.allowAllDomains = true;
+                        } else if (netAllDomainsOnParam === "false") {
+                            sandboxSettings.allowNet = false;
+                            sandboxSettings.allowAllDomains = false;
+                        }
+                        // null = use per-server defaultEnabled (effectively "on" for servers not explicitly disabled)
+                        // []  = explicitly no MCP servers
+                        if (mcpServersOnParam === "true") sandboxSettings.enabledMcpServers = null;
+                        else if (mcpServersOnParam === "false") sandboxSettings.enabledMcpServers = [];
+                        // Agent mode: "agent" = all tools, "chat" = no tools
+                        if (agentModeParam === "agent") sandboxSettings.agentMode = "agent";
+                        else if (agentModeParam === "chat") sandboxSettings.agentMode = "chat";
+
+                        // Apply sandbox settings if any were specified
+                        if (Object.keys(sandboxSettings).length > 0) {
+                            try {
+                                await updateConversationSettings(currentId, sandboxSettings);
+                            } catch {
+                                // Best-effort; don't block sending the message
+                            }
+                        }
+
+                        send(initialMessage, modelId);
+                        // Clear the draft and the URL params to avoid re-sending on refresh/reconnect
+                        sessionStorage.removeItem(draftKey(currentId));
+                        goto(`/chat/${currentId}`, { replaceState: true });
+                    }
+                });
             });
         }
-        return () => disconnectStream();
+        return () => untrack(() => disconnectStream());
     });
 
-    // Auto-scroll to bottom when messages arrive or streaming content updates
+    // Auto-scroll to bottom when messages arrive or streaming content updates.
+    // Debounced: cancels any pending scroll and schedules a single rAF.
+    // This avoids stacking dozens of nested-rAF callbacks during fast streaming,
+    // which caused increasing lag as messages grew longer.
+    let scrollRaf: number | undefined;
     $effect(() => {
         const count = chat.messages.length;
         const lastMsg = chat.messages[count - 1];
@@ -370,14 +381,13 @@
         const _streaming = lastMsg?.streaming;
         const _thinkingStreaming = lastMsg?.thinkingStreaming;
 
-        // Use nested rAF: first waits for Svelte's DOM update,
-        // second ensures the browser has painted the new content
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                if (viewportEl) {
-                    viewportEl.scrollTop = viewportEl.scrollHeight;
-                }
-            });
+        // Cancel any pending scroll — only the latest one matters
+        if (scrollRaf !== undefined) cancelAnimationFrame(scrollRaf);
+        scrollRaf = requestAnimationFrame(() => {
+            scrollRaf = undefined;
+            if (viewportEl) {
+                viewportEl.scrollTop = viewportEl.scrollHeight;
+            }
         });
     });
 

@@ -130,6 +130,7 @@
                         <SvelteMarkdown
                             source={step.thinking}
                             streaming={step.streaming}
+                            codeStreaming={step.streaming ?? false}
                             {renderers}
                             options={{ gfm: true, breaks: true }}
                         />

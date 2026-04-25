@@ -9,8 +9,11 @@
     import Trash2 from "@lucide/svelte/icons/trash-2";
     import Pencil from "@lucide/svelte/icons/pencil";
     import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
+    import X from "@lucide/svelte/icons/x";
+    import Check from "@lucide/svelte/icons/check";
     import CodeBlock from "$lib/components/chat/code-block.svelte";
     import ToolCall from "$lib/components/chat/tool-call.svelte";
+    import FetchedPages from "$lib/components/chat/fetched-pages.svelte";
     import type { ChatMessage as ChatMessageType } from "$lib/types.js";
 
     interface Props {
@@ -171,7 +174,7 @@
                 />
             </summary>
             <div bind:this={thinkingEl} class="border-t px-3 py-2 text-xs text-muted-foreground max-h-64 overflow-auto markdown-prose markdown-thinking">
-                <SvelteMarkdown source={msg.thinking || ""} streaming={msg.thinkingStreaming} {renderers} options={{ gfm: true, breaks: true }} />
+                <SvelteMarkdown source={msg.thinking || ""} streaming={msg.thinkingStreaming ?? false} codeStreaming={msg.thinkingStreaming ?? false} {renderers} options={{ gfm: true, breaks: true }} />
             </div>
         </details>
     {/if}
@@ -206,7 +209,7 @@
                     </div>
                 {:else}
                     <div class="markdown-prose">
-                        <SvelteMarkdown source={msg.content} streaming={msg.streaming} {renderers} options={{ gfm: true, breaks: true }} />
+                        <SvelteMarkdown source={msg.content} streaming={msg.streaming} codeStreaming={msg.streaming ?? false} {renderers} options={{ gfm: true, breaks: true }} />
                     </div>
                 {/if}
                 {#if msg.streaming}
@@ -298,6 +301,11 @@
                 </div>
             {/if}
         </div>
+    {/if}
+
+    <!-- Fetched pages / sources -->
+    {#if msg.role === "assistant" && msg.fetchedPages && msg.fetchedPages.length > 0 && !msg.streaming}
+        <FetchedPages pages={msg.fetchedPages} />
     {/if}
 
     <!-- Tool calls -->

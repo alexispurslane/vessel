@@ -2,6 +2,7 @@ import { join, resolve } from "path";
 import { writeFileSync, mkdirSync, rmSync, existsSync } from "fs";
 import {
     createAgentSession,
+    createEventBus,
     AuthStorage,
     DefaultResourceLoader,
     ModelRegistry,
@@ -15,6 +16,8 @@ import { ensureMcpConfigFile, writeConversationMcpConfig, getMcpServersFromDb, M
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { createSandboxedCodingTools } from "./sandboxed-tools.js";
 import { createFetchTool } from "./sandboxed-fetch-tool.js";
+import { fetchTracker } from "./extensions/fetch-tracker.js";
+import type { FetchedPage } from "./extensions/fetch-tracker.js";
 import { createSessionSandbox, getSessionWorkDir, loadConversationSettingsFromDb, saveConversationSettingsToDb, isNetworkAllowed, getEffectiveAgentMode } from "./sandbox-factory.js";
 import type { Model as PiModel, Api } from "@mariozechner/pi-ai";
 import { getDb } from "../db/index.js";
@@ -36,15 +39,6 @@ const MODELS_JSON_PATH = resolve(DATA_DIR, "models.json");
  * /api/sessions/[id]/release call from the frontend on conversation switch.
  */
 const SESSION_DISPOSE_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
-
-/** Maximum number of SSE events to keep in the replay buffer per session.
- *  This limits memory usage while still covering the typical duration of a
- *  page reload (a few seconds). At ~10 events/second during streaming, 500
- *  events covers ~50 seconds — more than enough for a reload. */
-const EVENT_BUFFER_MAX_SIZE = 500;
-
-/** Monotonically increasing event ID for SSE Last-Event-Id support */
-let eventCounter = 0n;
 
 // --- In-memory session store ---
 
@@ -254,20 +248,9 @@ function generateModelsJson(): void {
 
 // --- Event helpers ---
 
-function nextEventId(): string {
-    return `evt-${(eventCounter++).toString(36)}`;
-}
-
 function broadcast(sessionKey: string, event: ChatSSEEvent): void {
     const session = sessions.get(sessionKey);
     if (!session) return;
-
-    // Buffer the event for replay on reconnect
-    session.eventBuffer.push(event);
-    // Evict oldest events when the buffer exceeds the max size
-    if (session.eventBuffer.length > EVENT_BUFFER_MAX_SIZE) {
-        session.eventBuffer.splice(0, session.eventBuffer.length - EVENT_BUFFER_MAX_SIZE);
-    }
 
     for (const [, subscriber] of session.subscribers) {
         subscriber.send(event);
@@ -579,14 +562,20 @@ export async function getOrCreateSession(conversationId: string): Promise<PiAgen
         mcpFlagValues.set("mcp-config", MCP_CONFIG_PATH);
     }
 
-    // Create a custom ResourceLoader that includes the pi-mcp-adapter extension.
-    // This gives the adapter access to the full ExtensionAPI lifecycle (session_start,
-    // session_shutdown, etc.) which it needs to properly connect/teardown MCP servers.
+    // Create a shared EventBus for the session. We pass it into the ResourceLoader
+    // so that extensions can emit events via pi.events, and we can subscribe to those
+    // events from outside the extension system (e.g., to broadcast fetched pages via SSE).
+    const eventBus = createEventBus();
+
+    // Create a custom ResourceLoader that includes pi-mcp-adapter and our fetch tracker.
+    // This gives extensions access to the full ExtensionAPI lifecycle (session_start,
+    // session_shutdown, etc.) which they need to properly connect/teardown resources.
     const resourceLoader = new DefaultResourceLoader({
         cwd: sessionWorkDir,
         agentDir: AGENT_DIR,
         settingsManager,
-        extensionFactories: [mcpAdapter],
+        extensionFactories: [mcpAdapter, fetchTracker],
+        eventBus,
     });
     await resourceLoader.reload();
 
@@ -745,21 +734,35 @@ export async function getOrCreateSession(conversationId: string): Promise<PiAgen
     // Subscribe to events and broadcast to SSE subscribers
     const unsubscribe = agentSession.subscribe((event: PiAgentSessionEvent) => {
         const sseEvent: ChatSSEEvent = {
-            id: nextEventId(),
             event: event.type,
             data: formatEventPayload(event),
         };
         broadcast(conversationId, sseEvent);
     });
 
+    // Subscribe to the shared EventBus for extension-originated events that
+    // don't flow through the agent's subscribe() channel (e.g., pi.appendEntry
+    // doesn't emit message_start/message_end). The fetch tracker extension emits
+    // "fetched_pages" via pi.events, and we broadcast it as a custom SSE event.
+    const unsubscribeEventBus = eventBus.on("fetched_pages", (data) => {
+        const pages = data as FetchedPage[];
+        console.log("[fetch-tracker] EventBus received fetched_pages:", pages.length, "pages for conversation", conversationId);
+        broadcast(conversationId, {
+            event: "fetched_pages",
+            data: { pages },
+        });
+    });
+
     sessions.set(conversationId, {
         agentSession,
         sessionId: conversationId,
         subscribers: new Map(),
-        unsubscribe,
+        unsubscribe: () => {
+            unsubscribe();
+            unsubscribeEventBus();
+        },
         sandbox,
         conversationSettings: conversationSettings ?? undefined,
-        eventBuffer: [],
     });
 
     return agentSession;
@@ -790,28 +793,6 @@ export function subscribe(
             scheduleDispose(conversationId);
         }
     };
-}
-
-/**
- * Get buffered SSE events after the given event ID.
- * Used to replay missed events when a client reconnects after a page reload.
- * Returns an empty array if the event ID is not found in the buffer
- * (i.e., it's too old and was evicted, or the session doesn't exist).
- */
-export function getBufferedEventsAfter(conversationId: string, lastEventId: string): ChatSSEEvent[] {
-    const session = sessions.get(conversationId);
-    if (!session) return [];
-
-    const idx = session.eventBuffer.findIndex((e) => e.id === lastEventId);
-    if (idx === -1) {
-        // Event ID not in buffer — it was evicted or is from a previous session.
-        // Return nothing; the client will get a "connected" event and can
-        // reload history to catch up.
-        return [];
-    }
-
-    // Return all events after the matched event ID
-    return session.eventBuffer.slice(idx + 1);
 }
 
 /**
@@ -881,12 +862,14 @@ export function disposeSession(conversationId: string, options?: { force?: boole
     const session = sessions.get(conversationId);
     if (!session) return;
 
-    // Don't dispose if the agent is actively generating — the user may reload
-    // the page and we need the session (and its event buffer) to stay alive
-    // so we can replay missed events. Disposal will be retried when the
-    // generation finishes and all subscribers disconnect.
+    // Don't dispose if the agent is actively generating. Disposal will be
+    // retried when the generation finishes and all subscribers disconnect.
     // Force disposal is allowed for explicit conversation deletion.
-    if (!options?.force && session.agentSession.isStreaming) return;
+    //
+    // Also don't dispose if there are active subscribers — even if isStreaming
+    // is momentarily false between events in a multi-turn loop, a connected
+    // client means the session is still in use.
+    if (!options?.force && (session.agentSession.isStreaming || session.subscribers.size > 0)) return;
 
     // Clear any pending disposal timer
     if (session.disposeTimer) {

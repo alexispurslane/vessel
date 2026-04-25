@@ -7,9 +7,14 @@
     interface Props {
         lang?: string;
         text?: string;
+        /** Whether the parent message is still streaming. When true, syntax highlighting
+         *  is deferred to avoid re-highlighting the entire block on every delta.
+         *  Named codeStreaming (not streaming) to avoid collision with SvelteMarkdown's
+         *  built-in streaming prop. */
+        codeStreaming?: boolean;
     }
 
-    let { lang = "", text = "" }: Props = $props();
+    let { lang = "", text = "", codeStreaming = false }: Props = $props();
     let copied = $state(false);
     let codeEl: HTMLDivElement | undefined = $state();
 
@@ -53,13 +58,17 @@
         }
     }
 
-    // Re-highlight when text or lang changes
+    // Re-highlight when text or lang changes — but skip while streaming to avoid
+    // re-highlighting the entire growing code block on every delta. Once streaming
+    // finishes, we highlight the complete block once.
     $effect(() => {
         if (!codeEl) return;
         const mapped = mapLang(lang);
         codeEl.className = mapped ? `shj-lang-${mapped}` : "shj-lang-plain";
         codeEl.textContent = text;
-        highlightElement(codeEl);
+        if (!codeStreaming) {
+            highlightElement(codeEl);
+        }
     });
 </script>
 
