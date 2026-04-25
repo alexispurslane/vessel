@@ -12,10 +12,11 @@ import {
     type AgentSessionEvent as PiAgentSessionEvent,
 } from "@mariozechner/pi-coding-agent";
 import mcpAdapter from "pi-mcp-adapter";
-import { ensureMcpConfigFile, writeConversationMcpConfig, getMcpServersFromDb, MCP_CONFIG_PATH } from "./mcp-config.js";
+import { ensureMcpConfigFile, writeConversationMcpConfig, getMcpServersFromDb, filterMcpServers, MCP_CONFIG_PATH } from "./mcp-config.js";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { createSandboxedCodingTools } from "./sandboxed-tools.js";
 import { createFetchTool } from "./sandboxed-fetch-tool.js";
+import { createSearchTool, SEARCH_SETTINGS_KEYS } from "./sandboxed-search-tool.js";
 import { fetchTracker } from "./extensions/fetch-tracker.js";
 import type { FetchedPage } from "./extensions/fetch-tracker.js";
 import { createSessionSandbox, getSessionWorkDir, loadConversationSettingsFromDb, saveConversationSettingsToDb, isNetworkAllowed, getEffectiveAgentMode } from "./sandbox-factory.js";
@@ -635,19 +636,26 @@ export async function getOrCreateSession(conversationId: string): Promise<PiAgen
         mcpFlagValues.set("mcp-config", MCP_CONFIG_PATH);
     }
 
+    // Determine which MCP servers will be active for this conversation, so we can
+    // skip adding the mcpAdapter extension entirely when no MCP tools are toggled on.
+    const activeMcpServers = filterMcpServers(enabledMcpServers);
+    const hasMcpServers = Object.keys(activeMcpServers).length > 0;
+
     // Create a shared EventBus for the session. We pass it into the ResourceLoader
     // so that extensions can emit events via pi.events, and we can subscribe to those
     // events from outside the extension system (e.g., to broadcast fetched pages via SSE).
     const eventBus = createEventBus();
 
-    // Create a custom ResourceLoader that includes pi-mcp-adapter and our fetch tracker.
+    // Create a custom ResourceLoader that includes the fetch tracker (always) and
+    // pi-mcp-adapter (only when there are enabled MCP servers).
     // This gives extensions access to the full ExtensionAPI lifecycle (session_start,
     // session_shutdown, etc.) which they need to properly connect/teardown resources.
+    const extensionFactories = hasMcpServers ? [mcpAdapter, fetchTracker] : [fetchTracker];
     const resourceLoader = new DefaultResourceLoader({
         cwd: sessionWorkDir,
         agentDir: AGENT_DIR,
         settingsManager,
-        extensionFactories: [mcpAdapter, fetchTracker],
+        extensionFactories,
         eventBus,
     });
     await resourceLoader.reload();
@@ -670,7 +678,8 @@ export async function getOrCreateSession(conversationId: string): Promise<PiAgen
 
     // If MCP servers are configured and we have a per-conversation config path,
     // set the mcp-config flag so pi-mcp-adapter picks it up during session_start.
-    if (mcpFlagValues.size > 0 && extensionsResult) {
+    // Skip this entirely when no MCP servers are active (mcpAdapter not loaded).
+    if (hasMcpServers && mcpFlagValues.size > 0 && extensionsResult) {
         for (const [name, value] of mcpFlagValues) {
             extensionsResult.runtime.flagValues.set(name, value);
         }
@@ -705,6 +714,7 @@ export async function getOrCreateSession(conversationId: string): Promise<PiAgen
         allRegisteredToolNames: [
             ...allAgentTools.map((t) => t.name),
             "fetch",
+            "web_search",
         ],
         conversationSettings,
         sandbox,
@@ -713,7 +723,7 @@ export async function getOrCreateSession(conversationId: string): Promise<PiAgen
         networkAllowed: isNetworkAllowed(conversationSettings),
     });
 
-    // Register Vessel-specific tools (fetch) into the agent session.
+    // Register Vessel-specific tools (fetch, web_search) into the agent session.
     // These aren't part of pi-coding-agent's built-in set, so we need to inject
     // them into all three internal maps:
     //   _toolRegistry      — used by setActiveToolsByName() to resolve tool objects
@@ -734,6 +744,24 @@ export async function getOrCreateSession(conversationId: string): Promise<PiAgen
         sourceInfo: { path: `<sdk:${fetchTool.name}>`, source: "sdk", scope: "user", origin: "top-level" },
     });
     baseToolDefinitions.set(fetchTool.name, fetchTool);
+
+    // Register the web search tool — always active when network access is on.
+    // Read settings from DB at creation time; sessions are restarted on settings change.
+    const searchBaseUrl = (() => {
+        const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(SEARCH_SETTINGS_KEYS.BASE_URL) as { value: string } | undefined;
+        return row?.value || undefined;
+    })();
+    const searchApiKey = (() => {
+        const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(SEARCH_SETTINGS_KEYS.API_KEY) as { value: string } | undefined;
+        return row?.value || undefined;
+    })();
+    const searchTool = createSearchTool({ baseUrl: searchBaseUrl, apiKey: searchApiKey });
+    toolRegistry.set(searchTool.name, searchTool);
+    toolDefinitions.set(searchTool.name, {
+        definition: searchTool,
+        sourceInfo: { path: `<sdk:${searchTool.name}>`, source: "sdk", scope: "user", origin: "top-level" },
+    });
+    baseToolDefinitions.set(searchTool.name, searchTool);
 
     if (sandbox) {
         // Sandbox mode: replace default tool execution with sandboxed operations
@@ -2085,9 +2113,11 @@ function resolveActiveToolNames(input: ResolveActiveToolNamesInput): ResolveActi
 
     // Chat mode: disable all non-MCP built-in and SDK tools.
     // In chat mode, the agent is used as a plain conversation with no tools.
+    // Exception: the fetch tool is kept available when network access is on,
+    // so the model can still fetch web pages even in chat mode.
     if (effectiveAgentMode === "chat") {
         for (const name of allRegisteredToolNames) {
-            if (!mcpToolNames.has(name)) {
+            if (!mcpToolNames.has(name) && !(name === "fetch" && networkAllowed) && !(name === "web_search" && networkAllowed)) {
                 disabledTools.add(name);
             }
         }
@@ -2100,9 +2130,10 @@ function resolveActiveToolNames(input: ResolveActiveToolNamesInput): ResolveActi
         }
     }
 
-    // Fetch tool is auto-disabled when network is off
+    // Fetch and web_search tools are auto-disabled when network is off
     if (!networkAllowed) {
         disabledTools.add("fetch");
+        disabledTools.add("web_search");
     }
 
     // Build the desired set: start from all registered tools, remove disabled ones

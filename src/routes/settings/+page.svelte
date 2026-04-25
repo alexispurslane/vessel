@@ -40,7 +40,6 @@
     import Trash2 from "@lucide/svelte/icons/trash-2";
     import RefreshCw from "@lucide/svelte/icons/refresh-cw";
     import Check from "@lucide/svelte/icons/check";
-    import Settings2 from "@lucide/svelte/icons/settings-2";
     import Pencil from "@lucide/svelte/icons/pencil";
     import Shield from "@lucide/svelte/icons/shield";
     import FileText from "@lucide/svelte/icons/file-text";
@@ -68,6 +67,7 @@
     let newProviderDisplayName = $state("");
     let newProviderModelsEndpoint = $state("");
     let providerError = $state<string | null>(null);
+    let showAddProvider = $state(false);
 
     // Fetch-models state per provider
     let fetchedModels = $state<Record<string, string[]>>({});
@@ -137,6 +137,7 @@
             newProviderBaseUrl = "";
             newProviderDisplayName = "";
             newProviderModelsEndpoint = "";
+            showAddProvider = false;
             await loadProviders();
         } catch (e) {
             providerError = e instanceof Error ? e.message : "Failed to add provider";
@@ -193,6 +194,10 @@
         showAddModel = true;
         // Switch to the custom models tab so the user sees the form
         activeTab = "models";
+        // Scroll to the form after Svelte renders it
+        setTimeout(() => {
+            document.getElementById("custom-model-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 0);
     }
 
     function isModelAdded(modelId: string): boolean {
@@ -340,6 +345,9 @@
         cmCostCacheWrite = cm.cost.cacheWrite;
         editingModelId = cm.id;
         showAddModel = true;
+        setTimeout(() => {
+            document.getElementById("custom-model-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 0);
     }
 
     onMount(() => {
@@ -356,7 +364,7 @@
     let settingsError = $state<string | null>(null);
     let defaultModelId = $state<string>(""); // Just the model ID
     let secondaryModelId = $state<string>(""); // Just the model ID
-    let activeTab = $state("providers");
+    let activeTab = $state("models");
 
     async function loadAppSettings() {
         settingsLoading = true;
@@ -368,6 +376,7 @@
             if (sm) secondaryModelId = sm;
             loadSandboxSettings();
             loadAgentSettings();
+            loadSearchSettings();
         } catch (e) {
             settingsError = e instanceof Error ? e.message : "Failed to load settings";
         } finally {
@@ -505,7 +514,6 @@
                 "sandbox.enabled": sandboxEnabled ? "true" : "false",
                 "sandbox.allowNet": sandboxAllowNet ? "true" : "false",
                 "sandbox.allowAllDomains": sandboxAllowAllDomains ? "true" : "false",
-                "sandbox.defaultAgentMode": defaultAgentMode,
                 "sandbox.secrets": JSON.stringify(secretsObj),
                 "sandbox.snapshotEnabled": sandboxSnapshotEnabled ? "true" : "false",
                 ...pillLists,
@@ -691,125 +699,154 @@
         editingMcpName = server.name;
         showAddMcp = true;
     }
+
+    // --- Search Grounding settings state ---
+    let searchBaseUrl = $state("");
+    let searchApiKey = $state("");
+    let searchSettingsLoading = $state(false);
+    let searchSettingsSaved = $state(false);
+    let searchSettingsError = $state<string | null>(null);
+
+    function loadSearchSettings() {
+        searchSettingsLoading = true;
+        try {
+            searchBaseUrl = appSettings["search.baseUrl"] || "";
+            searchApiKey = appSettings["search.apiKey"] || "";
+        } catch {
+            // Use defaults on parse error
+        } finally {
+            searchSettingsLoading = false;
+        }
+    }
+
+    async function saveSearchSettings() {
+        searchSettingsError = null;
+        searchSettingsSaved = false;
+        try {
+            await updateSettings({
+                "search.baseUrl": searchBaseUrl,
+                "search.apiKey": searchApiKey,
+            });
+
+            // Restart all active sessions so they pick up the new search settings
+            await restartAllSessions();
+
+            searchSettingsSaved = true;
+            setTimeout(() => { searchSettingsSaved = false; }, 2000);
+        } catch (e) {
+            searchSettingsError = e instanceof Error ? e.message : "Failed to save search settings";
+        }
+    }
 </script>
 
 <PageLayout title="Settings" onback={handleBack}>
     <Tabs bind:value={activeTab}>
         <TabsList class="mb-6 w-full justify-start">
-            <TabsTrigger value="defaults"><Settings2 class="mr-1.5 h-4 w-4" /> Defaults</TabsTrigger
-            >
-            <TabsTrigger value="providers"><Key class="mr-1.5 h-4 w-4" /> Providers</TabsTrigger>
             <TabsTrigger value="models"><Cpu class="mr-1.5 h-4 w-4" /> Models</TabsTrigger>
+            <TabsTrigger value="tools"><Plug class="mr-1.5 h-4 w-4" /> Tools</TabsTrigger>
             <TabsTrigger value="sandbox"><Shield class="mr-1.5 h-4 w-4" /> Sandbox</TabsTrigger>
             <TabsTrigger value="agent"><FileText class="mr-1.5 h-4 w-4" /> Agent</TabsTrigger>
-            <TabsTrigger value="mcp"><Plug class="mr-1.5 h-4 w-4" /> MCP Servers</TabsTrigger>
         </TabsList>
 
-        <!-- Defaults Tab -->
-        <TabsContent value="defaults">
+        <!-- Models Tab -->
+        <TabsContent value="models">
             <Card>
                 <CardHeader>
-                    <CardTitle>Default Models</CardTitle>
+                    <CardTitle>Models</CardTitle>
                     <CardDescription
-                        >Choose the default model for new chats and the secondary model used for
-                        auto-generating titles and tags.</CardDescription
+                        >Configure LLM providers, default models, and custom model definitions.</CardDescription
                     >
                 </CardHeader>
                 <CardContent>
-                    {#if settingsLoading}
-                        <div class="flex items-center justify-center py-8">
-                            <Spinner class="h-6 w-6" />
+                    <div class="space-y-8">
+                        <!-- Default Models Section -->
+                        <div>
+                            <h3 class="text-base font-medium">Default Models</h3>
+                            <p class="text-sm text-muted-foreground">Choose the default model for new chats and the secondary model used for auto-generating titles and tags.</p>
                         </div>
-                    {:else}
-                        <div class="space-y-6">
-                            {#if settingsError}
-                                <p class="text-sm text-destructive">
-                                    {settingsError}
-                                </p>
-                            {/if}
-
-                            <!-- Default Chat Model -->
-                            <div class="space-y-2">
-                                <Label>Default Chat Model</Label>
-                                <p class="text-xs text-muted-foreground">
-                                    The model used by default when starting new conversations.
-                                </p>
-                                <Select
-                                    type="single"
-                                    value={defaultModelId}
-                                    onValueChange={(v: string) => saveDefaultModel(v)}
-                                >
-                                    <SelectTrigger class="w-full">
-                                        <SelectValue placeholder="Auto (first available)" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="">Auto (first available)</SelectItem>
-                                        {#each models as model (model.id)}
-                                            <SelectItem value={model.id}>
-                                                {model.name}
-                                                <span class="text-muted-foreground ml-1"
-                                                    >({model.provider})</span
-                                                >
-                                            </SelectItem>
-                                        {/each}
-                                    </SelectContent>
-                                </Select>
+                        {#if settingsLoading}
+                            <div class="flex items-center justify-center py-8">
+                                <Spinner class="h-6 w-6" />
                             </div>
+                        {:else}
+                            <div class="space-y-6">
+                                {#if settingsError}
+                                    <p class="text-sm text-destructive">
+                                        {settingsError}
+                                    </p>
+                                {/if}
 
-                            <Separator />
+                                <div class="space-y-2">
+                                    <Label>Default Chat Model</Label>
+                                    <p class="text-xs text-muted-foreground">
+                                        The model used by default when starting new conversations.
+                                    </p>
+                                    <Select
+                                        type="single"
+                                        value={defaultModelId}
+                                        onValueChange={(v: string) => saveDefaultModel(v)}
+                                    >
+                                        <SelectTrigger class="w-full">
+                                            <SelectValue placeholder="Auto (first available)" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="">Auto (first available)</SelectItem>
+                                            {#each models as model (model.id)}
+                                                <SelectItem value={model.id}>
+                                                    {model.name}
+                                                    <span class="text-muted-foreground ml-1"
+                                                        >({model.provider})</span
+                                                    >
+                                                </SelectItem>
+                                            {/each}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
 
-                            <!-- Secondary Model -->
-                            <div class="space-y-2">
-                                <Label>Secondary Model (Titles & Tags)</Label>
-                                <p class="text-xs text-muted-foreground">
-                                    Used for auto-generating conversation titles and tags. A fast,
-                                    cheap model is recommended.
-                                </p>
-                                <Select
-                                    type="single"
-                                    value={secondaryModelId}
-                                    onValueChange={(v: string) => saveSecondaryModel(v)}
-                                >
-                                    <SelectTrigger class="w-full">
-                                        <SelectValue placeholder="Same as default" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="">Same as default</SelectItem>
-                                        {#each models as model (model.id)}
-                                            <SelectItem value={model.id}>
-                                                {model.name}
-                                                <span class="text-muted-foreground ml-1"
-                                                    >({model.provider})</span
-                                                >
-                                            </SelectItem>
-                                        {/each}
-                                    </SelectContent>
-                                </Select>
+                                <Separator />
+
+                                <div class="space-y-2">
+                                    <Label>Secondary Model (Titles & Tags)</Label>
+                                    <p class="text-xs text-muted-foreground">
+                                        Used for auto-generating conversation titles and tags. A fast,
+                                        cheap model is recommended.
+                                    </p>
+                                    <Select
+                                        type="single"
+                                        value={secondaryModelId}
+                                        onValueChange={(v: string) => saveSecondaryModel(v)}
+                                    >
+                                        <SelectTrigger class="w-full">
+                                            <SelectValue placeholder="Same as default" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="">Same as default</SelectItem>
+                                            {#each models as model (model.id)}
+                                                <SelectItem value={model.id}>
+                                                    {model.name}
+                                                    <span class="text-muted-foreground ml-1"
+                                                        >({model.provider})</span
+                                                        >
+                                                </SelectItem>
+                                            {/each}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
                             </div>
-                        </div>
-                    {/if}
-                </CardContent>
-            </Card>
-        </TabsContent>
+                        {/if}
 
-        <!-- Providers Tab -->
-        <TabsContent value="providers">
-            <Card>
-                <CardHeader>
-                    <CardTitle>API Providers</CardTitle>
-                    <CardDescription
-                        >Configure LLM provider API keys and base URLs. OpenAI-compatible providers
-                        can auto-discover models from a <code
-                            class="text-xs bg-muted px-1 py-0.5 rounded">/v1/models</code
-                        > endpoint.</CardDescription
-                    >
-                </CardHeader>
-                <CardContent>
-                    {#if providerLoading}
-                        <div class="flex items-center justify-center py-8">
-                            <Spinner class="h-6 w-6" />
+                        <Separator />
+
+                        <!-- API Providers Section -->
+                        <div>
+                            <h3 class="text-base font-medium">API Providers</h3>
+                            <p class="text-sm text-muted-foreground">Configure LLM provider API keys and base URLs. OpenAI-compatible providers can auto-discover models from a <code class="text-xs bg-muted px-1 py-0.5 rounded">/v1/models</code> endpoint.</p>
                         </div>
-                    {:else}
+                        {#if providerLoading}
+                            <div class="flex items-center justify-center py-8">
+                                <Spinner class="h-6 w-6" />
+                            </div>
+                        {:else}
                         {#if providers.length > 0}
                             <div class="mb-6 space-y-3">
                                 {#each providers as prov (prov.provider)}
@@ -930,8 +967,9 @@
                             </p>
                         {/if}
 
-                        <div class="space-y-3">
-                            <p class="text-sm font-medium">Add Provider</p>
+                            {#if showAddProvider}
+                            <div class="space-y-3">
+                                <p class="text-sm font-medium">Add Provider</p>
                             <div class="grid grid-cols-2 gap-3">
                                 <div>
                                     <Label for="prov-name">Provider</Label>
@@ -1001,36 +1039,35 @@
                                     </p>
                                 </div>
                             {/if}
-                            <Button
-                                onclick={addProvider}
-                                disabled={!newProviderName || !newProviderKey}
-                            >
-                                <Plus class="mr-1.5 h-4 w-4" /> Add Provider
-                            </Button>
-                        </div>
-                    {/if}
-                </CardContent>
-            </Card>
-        </TabsContent>
+                                <Button
+                                    onclick={addProvider}
+                                    disabled={!newProviderName || !newProviderKey}
+                                >
+                                    <Plus class="mr-1.5 h-4 w-4" /> Add Provider
+                                </Button>
+                            </div>
+                            {:else}
+                                <Button variant="outline" onclick={() => (showAddProvider = true)}>
+                                    <Plus class="mr-1.5 h-4 w-4" /> Add Provider
+                                </Button>
+                            {/if}
+                        {/if}
 
-        <!-- Models Tab -->
-        <TabsContent value="models">
-            <Card>
-                <CardHeader>
-                    <CardTitle>Models</CardTitle>
-                    <CardDescription
-                        >Custom models configured for local providers like Ollama, vLLM, or LM Studio.</CardDescription
-                    >
-                </CardHeader>
-                <CardContent>
-                    {#if customModelLoading}
-                        <div class="flex items-center justify-center py-8">
-                            <Spinner class="h-6 w-6" />
+                        <Separator />
+
+                        <!-- Custom Models Section -->
+                        <div>
+                            <h3 class="text-base font-medium">Custom Models</h3>
+                            <p class="text-sm text-muted-foreground">Custom models configured for local providers like Ollama, vLLM, or LM Studio.</p>
                         </div>
-                    {:else}
-                        {#if customModels.length > 0}
-                            <div class="mb-6 space-y-3">
-                                {#each customModels as cm (cm.id + cm.provider)}
+                        {#if customModelLoading}
+                            <div class="flex items-center justify-center py-8">
+                                <Spinner class="h-6 w-6" />
+                            </div>
+                        {:else}
+                            {#if customModels.length > 0}
+                                <div class="mb-6 space-y-3">
+                                    {#each customModels as cm (cm.id + cm.provider)}
                                     <div class="rounded-lg border p-3">
                                         <div class="flex items-center justify-between">
                                             <div class="flex items-center gap-3">
@@ -1098,7 +1135,7 @@
                         <Separator class="my-4" />
 
                         {#if showAddModel}
-                            <div class="space-y-4 rounded-lg border p-4">
+                            <div id="custom-model-form" class="space-y-4 rounded-lg border p-4">
                                 <p class="font-medium">
                                     {editingModelId ? "Edit Model" : "Add Custom Model"}
                                 </p>
@@ -1270,7 +1307,8 @@
                                 <Plus class="mr-1.5 h-4 w-4" /> Add Custom Model
                             </Button>
                         {/if}
-                    {/if}
+                        {/if}
+                    </div>
                 </CardContent>
             </Card>
         </TabsContent>
@@ -1312,32 +1350,6 @@
                                     >
                                 </div>
                                 <Switch bind:checked={sandboxEnabled} />
-                            </div>
-
-                            <!-- Default Agent Mode -->
-                            <div class="rounded-lg border p-4">
-                                <div class="space-y-3">
-                                    <div>
-                                        <Label class="text-base font-medium">Default Mode</Label>
-                                        <p class="text-sm text-muted-foreground mt-1">
-                                            Agent mode enables all tools by default. Chat mode disables tools for plain conversation. Individual conversations can override this.
-                                        </p>
-                                    </div>
-                                    <div class="flex gap-2">
-                                        <button
-                                            class="px-3 py-1.5 text-sm rounded-md border transition-colors {defaultAgentMode === 'agent' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
-                                            onclick={() => (defaultAgentMode = 'agent')}
-                                        >
-                                            Agent
-                                        </button>
-                                        <button
-                                            class="px-3 py-1.5 text-sm rounded-md border transition-colors {defaultAgentMode === 'chat' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
-                                            onclick={() => (defaultAgentMode = 'chat')}
-                                        >
-                                            Chat
-                                        </button>
-                                    </div>
-                                </div>
                             </div>
 
                             {#if sandboxEnabled}
@@ -1565,130 +1577,208 @@
             </Card>
         </TabsContent>
 
-        <!-- MCP Servers Tab -->
-        <TabsContent value="mcp">
+        <!-- Tools Tab -->
+        <TabsContent value="tools">
             <Card>
                 <CardHeader>
-                    <CardTitle>MCP Servers</CardTitle>
+                    <CardTitle>Tools</CardTitle>
                     <CardDescription
-                        >Configure MCP (Model Context Protocol) servers to give the agent access to external tools and resources. Uses the standard Claude-like <code
-                            class="rounded bg-muted px-1 py-0.5 text-xs font-mono"
-                            >mcpServers</code
-                        >
-                        JSON configuration syntax.</CardDescription
+                        >Configure the agent's default mode and external tools: MCP servers for custom integrations, and web search for grounding responses in real-time information.</CardDescription
                     >
                 </CardHeader>
                 <CardContent>
-                    {#if mcpLoading}
-                        <div class="flex items-center justify-center py-8">
-                            <Spinner class="h-6 w-6" />
+                    <div class="space-y-8">
+                        <!-- Default Mode Section -->
+                        <div class="rounded-lg border p-4">
+                            <div class="space-y-3">
+                                <div>
+                                    <Label class="text-base font-medium">Default Mode</Label>
+                                    <p class="text-sm text-muted-foreground mt-1">
+                                        Agent mode enables all tools by default. Chat mode disables tools for plain conversation. Individual conversations can override this.
+                                    </p>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <div class="flex gap-2">
+                                        <button
+                                            class="px-3 py-1.5 text-sm rounded-md border transition-colors {defaultAgentMode === 'agent' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+                                            onclick={async () => { defaultAgentMode = 'agent'; await updateSettings({ 'sandbox.defaultAgentMode': 'agent' }); await restartAllSessions(); }}
+                                        >
+                                            Agent
+                                        </button>
+                                        <button
+                                            class="px-3 py-1.5 text-sm rounded-md border transition-colors {defaultAgentMode === 'chat' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+                                            onclick={async () => { defaultAgentMode = 'chat'; await updateSettings({ 'sandbox.defaultAgentMode': 'chat' }); await restartAllSessions(); }}
+                                        >
+                                            Chat
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
-                    {:else}
-                        {#if mcpServers.length > 0}
-                            <div class="mb-6 space-y-3">
-                                {#each mcpServers as server (server.name)}
-                                    <div class="rounded-lg border p-3">
-                                        <div class="flex items-center justify-between">
-                                            <div class="flex items-center gap-3">
-                                                <span class="font-medium">{server.name}</span>
-                                                {#if server.config.command}
-                                                    <Badge variant="outline" class="text-xs">stdio</Badge>
-                                                {:else if server.config.url}
-                                                    <Badge variant="outline" class="text-xs">http</Badge>
-                                                {/if}
-                                                <div class="flex items-center gap-1.5 text-xs text-muted-foreground">
-                                                    <Switch
-                                                        checked={server.config.defaultEnabled !== false}
-                                                        onCheckedChange={(checked: boolean) => {
-                                                            server.config.defaultEnabled = checked;
-                                                            upsertMcpServer(server.name, server.config);
-                                                        }}
-                                                    />
-                                                    <span>{server.config.defaultEnabled !== false ? 'On by default' : 'Off by default'}</span>
+
+                        <Separator />
+
+                        <!-- MCP Servers Section -->
+                        {#if mcpLoading}
+                            <div class="flex items-center justify-center py-8">
+                                <Spinner class="h-6 w-6" />
+                            </div>
+                        {:else}
+                            {#if mcpServers.length > 0}
+                                <div class="mb-6 space-y-3">
+                                    {#each mcpServers as server (server.name)}
+                                        <div class="rounded-lg border p-3">
+                                            <div class="flex items-center justify-between">
+                                                <div class="flex items-center gap-3">
+                                                    <span class="font-medium">{server.name}</span>
+                                                    {#if server.config.command}
+                                                        <Badge variant="outline" class="text-xs">stdio</Badge>
+                                                    {:else if server.config.url}
+                                                        <Badge variant="outline" class="text-xs">http</Badge>
+                                                    {/if}
+                                                    <div class="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                                        <Switch
+                                                            checked={server.config.defaultEnabled !== false}
+                                                            onCheckedChange={(checked: boolean) => {
+                                                                server.config.defaultEnabled = checked;
+                                                                upsertMcpServer(server.name, server.config);
+                                                            }}
+                                                        />
+                                                        <span>{server.config.defaultEnabled !== false ? 'On by default' : 'Off by default'}</span>
+                                                    </div>
+                                                </div>
+                                                <div class="flex items-center gap-1">
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onclick={() => editMcpServer(server)}
+                                                    >
+                                                        <Pencil class="h-4 w-4" />
+                                                    </Button>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onclick={() => removeMcpServer(server.name)}
+                                                    >
+                                                        <Trash2 class="h-4 w-4" />
+                                                    </Button>
                                                 </div>
                                             </div>
-                                            <div class="flex items-center gap-1">
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    onclick={() => editMcpServer(server)}
-                                                >
-                                                    <Pencil class="h-4 w-4" />
-                                                </Button>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    onclick={() => removeMcpServer(server.name)}
-                                                >
-                                                    <Trash2 class="h-4 w-4" />
-                                                </Button>
-                                            </div>
+                                            {#if server.config.command}
+                                                <p class="mt-1 text-sm text-muted-foreground">
+                                                    <code class="text-xs">{server.config.command}{#if server.config.args?.length} {server.config.args.join(' ')}{/if}</code>
+                                                </p>
+                                            {:else if server.config.url}
+                                                <p class="mt-1 text-sm text-muted-foreground">
+                                                    <code class="text-xs">{server.config.url}</code>
+                                                </p>
+                                            {/if}
                                         </div>
-                                        {#if server.config.command}
-                                            <p class="mt-1 text-sm text-muted-foreground">
-                                                <code class="text-xs">{server.config.command}{#if server.config.args?.length} {server.config.args.join(' ')}{/if}</code>
-                                            </p>
-                                        {:else if server.config.url}
-                                            <p class="mt-1 text-sm text-muted-foreground">
-                                                <code class="text-xs">{server.config.url}</code>
-                                            </p>
-                                        {/if}
+                                    {/each}
+                                </div>
+                                <Separator class="my-4" />
+                            {:else}
+                                <p class="mb-4 text-center text-muted-foreground">No MCP servers configured yet.</p>
+                            {/if}
+
+                            {#if mcpError}
+                                <p class="mb-4 text-sm text-destructive">{mcpError}</p>
+                            {/if}
+
+                            {#if showAddMcp}
+                                <div class="space-y-4 rounded-lg border p-4">
+                                    <p class="font-medium">{editingMcpName ? 'Edit' : 'Add'} MCP Server</p>
+                                    <div>
+                                        <Label for="mcp-name" class="mb-1">Name</Label>
+                                        <Input
+                                            id="mcp-name"
+                                            placeholder="e.g. filesystem, github"
+                                            bind:value={mcpName}
+                                            disabled={!!editingMcpName}
+                                        />
                                     </div>
-                                {/each}
+                                    <div>
+                                        <Label for="mcp-config" class="mb-1">Configuration (JSON)</Label>
+                                        <p class="text-xs text-muted-foreground mb-1">
+                                            Standard MCP server config: <code class="text-xs">{mcpConfigExample}</code>
+                                        </p>
+                                        <textarea
+                                            id="mcp-config"
+                                            class="flex min-h-[120px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                            placeholder={mcpConfigExample}
+                                            bind:value={mcpConfigJson}
+                                        ></textarea>
+                                    </div>
+                                    <div class="flex gap-2">
+                                        <Button onclick={saveMcpServer} disabled={mcpSaving}>
+                                            {#if mcpSaving}
+                                                <Spinner class="mr-1.5 h-4 w-4" />
+                                            {:else if editingMcpName}
+                                                <Check class="mr-1.5 h-4 w-4" />
+                                            {:else}
+                                                <Plus class="mr-1.5 h-4 w-4" />
+                                            {/if}
+                                            {editingMcpName ? 'Update' : 'Add'} Server
+                                        </Button>
+                                        <Button variant="outline" onclick={resetMcpForm}>Cancel</Button>
+                                    </div>
+                                </div>
+                            {:else}
+                                <Button variant="outline" onclick={() => (showAddMcp = true)}>
+                                    <Plus class="mr-1.5 h-4 w-4" /> Add MCP Server
+                                </Button>
+                            {/if}
+                        {/if}
+
+                        <Separator />
+
+                        <!-- Search Grounding Section -->
+                        {#if searchSettingsLoading}
+                            <div class="flex items-center justify-center py-8">
+                                <Spinner class="h-6 w-6" />
                             </div>
-                            <Separator class="my-4" />
                         {:else}
-                            <p class="mb-4 text-center text-muted-foreground">No MCP servers configured yet.</p>
-                        {/if}
-
-                        {#if mcpError}
-                            <p class="mb-4 text-sm text-destructive">{mcpError}</p>
-                        {/if}
-
-                        {#if showAddMcp}
-                            <div class="space-y-4 rounded-lg border p-4">
-                                <p class="font-medium">{editingMcpName ? 'Edit' : 'Add'} MCP Server</p>
-                                <div>
-                                    <Label for="mcp-name" class="mb-1">Name</Label>
-                                    <Input
-                                        id="mcp-name"
-                                        placeholder="e.g. filesystem, github"
-                                        bind:value={mcpName}
-                                        disabled={!!editingMcpName}
-                                    />
+                            <div class="space-y-6">
+                                {#if searchSettingsError}
+                                    <p class="text-sm text-destructive">{searchSettingsError}</p>
+                                {/if}
+                                {#if searchSettingsSaved}
+                                    <p class="text-sm text-green-600">Settings saved.</p>
+                                {/if}
+                                <div class="space-y-3">
+                                    <div class="space-y-2">
+                                        <Label for="search-base-url" class="text-sm font-medium">Search API Base URL</Label>
+                                        <p class="text-xs text-muted-foreground">The search API endpoint. Defaults to <code class="text-xs">https://api.exa.ai/search</code> if left empty. For testing with Synthetic, use <code class="text-xs">https://api.synthetic.new/v2/search</code>.</p>
+                                        <Input
+                                            id="search-base-url"
+                                            type="url"
+                                            placeholder="https://api.exa.ai/search"
+                                            bind:value={searchBaseUrl}
+                                        />
+                                    </div>
+                                    <div class="space-y-2">
+                                        <Label for="search-api-key" class="text-sm font-medium">Search API Key</Label>
+                                        <p class="text-xs text-muted-foreground">Your search API key. Required for the web search tool to work.</p>
+                                        <Input
+                                            id="search-api-key"
+                                            type="password"
+                                            placeholder="Enter your API key"
+                                            bind:value={searchApiKey}
+                                        />
+                                    </div>
                                 </div>
-                                <div>
-                                    <Label for="mcp-config" class="mb-1">Configuration (JSON)</Label>
-                                    <p class="text-xs text-muted-foreground mb-1">
-                                        Standard MCP server config: <code class="text-xs">{mcpConfigExample}</code>
-                                    </p>
-                                    <textarea
-                                        id="mcp-config"
-                                        class="flex min-h-[120px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                                        placeholder={mcpConfigExample}
-                                        bind:value={mcpConfigJson}
-                                    ></textarea>
-                                </div>
-                                <div class="flex gap-2">
-                                    <Button onclick={saveMcpServer} disabled={mcpSaving}>
-                                        {#if mcpSaving}
-                                            <Spinner class="mr-1.5 h-4 w-4" />
-                                        {:else if editingMcpName}
-                                            <Check class="mr-1.5 h-4 w-4" />
+                                <div class="flex justify-end pt-2">
+                                    <Button onclick={saveSearchSettings}>
+                                        {#if searchSettingsSaved}
+                                            <Check class="mr-1.5 h-4 w-4" /> Saved
                                         {:else}
-                                            <Plus class="mr-1.5 h-4 w-4" />
+                                            Save
                                         {/if}
-                                        {editingMcpName ? 'Update' : 'Add'} Server
                                     </Button>
-                                    <Button variant="outline" onclick={resetMcpForm}>Cancel</Button>
                                 </div>
                             </div>
-                        {:else}
-                            <Button variant="outline" onclick={() => (showAddMcp = true)}>
-                                <Plus class="mr-1.5 h-4 w-4" /> Add MCP Server
-                            </Button>
                         {/if}
-                    {/if}
+                    </div>
                 </CardContent>
             </Card>
         </TabsContent>
