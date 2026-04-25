@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@source "../node_modules/svelte-streamdown/**/*";
 @import "tw-animate-css";
 @import "shadcn-svelte/tailwind.css";
 @import "@fontsource-variable/inter";
@@ -125,6 +126,8 @@
 }
 
 /* Markdown prose styles for rendered chat messages */
+/* Streamdown handles element-level styling via its theme system, */
+/* so we only need wrapper-level prose typography here. */
 .markdown-prose {
     font-family: var(--font-serif);
     line-height: 1.7;
@@ -136,154 +139,68 @@
     word-break: auto-phrase;
     overflow-wrap: anywhere;
     font-size: 1.1em;
+
+    /* Constrain Streamdown's root div to message width */
+    &>div {
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+
+    /* Minor Third modular scale (1.200) for headings */
+    & h1 {
+        font-size: 2.074em;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        line-height: 1.2;
+    }
+
+    & h2 {
+        font-size: 1.728em;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        line-height: 1.2;
+    }
+
+    & h3 {
+        font-size: 1.44em;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        line-height: 1.25;
+    }
+
+    & h4 {
+        font-size: 1.2em;
+        font-weight: 600;
+        line-height: 1.3;
+    }
+
+    & h5 {
+        font-size: 1em;
+        font-weight: 600;
+        line-height: 1.4;
+    }
+
+    & h6 {
+        font-size: 0.833em;
+        font-weight: 600;
+        line-height: 1.4;
+    }
 }
 
-.markdown-prose p {
-    margin: 0.5em 0;
+/* Thinking section: more compact, uses sans-serif font */
+.markdown-thinking {
+    font-family: var(--font-sans);
+    font-size: 0.75rem;
+    line-height: 1.5;
 }
 
-.markdown-prose p:first-child {
-    margin-top: 0;
-}
-
-.markdown-prose p:last-child {
-    margin-bottom: 0;
-}
-
-.markdown-prose h1,
-.markdown-prose h2,
-.markdown-prose h3,
-.markdown-prose h4,
-.markdown-prose h5,
-.markdown-prose h6 {
-    margin-top: 1.25em;
-    margin-bottom: 0.5em;
-    line-height: 1.2;
-}
-
-.markdown-prose h1 {
-    font-size: 1.802em;
-    font-weight: 700;
-    letter-spacing: -0.03em;
-}
-
-.markdown-prose h2 {
-    font-size: 1.602em;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-}
-
-.markdown-prose h3 {
-    font-size: 1.424em;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-}
-
-.markdown-prose h4 {
-    font-size: 1.266em;
-    font-weight: 600;
-}
-
-.markdown-prose h5 {
-    font-size: 1.125em;
-    font-weight: 600;
-}
-
-.markdown-prose h6 {
-    font-size: 1em;
-    font-weight: 600;
-}
-
-.markdown-prose ul,
-.markdown-prose ol {
-    padding-left: 1.5em;
-    margin: 0.5em 0;
-}
-
-.markdown-prose ul {
-    list-style-type: disc;
-}
-
-.markdown-prose ol {
-    list-style-type: decimal;
-}
-
-.markdown-prose li {
+.markdown-thinking p {
     margin: 0.25em 0;
 }
 
-.markdown-prose li>ul,
-.markdown-prose li>ol {
-    margin: 0;
-}
-
-.markdown-prose blockquote {
-    border-left: 3px solid var(--border);
-    padding-left: 1em;
-    margin: 0.5em 0;
-    color: var(--muted-foreground);
-}
-
-.markdown-prose a {
-    color: var(--primary);
-    text-decoration: underline;
-    text-underline-offset: 2px;
-}
-
-.markdown-prose a:hover {
-    opacity: 0.8;
-}
-
-.markdown-prose hr {
-    border: none;
-    border-top: 1px solid var(--border);
-    margin: 1em 0;
-}
-
-.markdown-prose table {
-    border-collapse: collapse;
-    margin: 0.5em 0;
-    font-size: 0.9em;
-}
-
-.markdown-prose th,
-.markdown-prose td {
-    border: 1px solid var(--border);
-    padding: 0.4em 0.75em;
-    text-align: left;
-}
-
-.markdown-prose th {
-    font-weight: 600;
-    background: var(--muted);
-}
-
-.markdown-prose img {
-    max-width: 100%;
-    border-radius: 0.5em;
-}
-
-.markdown-prose code:not(pre code) {
-    background: var(--muted);
-    padding: 0.15em 0.35em;
-    border-radius: 0.25em;
-    font-size: 0.875em;
-    font-family: var(--font-mono, ui-monospace, monospace);
-}
-
-.markdown-prose pre {
-    margin: 0;
-}
-
-.markdown-prose pre code {
-    background: none;
-    padding: 0;
-    font-size: inherit;
-}
-
-.markdown-prose input[type="checkbox"] {
-    margin-right: 0.5em;
-    vertical-align: middle;
+.markdown-thinking ul,
+.markdown-thinking ol {
+    margin: 0.25em 0;
 }
 
 /* Speed-highlight syntax highlighting token colors */
@@ -397,30 +314,6 @@
     background: none;
 }
 
-/* Thinking section: more compact styling */
-.markdown-thinking {
-    font-size: 0.75rem;
-}
-
-.markdown-thinking h1,
-.markdown-thinking h2,
-.markdown-thinking h3,
-.markdown-thinking h4,
-.markdown-thinking h5,
-.markdown-thinking h6 {
-    font-size: 1em;
-    margin-top: 0.75em;
-    margin-bottom: 0.25em;
-}
-
-.markdown-thinking p {
-    margin: 0.25em 0;
-}
-
-.markdown-thinking ul,
-.markdown-thinking ol {
-    margin: 0.25em 0;
-}
 
 .tag-pill-colors {
     color: hsl(var(--tag-hue), 60%, 38%);

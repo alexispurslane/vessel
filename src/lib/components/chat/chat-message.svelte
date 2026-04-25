@@ -1,5 +1,5 @@
 <script lang="ts">
-    import SvelteMarkdown from "@humanspeak/svelte-markdown";
+    import { Streamdown, type DeepPartialTheme } from "svelte-streamdown";
     import { Spinner } from "$lib/components/ui/spinner/index.js";
     import Brain from "@lucide/svelte/icons/brain";
     import ChevronDown from "@lucide/svelte/icons/chevron-down";
@@ -46,9 +46,62 @@
         navigating = false,
     }: Props = $props();
 
-    /** Custom renderers for SvelteMarkdown */
-    const renderers = {
-        code: CodeBlock,
+    /** Theme override for user messages — needs text-primary-foreground instead of text-foreground */
+    const userMsgTheme: DeepPartialTheme = {
+        h1: { base: 'mt-4 mb-1 text-xl font-semibold text-primary-foreground' },
+        h2: { base: 'mt-4 mb-1 text-lg font-semibold text-primary-foreground' },
+        h3: { base: 'mt-3 mb-1 text-base font-semibold text-primary-foreground' },
+        h4: { base: 'mt-3 mb-1 text-sm font-semibold text-primary-foreground' },
+        h5: { base: 'mt-2 mb-1 text-sm font-semibold text-primary-foreground' },
+        h6: { base: 'mt-2 mb-1 text-xs font-semibold text-primary-foreground' },
+        paragraph: { base: 'text-primary-foreground' },
+        ul: { base: 'ml-4 list-inside list-disc whitespace-normal text-primary-foreground' },
+        ol: { base: 'ml-4 list-inside whitespace-normal text-primary-foreground' },
+        li: { base: 'py-0.5 text-primary-foreground' },
+        blockquote: { base: 'border-primary-foreground/30 text-primary-foreground/80 my-2 border-l-4 pl-4 italic' },
+        strong: { base: 'font-semibold text-primary-foreground' },
+        em: { base: 'italic text-primary-foreground' },
+        del: { base: 'text-primary-foreground/60 line-through' },
+        link: { base: 'text-primary-foreground underline wrap-anywhere font-medium hover:text-primary-foreground/80' },
+        codespan: { base: 'bg-primary-foreground/15 rounded px-1.5 py-0.5 font-mono text-primary-foreground text-[0.9em]' },
+        hr: { base: 'border-primary-foreground/30 my-4' },
+        table: { base: 'overflow-x-auto max-w-full my-2 border border-primary-foreground/20 rounded-lg' },
+        thead: { base: 'bg-primary-foreground/10' },
+        tr: { base: 'border-primary-foreground/15 border-b' },
+        th: { base: 'px-3 py-2 text-xs font-semibold text-primary-foreground min-w-0' },
+        td: { base: 'px-3 py-2 text-xs text-primary-foreground min-w-0 break-words' },
+    };
+
+    /** Theme override for assistant messages — constrain widths, use serif font, compact spacing */
+    const assistantMsgTheme: DeepPartialTheme = {
+        h1: { base: 'mt-4 mb-1 text-xl font-semibold' },
+        h2: { base: 'mt-4 mb-1 text-lg font-semibold' },
+        h3: { base: 'mt-3 mb-1 text-base font-semibold' },
+        h4: { base: 'mt-3 mb-1 text-sm font-semibold' },
+        h5: { base: 'mt-2 mb-1 text-sm font-semibold' },
+        h6: { base: 'mt-2 mb-1 text-xs font-semibold' },
+        paragraph: { base: '' },
+        ul: { base: 'ml-4 list-inside list-disc whitespace-normal' },
+        ol: { base: 'ml-4 list-inside whitespace-normal' },
+        li: { base: 'py-0.5' },
+        blockquote: { base: 'my-2 border-l-4 pl-4 italic' },
+        table: { base: 'overflow-x-auto max-w-full my-2 rounded-lg border border-border' },
+        th: { base: 'px-3 py-2 text-xs font-semibold min-w-0' },
+        td: { base: 'px-3 py-2 text-xs min-w-0 break-words' },
+        code: { base: 'my-2 w-full overflow-hidden rounded-lg border border-border flex flex-col max-w-full' },
+    };
+
+    /** Theme override for thinking block — very compact */
+    const thinkingTheme: DeepPartialTheme = {
+        h1: { base: 'mt-2 mb-0.5 text-xs font-semibold' },
+        h2: { base: 'mt-2 mb-0.5 text-xs font-semibold' },
+        h3: { base: 'mt-1.5 mb-0.5 text-xs font-semibold' },
+        h4: { base: 'mt-1 mb-0.5 text-xs font-semibold' },
+        paragraph: { base: '' },
+        ul: { base: 'ml-3 list-inside list-disc whitespace-normal' },
+        ol: { base: 'ml-3 list-inside whitespace-normal' },
+        li: { base: 'py-0' },
+        code: { base: 'my-1 w-full overflow-hidden rounded border border-border flex flex-col max-w-full text-[0.7rem]' },
     };
 
     let thinkingEl: HTMLDivElement | undefined = $state();
@@ -174,7 +227,11 @@
                 />
             </summary>
             <div bind:this={thinkingEl} class="border-t px-3 py-2 text-xs text-muted-foreground max-h-64 overflow-auto markdown-prose markdown-thinking">
-                <SvelteMarkdown source={msg.thinking || ""} streaming={msg.thinkingStreaming ?? false} codeStreaming={msg.thinkingStreaming ?? false} {renderers} options={{ gfm: true, breaks: true }} />
+                <Streamdown content={msg.thinking || ""} baseTheme="shadcn" theme={thinkingTheme} parseIncompleteMarkdown={msg.thinkingStreaming ?? false}>
+                    {#snippet code({ token })}
+                        <CodeBlock lang={token.lang} text={token.text} codeStreaming={msg.thinkingStreaming ?? false} />
+                    {/snippet}
+                </Streamdown>
             </div>
         </details>
     {/if}
@@ -205,11 +262,19 @@
                     ></textarea>
                 {:else if msg.role === 'user'}
                     <div class="markdown-prose">
-                        <SvelteMarkdown source={msg.content} {renderers} options={{ gfm: true, breaks: true }} />
+                        <Streamdown content={msg.content} baseTheme="shadcn" theme={userMsgTheme} parseIncompleteMarkdown={false}>
+                            {#snippet code({ token })}
+                                <CodeBlock lang={token.lang} text={token.text} codeStreaming={false} />
+                            {/snippet}
+                        </Streamdown>
                     </div>
                 {:else}
                     <div class="markdown-prose">
-                        <SvelteMarkdown source={msg.content} streaming={msg.streaming} codeStreaming={msg.streaming ?? false} {renderers} options={{ gfm: true, breaks: true }} />
+                        <Streamdown content={msg.content} baseTheme="shadcn" theme={assistantMsgTheme} parseIncompleteMarkdown={msg.streaming ?? false}>
+                            {#snippet code({ token })}
+                                <CodeBlock lang={token.lang} text={token.text} codeStreaming={msg.streaming ?? false} />
+                            {/snippet}
+                        </Streamdown>
                     </div>
                 {/if}
                 {#if msg.streaming}

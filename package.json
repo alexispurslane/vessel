@@ -44,7 +44,6 @@
         "vite": "^8.0.7"
     },
     "dependencies": {
-        "@humanspeak/svelte-markdown": "^1.4.1",
         "@mariozechner/pi-agent-core": "^0.67.68",
         "@mariozechner/pi-ai": "^0.67.68",
         "@mariozechner/pi-coding-agent": "^0.67.68",
@@ -56,6 +55,7 @@
         "defuddle": "^0.18.1",
         "happy-dom": "^20.9.0",
         "pi-mcp-adapter": "^2.4.0",
+        "svelte-streamdown": "^3.0.1",
         "zerobox": "^0.2.6"
     }
 }
