@@ -23,7 +23,7 @@
     import { ScrollArea } from "$lib/components/ui/scroll-area";
     import Bot from "@lucide/svelte/icons/bot";
     import { listModels, getSessionTree, setSessionLeaf, updateConversationSettings } from "$lib/api.js";
-    import type { ConversationSettings, ModelInfo, RenderItem, ThinkingGroup as ThinkingGroupType } from "$lib/types.js";
+    import type { ChatMessage as ChatMessageType, ConversationSettings, ModelInfo, RenderItem, ThinkingGroup as ThinkingGroupType } from "$lib/types.js";
     import type { SessionTreeNodeData } from "$lib/api.js";
     import { MessageDag } from "$lib/components/chat/index.js";
     import GitBranch from "@lucide/svelte/icons/git-branch";
@@ -50,6 +50,21 @@
     const conversations = getConversations();
     const auth = getAuth();
     const settingsStore = getSettingsStore();
+
+    // Whether the chat store has taken over from SSR data.
+    // Initially false (renders from $page.data.messages), set to true once
+    // connectStream populates the live store — then chat.messages drives rendering.
+    let hydrated = $state(false);
+
+    // Messages to render: SSR data first, then live chat store after hydration.
+    // This gives us true SSR — messages in the HTML before JS runs — while
+    // seamlessly transitioning to the live SSE-driven store once the client takes over.
+    let displayMessages = $derived.by(() => {
+        if (hydrated) return chat.messages;
+        // SSR path: use pre-converted ChatMessage[] from the server load.
+        // Fall back to empty array if no SSR data (shouldn't normally happen).
+        return $page.data.messages ?? [];
+    });
 
     // Session storage key for in-progress message draft, scoped per conversation
     function draftKey(conversationId: string) {
@@ -119,7 +134,7 @@
     let waitingForResponse = $derived.by(() => {
         if (!chat.generating) return false;
         // Check if any assistant message is currently streaming with content
-        const streamingMsg = chat.messages.find((m) => m.streaming);
+        const streamingMsg = displayMessages.find((m) => m.streaming);
         if (!streamingMsg) return true; // no streaming message at all yet
         // If the streaming message has no content, thinking, or tool calls, we're still waiting
         if (!streamingMsg.content?.trim() && !streamingMsg.thinking && !streamingMsg.thinkingStreaming && !(streamingMsg.toolCalls && streamingMsg.toolCalls.length > 0)) {
@@ -136,7 +151,7 @@
      *  definitively have no content. Streaming messages with thinking but no content yet
      *  are still grouped (they'll stay in the group since tool calls always precede final text
      *  in the agent loop — the text comes in a NEW message/turn). */
-    function isIntermediateAssistant(msg: typeof chat.messages[number]): boolean {
+    function isIntermediateAssistant(msg: ChatMessageType): boolean {
         if (msg.role !== "assistant") return false;
         // If it has visible text content (non-empty after trimming), it's not intermediate
         if (msg.content && msg.content.trim()) return false;
@@ -154,7 +169,7 @@
         const items: RenderItem[] = [];
         let currentGroup: ThinkingGroupType | null = null;
 
-        for (const msg of chat.messages) {
+        for (const msg of displayMessages) {
             if (isIntermediateAssistant(msg)) {
                 // This message belongs in a thinking group
                 if (!currentGroup) {
@@ -265,6 +280,12 @@
             selectedModelId = settingsStore.defaultModel;
             defaultApplied = true;
         }
+        // When SSR provides a lastModel and no model is selected yet, use it
+        // (this runs before connectStream, so chat.lastModel is still empty)
+        if (!defaultApplied && $page.data.lastModel) {
+            selectedModelId = $page.data.lastModel.modelId;
+            defaultApplied = true;
+        }
     });
 
     // Persist in-progress message to sessionStorage so it survives page reloads.
@@ -291,13 +312,30 @@
     // dependencies of this effect — only `id` is tracked.
     // Without untrack, the effect would re-run every time `generating`
     // changes during streaming, creating an infinite disconnect/reconnect loop.
+    //
+    // When SSR data is available (from +page.server.ts), we pass it to connectStream
+    // as preloadedHistory, which skips the client-side fetch and populates the chat store
+    // immediately. The rendering starts from $page.data.messages (SSR HTML), then
+    // transitions to chat.messages (live store) once hydrated=true after connectStream completes.
     $effect(() => {
         const currentId = id;
         // Reset the draft-restored flag — the new conversation's draft hasn't been restored yet
         draftRestored = false;
+        // Reset hydrated — we want to render from SSR data for the new conversation first,
+        // then transition to the live store once connectStream completes.
+        hydrated = false;
         if (currentId) {
             untrack(() => {
-                connectStream(currentId).then(async () => {
+                // Use SSR-provided history if available — avoids a client-side fetch
+                // and renders messages immediately (before SSE connects).
+                const ssrHistory = $page.data.messageHistory;
+                const connectPromise = connectStream(currentId, ssrHistory);
+
+                connectPromise.then(async () => {
+                    // The chat store now has messages from the server — switch rendering
+                    // from SSR data ($page.data.messages) to the live store (chat.messages).
+                    hydrated = true;
+
                     // After connecting (which loads history), set model selector to last used model
                     if (chat.lastModel) {
                         selectedModelId = chat.lastModel.modelId;
@@ -373,8 +411,8 @@
     // which caused increasing lag as messages grew longer.
     let scrollRaf: number | undefined;
     $effect(() => {
-        const count = chat.messages.length;
-        const lastMsg = chat.messages[count - 1];
+        const count = displayMessages.length;
+        const lastMsg = displayMessages[count - 1];
         // Track all reactive content so we re-scroll as deltas arrive
         const _content = lastMsg?.content;
         const _thinking = lastMsg?.thinking;
@@ -582,7 +620,7 @@
         <!-- Message area -->
         <ScrollArea class="flex-1 min-h-0 overflow-hidden" bind:viewportRef={viewportEl}>
             <div class="flex flex-col gap-6 p-6">
-            {#if chat.messages.length === 0}
+            {#if displayMessages.length === 0}
                 <div class="flex items-center justify-center py-24">
                     <div class="flex flex-col items-center gap-4 text-muted-foreground">
                         <div class="rounded-full bg-muted p-4">

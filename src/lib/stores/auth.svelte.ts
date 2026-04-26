@@ -37,6 +37,19 @@ export function getAuth() {
     };
 }
 
+/**
+ * Initialize the auth store from server-side data (e.g., from +layout.server.ts).
+ * This avoids the loading spinner — the store is populated before the client-side
+ * checkAuth() fetch completes.
+ */
+export function initAuth(authStatus: AuthStatus): void {
+    // Only initialize if the store hasn't been populated yet.
+    // This prevents overwriting a fresh checkAuth() result.
+    if (status.authenticated === undefined || (!status.authenticated && !loading)) {
+        status = authStatus;
+    }
+}
+
 export async function checkAuth(): Promise<AuthStatus> {
     loading = true;
     error = null;

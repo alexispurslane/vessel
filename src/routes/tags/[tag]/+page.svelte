@@ -9,15 +9,16 @@
     import { hashHue } from "$lib/utils.js";
     import PageLayout from "$lib/components/page-layout/index.svelte";
 
-
     const tag = $derived($page.params.tag);
 
-    let conversations = $state<ConversationListItem[]>([]);
-    let loading = $state(true);
+    // Start with SSR data — conversations are in the HTML before JS loads.
+    // Then refresh client-side when the tag changes.
+    let conversations = $state<ConversationListItem[]>($page.data.conversations ?? []);
+    let refreshing = $state(false);
     let error = $state<string | null>(null);
 
-    async function loadConversations() {
-        loading = true;
+    async function refreshConversations() {
+        refreshing = true;
         error = null;
         try {
             const result = await listConversationsByTag(tag);
@@ -25,14 +26,14 @@
         } catch (e) {
             error = e instanceof Error ? e.message : "Failed to load conversations";
         } finally {
-            loading = false;
+            refreshing = false;
         }
     }
 
-    // Load conversations and reload when navigating to a different tag
+    // Refresh when navigating to a different tag (client-side nav)
     $effect(() => {
         if (tag) {
-            loadConversations();
+            refreshConversations();
         }
     });
 
@@ -65,15 +66,13 @@
                 {tag}
             </span>
             Conversations
+            {#if refreshing}
+                <Spinner class="h-4 w-4 ml-2 inline-block" />
+            {/if}
         </h1>
     {/snippet}
 
-    <!-- Loading -->
-    {#if loading}
-        <div class="flex items-center justify-center py-12">
-            <Spinner class="h-6 w-6" />
-        </div>
-    {:else if error}
+    {#if error}
         <p class="text-destructive text-sm">{error}</p>
     {:else if conversations.length === 0}
         <p class="text-muted-foreground text-sm">No conversations with this tag.</p>

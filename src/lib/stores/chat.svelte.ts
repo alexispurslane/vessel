@@ -10,7 +10,9 @@ import {
     editAssistantMessage as apiEditAssistant,
     releaseConversation,
 } from "$lib/api.js";
+import type { MessageHistory } from "$lib/api.js";
 import type { ChatMessage } from "$lib/types.js";
+import { messageHistoryToChatMessages } from "$lib/chat-history.js";
 import { setActiveConversation, updateConversationTitleAndTags } from "./conversations.svelte.js";
 
 let messages = $state<ChatMessage[]>([]);
@@ -58,6 +60,39 @@ let lastModel: { provider: string; modelId: string } | null = null;
 /** Whether we've already requested title generation for this conversation */
 let titleGenerationRequested = false;
 
+/**
+ * Populate the messages array from a MessageHistory payload.
+ * Uses the shared messageHistoryToChatMessages for the pure conversion,
+ * then applies store-specific side effects (lastModel, title generation).
+ */
+function populateFromHistory(history: MessageHistory, conversationId: string): void {
+    const chatMessages = messageHistoryToChatMessages(history);
+    for (const msg of chatMessages) {
+        messages.push(msg);
+    }
+    // Set the last model used from the history
+    if (history.model) {
+        lastModel = history.model;
+    }
+
+    // If this conversation already has messages but we haven't generated a title yet,
+    // request one now (the server checks if the title is still "New Chat")
+    if (history.messages.length > 0 && !titleGenerationRequested) {
+        titleGenerationRequested = true;
+        const convId = conversationId;
+        generateTitle(convId)
+            .then((result) => {
+                // Update sidebar if we got a title (either newly generated or already set server-side)
+                if (result.title && result.title !== "New Chat") {
+                    updateConversationTitleAndTags(convId, result.title, result.tags ?? []);
+                }
+            })
+            .catch(() => {
+                // Title generation failed — non-critical, ignore
+            });
+    }
+}
+
 /** Turn generation from the last stream_recovery event. Used to skip stale
  *  message_update deltas that were already incorporated into the recovery snapshot.
  *  Reset on message_end/agent_end/disconnect. */
@@ -103,11 +138,18 @@ export function getChat() {
 
 /**
  * Connect to the SSE stream for a conversation.
- * First loads message history from the server, then connects the SSE stream.
+ * Loads message history (from preloaded data or a server fetch), then connects the SSE stream.
  * Disconnects any existing connection first.
+ *
+ * @param conversationId - The conversation to connect to
+ * @param preloadedHistory - If provided (e.g., from SSR), skip the client-side fetch
+ *   and populate messages immediately. This is the SSR optimization path.
  */
-export async function connectStream(conversationId: string): Promise<void> {
-    console.log(`[chat] connectStream called: conversationId=${conversationId}, currentGeneration=${connectGeneration}`);
+export async function connectStream(
+    conversationId: string,
+    preloadedHistory?: MessageHistory
+): Promise<void> {
+    console.log(`[chat] connectStream called: conversationId=${conversationId}, hasPreloadedHistory=${!!preloadedHistory}, currentGeneration=${connectGeneration}`);
     // Disconnect existing
     disconnectStream();
 
@@ -126,57 +168,19 @@ export async function connectStream(conversationId: string): Promise<void> {
     currentConversationId = conversationId;
     setActiveConversation(conversationId);
 
-    // Load message history from the server
-    try {
-        const history = await getMessageHistory(conversationId);
-        // If another connectStream call happened while we awaited, discard this result
-        if (thisGeneration !== connectGeneration) return;
-        for (const msg of history.messages) {
-            messages.push({
-                id: msg.id,
-                role: msg.role as ChatMessage["role"],
-                content: msg.content,
-                timestamp: msg.timestamp,
-                thinking: msg.thinking,
-                model: msg.model,
-                modelProvider: msg.modelProvider,
-                toolCalls:
-                    msg.toolCalls?.map((tc) => ({
-                        toolName: tc.toolName,
-                        status: tc.status as "running" | "completed" | "error",
-                        output: tc.output,
-                        arguments: tc.arguments,
-                    })) ?? [],
-                isError: msg.isError,
-                usage: msg.usage,
-                streaming: false,
-                thinkingStreaming: false,
-            });
+    // Load message history — either from preloaded SSR data (synchronous) or from the server (async)
+    if (preloadedHistory) {
+        populateFromHistory(preloadedHistory, conversationId);
+    } else {
+        try {
+            const history = await getMessageHistory(conversationId);
+            // If another connectStream call happened while we awaited, discard this result
+            if (thisGeneration !== connectGeneration) return;
+            populateFromHistory(history, conversationId);
+        } catch {
+            // If history loading fails, continue with empty messages
+            // The user can still start a new conversation
         }
-        // Set the last model used from the history
-        if (history.model) {
-            lastModel = history.model;
-        }
-
-        // If this conversation already has messages but we haven't generated a title yet,
-        // request one now (the server checks if the title is still "New Chat")
-        if (history.messages.length > 0 && !titleGenerationRequested) {
-            titleGenerationRequested = true;
-            const convId = conversationId;
-            generateTitle(convId)
-                .then((result) => {
-                    // Update sidebar if we got a title (either newly generated or already set server-side)
-                    if (result.title && result.title !== "New Chat") {
-                        updateConversationTitleAndTags(convId, result.title, result.tags ?? []);
-                    }
-                })
-                .catch(() => {
-                    // Title generation failed — non-critical, ignore
-                });
-        }
-    } catch {
-        // If history loading fails, continue with empty messages
-        // The user can still start a new conversation
     }
 
     // Re-check after await — if a newer connectStream superseded us, bail out

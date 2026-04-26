@@ -57,3 +57,45 @@ export function upsertTags(tags: string[]): void {
     });
     insertMany(tags);
 }
+
+/**
+ * Get all conversations that have a given tag.
+ * Uses LIKE to find candidate rows, then filters for exact tag matches
+ * to avoid false positives (e.g. "python" matching "python3").
+ */
+export function getConversationsByTag(tag: string): import("$lib/types.js").ConversationListItem[] {
+    const db = getDb();
+    const normalizedTag = tag.toLowerCase();
+
+    const rows = db
+        .prepare(
+            `SELECT id, title, tags, created_at, updated_at
+             FROM conversations
+             WHERE tags LIKE ?
+             ORDER BY updated_at DESC`
+        )
+        .all(`%"${normalizedTag}"%`) as {
+            id: string;
+            title: string;
+            tags: string;
+            created_at: string;
+            updated_at: string;
+        }[];
+
+    return rows
+        .filter((row) => {
+            try {
+                const parsed = JSON.parse(row.tags) as string[];
+                return parsed.some((t) => t.toLowerCase() === normalizedTag);
+            } catch {
+                return false;
+            }
+        })
+        .map((row) => ({
+            id: row.id,
+            title: row.title,
+            tags: JSON.parse(row.tags) as string[],
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+        }));
+}

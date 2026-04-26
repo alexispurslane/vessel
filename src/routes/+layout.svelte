@@ -10,7 +10,7 @@
     import { onMount } from "svelte";
     import { page } from "$app/stores";
     import { ModeWatcher } from "mode-watcher";
-    import { getAuth, checkAuth, doLogout } from "$lib/stores/auth.svelte.js";
+    import { getAuth, checkAuth, initAuth, doLogout } from "$lib/stores/auth.svelte.js";
     import {
         getConversations,
         loadConversations,
@@ -20,9 +20,20 @@
     import { loadSettings } from "$lib/stores/settings.svelte.js";
     import { hashHue } from "$lib/utils.js";
     import AppSidebar from "$lib/components/sidebar/index.svelte";
+    import type { AuthStatus } from "$lib/types.js";
 
     const auth = getAuth();
     const convs = getConversations();
+
+    // Use SSR auth data for the initial render — avoids the loading spinner.
+    // $page.data.auth comes from +layout.server.ts (server-side auth check).
+    // Fall back to the auth store's value (which starts as unauthenticated).
+    let ssrAuth: AuthStatus | undefined = $derived($page.data.auth);
+
+    // Derived auth state: SSR data takes priority until the client-side
+    // checkAuth() completes, then the store is the source of truth.
+    // This ensures authenticated users see the app immediately (no spinner).
+    let isAuthenticated = $derived(ssrAuth?.authenticated ?? auth.isAuthenticated);
 
     // Current route info
     let currentPath: string = $derived($page.url.pathname);
@@ -35,9 +46,15 @@
         currentPath.startsWith("/chat/") ? currentPath.split("/chat/")[1] : null
     );
 
+    // Initialize auth store from SSR data so client-side code sees
+    // the correct state immediately (before checkAuth() completes).
+    if (ssrAuth) {
+        initAuth(ssrAuth);
+    }
+
     // Load conversations and settings when authenticated
     $effect(() => {
-        if (auth.isAuthenticated) {
+        if (isAuthenticated) {
             loadConversations();
             loadSettings();
         }
@@ -54,6 +71,9 @@
     });
 
     onMount(() => {
+        // Revalidate auth on the client — this catches session expiry
+        // that the server might not know about yet. The SSR data already
+        // initialized the store, so the user sees content immediately.
         checkAuth();
 
         // When the user closes the tab or navigates away, release the
@@ -92,7 +112,7 @@
 {#if isAuthPage}
     <!-- Auth pages get no sidebar layout -->
     {@render children()}
-{:else if !auth.isAuthenticated}
+{:else if !isAuthenticated}
     <!-- Loading state while checking auth -->
     <div class="flex min-h-svh items-center justify-center">
         <Spinner class="h-8 w-8" />
