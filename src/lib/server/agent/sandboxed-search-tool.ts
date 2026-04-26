@@ -63,6 +63,8 @@ export interface SearchToolDetails {
     query: string;
     /** Number of results returned. */
     resultCount: number;
+    /** The actual search results. */
+    results: SearchResult[];
 }
 
 // --- API response types ---
@@ -187,7 +189,7 @@ export function createSearchTool(options?: SearchToolOptions): AgentTool<typeof 
                             text: "Web search is not configured. Please set a search API key in Settings → Search Grounding.",
                         },
                     ],
-                    details: { query, resultCount: 0 },
+                    details: { query, resultCount: 0, results: [] },
                 };
             }
 
@@ -238,7 +240,7 @@ export function createSearchTool(options?: SearchToolOptions): AgentTool<typeof 
                                 text: `Search API returned ${response.status} ${statusText}${errorDetail}`,
                             },
                         ],
-                        details: { query, resultCount: 0 },
+                        details: { query, resultCount: 0, results: [] },
                     };
                 }
 
@@ -255,6 +257,7 @@ export function createSearchTool(options?: SearchToolOptions): AgentTool<typeof 
                     details: {
                         query,
                         resultCount: results.length,
+                        results,
                     },
                 };
             } catch (err) {
@@ -263,7 +266,7 @@ export function createSearchTool(options?: SearchToolOptions): AgentTool<typeof 
                     content: [
                         { type: "text", text: `Error searching for "${query}": ${message}` },
                     ],
-                    details: { query, resultCount: 0 },
+                    details: { query, resultCount: 0, results: [] },
                 };
             }
         },

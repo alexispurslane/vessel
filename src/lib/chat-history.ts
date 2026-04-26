@@ -26,6 +26,7 @@ export function messageHistoryToChatMessages(history: MessageHistory): ChatMessa
             })) ?? [],
         isError: msg.isError,
         usage: msg.usage,
+        fetchedSources: msg.fetchedSources,
         streaming: false,
         thinkingStreaming: false,
     }));

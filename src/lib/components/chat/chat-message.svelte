@@ -13,8 +13,9 @@
     import Check from "@lucide/svelte/icons/check";
     import CodeBlock from "$lib/components/chat/code-block.svelte";
     import ToolCall from "$lib/components/chat/tool-call.svelte";
-    import FetchedPages from "$lib/components/chat/fetched-pages.svelte";
+    import FetchedSources from "$lib/components/chat/fetched-sources.svelte";
     import type { ChatMessage as ChatMessageType } from "$lib/types.js";
+    import type { SearchResultItem } from "$lib/types.js";
 
     interface Props {
         /** The chat message data */
@@ -33,6 +34,10 @@
         oneditassistant?: (messageId: string, newText: string) => void;
         /** Whether a navigation operation is in progress */
         navigating?: boolean;
+        /** Callback when a search source is clicked, to open search results panel */
+        onsearchclick?: (query: string, results: SearchResultItem[]) => void;
+        /** Callback when a page source is clicked, to open page content panel */
+        onpageclick?: (url: string, title: string, content: string) => void;
     }
 
     let {
@@ -44,64 +49,78 @@
         onedit,
         oneditassistant,
         navigating = false,
+        onsearchclick,
+        onpageclick,
     }: Props = $props();
 
     /** Theme override for user messages — needs text-primary-foreground instead of text-foreground */
     const userMsgTheme: DeepPartialTheme = {
-        h1: { base: 'mt-4 mb-1 text-xl font-semibold text-primary-foreground' },
-        h2: { base: 'mt-4 mb-1 text-lg font-semibold text-primary-foreground' },
-        h3: { base: 'mt-3 mb-1 text-base font-semibold text-primary-foreground' },
-        h4: { base: 'mt-3 mb-1 text-sm font-semibold text-primary-foreground' },
-        h5: { base: 'mt-2 mb-1 text-sm font-semibold text-primary-foreground' },
-        h6: { base: 'mt-2 mb-1 text-xs font-semibold text-primary-foreground' },
-        paragraph: { base: 'text-primary-foreground' },
-        ul: { base: 'ml-4 list-inside list-disc whitespace-normal text-primary-foreground' },
-        ol: { base: 'ml-4 list-inside whitespace-normal text-primary-foreground' },
-        li: { base: 'py-0.5 text-primary-foreground' },
-        blockquote: { base: 'border-primary-foreground/30 text-primary-foreground/80 my-2 border-l-4 pl-4 italic' },
-        strong: { base: 'font-semibold text-primary-foreground' },
-        em: { base: 'italic text-primary-foreground' },
-        del: { base: 'text-primary-foreground/60 line-through' },
-        link: { base: 'text-primary-foreground underline wrap-anywhere font-medium hover:text-primary-foreground/80' },
-        codespan: { base: 'bg-primary-foreground/15 rounded px-1.5 py-0.5 font-mono text-primary-foreground text-[0.9em]' },
-        hr: { base: 'border-primary-foreground/30 my-4' },
-        table: { base: 'overflow-x-auto max-w-full my-2 border border-primary-foreground/20 rounded-lg' },
-        thead: { base: 'bg-primary-foreground/10' },
-        tr: { base: 'border-primary-foreground/15 border-b' },
-        th: { base: 'px-3 py-2 text-xs font-semibold text-primary-foreground min-w-0' },
-        td: { base: 'px-3 py-2 text-xs text-primary-foreground min-w-0 break-words' },
+        h1: { base: "mt-4 mb-1 text-xl font-semibold text-primary-foreground" },
+        h2: { base: "mt-4 mb-1 text-lg font-semibold text-primary-foreground" },
+        h3: { base: "mt-3 mb-1 text-base font-semibold text-primary-foreground" },
+        h4: { base: "mt-3 mb-1 text-sm font-semibold text-primary-foreground" },
+        h5: { base: "mt-2 mb-1 text-sm font-semibold text-primary-foreground" },
+        h6: { base: "mt-2 mb-1 text-xs font-semibold text-primary-foreground" },
+        paragraph: { base: "text-primary-foreground" },
+        ul: { base: "ml-4 list-inside list-disc whitespace-normal text-primary-foreground" },
+        ol: { base: "ml-4 list-inside whitespace-normal text-primary-foreground" },
+        li: { base: "py-0.5 text-primary-foreground" },
+        blockquote: {
+            base: "border-primary-foreground/30 text-primary-foreground/80 my-2 border-l-4 pl-4 italic",
+        },
+        strong: { base: "font-semibold text-primary-foreground" },
+        em: { base: "italic text-primary-foreground" },
+        del: { base: "text-primary-foreground/60 line-through" },
+        link: {
+            base: "text-primary-foreground underline wrap-anywhere font-medium hover:text-primary-foreground/80",
+        },
+        codespan: {
+            base: "bg-primary-foreground/15 rounded px-1.5 py-0.5 font-mono text-primary-foreground text-[0.9em]",
+        },
+        hr: { base: "border-primary-foreground/30 my-4" },
+        table: {
+            base: "overflow-x-auto max-w-full my-2 border border-primary-foreground/20 rounded-lg",
+        },
+        thead: { base: "bg-primary-foreground/10" },
+        tr: { base: "border-primary-foreground/15 border-b" },
+        th: { base: "px-3 py-2 text-xs font-semibold text-primary-foreground min-w-0" },
+        td: { base: "px-3 py-2 text-xs text-primary-foreground min-w-0 break-words" },
     };
 
     /** Theme override for assistant messages — constrain widths, use serif font, compact spacing */
     const assistantMsgTheme: DeepPartialTheme = {
-        h1: { base: 'mt-4 mb-1 text-xl font-semibold' },
-        h2: { base: 'mt-4 mb-1 text-lg font-semibold' },
-        h3: { base: 'mt-3 mb-1 text-base font-semibold' },
-        h4: { base: 'mt-3 mb-1 text-sm font-semibold' },
-        h5: { base: 'mt-2 mb-1 text-sm font-semibold' },
-        h6: { base: 'mt-2 mb-1 text-xs font-semibold' },
-        paragraph: { base: '' },
-        ul: { base: 'ml-4 list-inside list-disc whitespace-normal' },
-        ol: { base: 'ml-4 list-inside whitespace-normal' },
-        li: { base: 'py-0.5' },
-        blockquote: { base: 'my-2 border-l-4 pl-4 italic' },
-        table: { base: 'overflow-x-auto max-w-full my-2 rounded-lg border border-border' },
-        th: { base: 'px-3 py-2 text-xs font-semibold min-w-0' },
-        td: { base: 'px-3 py-2 text-xs min-w-0 break-words' },
-        code: { base: 'my-2 w-full overflow-hidden rounded-lg border border-border flex flex-col max-w-full' },
+        h1: { base: "mt-4 mb-1 text-xl font-semibold" },
+        h2: { base: "mt-4 mb-1 text-lg font-semibold" },
+        h3: { base: "mt-3 mb-1 text-base font-semibold" },
+        h4: { base: "mt-3 mb-1 text-sm font-semibold" },
+        h5: { base: "mt-2 mb-1 text-sm font-semibold" },
+        h6: { base: "mt-2 mb-1 text-xs font-semibold" },
+        paragraph: { base: "" },
+        ul: { base: "ml-4 list-inside list-disc whitespace-normal" },
+        ol: { base: "ml-4 list-inside whitespace-normal" },
+        li: { base: "py-0.5" },
+        blockquote: { base: "my-2 border-l-4 pl-4 italic" },
+        table: { base: "overflow-x-auto max-w-full my-2 rounded-lg border border-border" },
+        th: { base: "px-3 py-2 text-xs font-semibold min-w-0" },
+        td: { base: "px-3 py-2 text-xs min-w-0 break-words" },
+        code: {
+            base: "my-2 w-full overflow-hidden rounded-lg border border-border flex flex-col max-w-full",
+        },
     };
 
     /** Theme override for thinking block — very compact */
     const thinkingTheme: DeepPartialTheme = {
-        h1: { base: 'mt-2 mb-0.5 text-xs font-semibold' },
-        h2: { base: 'mt-2 mb-0.5 text-xs font-semibold' },
-        h3: { base: 'mt-1.5 mb-0.5 text-xs font-semibold' },
-        h4: { base: 'mt-1 mb-0.5 text-xs font-semibold' },
-        paragraph: { base: '' },
-        ul: { base: 'ml-3 list-inside list-disc whitespace-normal' },
-        ol: { base: 'ml-3 list-inside whitespace-normal' },
-        li: { base: 'py-0' },
-        code: { base: 'my-1 w-full overflow-hidden rounded border border-border flex flex-col max-w-full text-[0.7rem]' },
+        h1: { base: "mt-2 mb-0.5 text-xs font-semibold" },
+        h2: { base: "mt-2 mb-0.5 text-xs font-semibold" },
+        h3: { base: "mt-1.5 mb-0.5 text-xs font-semibold" },
+        h4: { base: "mt-1 mb-0.5 text-xs font-semibold" },
+        paragraph: { base: "" },
+        ul: { base: "ml-3 list-inside list-disc whitespace-normal" },
+        ol: { base: "ml-3 list-inside whitespace-normal" },
+        li: { base: "py-0" },
+        code: {
+            base: "my-1 w-full overflow-hidden rounded border border-border flex flex-col max-w-full text-[0.7rem]",
+        },
     };
 
     let thinkingEl: HTMLDivElement | undefined = $state();
@@ -176,7 +195,7 @@
         const trimmed = editText.trim();
         if (!trimmed) return;
         editing = false;
-        if (msg.role === 'user') {
+        if (msg.role === "user") {
             onedit?.(msg.id, msg.role, trimmed);
         } else {
             // In-place edit for assistant messages — no AI re-prompt
@@ -226,10 +245,22 @@
                     class="size-3 ml-auto shrink-0 transition-transform group-open:rotate-180"
                 />
             </summary>
-            <div bind:this={thinkingEl} class="border-t px-3 py-2 text-xs text-muted-foreground max-h-64 overflow-auto markdown-prose markdown-thinking">
-                <Streamdown content={msg.thinking || ""} baseTheme="shadcn" theme={thinkingTheme} parseIncompleteMarkdown={msg.thinkingStreaming ?? false}>
+            <div
+                bind:this={thinkingEl}
+                class="border-t px-3 py-2 text-xs text-muted-foreground max-h-64 overflow-auto markdown-prose markdown-thinking"
+            >
+                <Streamdown
+                    content={msg.thinking || ""}
+                    baseTheme="shadcn"
+                    theme={thinkingTheme}
+                    parseIncompleteMarkdown={msg.thinkingStreaming ?? false}
+                >
                     {#snippet code({ token })}
-                        <CodeBlock lang={token.lang} text={token.text} codeStreaming={msg.thinkingStreaming ?? false} />
+                        <CodeBlock
+                            lang={token.lang}
+                            text={token.text}
+                            codeStreaming={msg.thinkingStreaming ?? false}
+                        />
                     {/snippet}
                 </Streamdown>
             </div>
@@ -258,21 +289,39 @@
                         onkeydown={handleEditKeydown}
                         autofocus
                         class="w-full bg-transparent resize-none outline-none min-h-[2em] max-h-[50vh] overflow-auto text-sm leading-relaxed"
-                        rows={Math.max(2, editText.split('\n').length)}
+                        rows={Math.max(2, editText.split("\n").length)}
                     ></textarea>
-                {:else if msg.role === 'user'}
+                {:else if msg.role === "user"}
                     <div class="markdown-prose">
-                        <Streamdown content={msg.content} baseTheme="shadcn" theme={userMsgTheme} parseIncompleteMarkdown={false}>
+                        <Streamdown
+                            content={msg.content}
+                            baseTheme="shadcn"
+                            theme={userMsgTheme}
+                            parseIncompleteMarkdown={false}
+                        >
                             {#snippet code({ token })}
-                                <CodeBlock lang={token.lang} text={token.text} codeStreaming={false} />
+                                <CodeBlock
+                                    lang={token.lang}
+                                    text={token.text}
+                                    codeStreaming={false}
+                                />
                             {/snippet}
                         </Streamdown>
                     </div>
                 {:else}
                     <div class="markdown-prose">
-                        <Streamdown content={msg.content} baseTheme="shadcn" theme={assistantMsgTheme} parseIncompleteMarkdown={msg.streaming ?? false}>
+                        <Streamdown
+                            content={msg.content}
+                            baseTheme="shadcn"
+                            theme={assistantMsgTheme}
+                            parseIncompleteMarkdown={msg.streaming ?? false}
+                        >
                             {#snippet code({ token })}
-                                <CodeBlock lang={token.lang} text={token.text} codeStreaming={msg.streaming ?? false} />
+                                <CodeBlock
+                                    lang={token.lang}
+                                    text={token.text}
+                                    codeStreaming={msg.streaming ?? false}
+                                />
                             {/snippet}
                         </Streamdown>
                     </div>
@@ -300,27 +349,29 @@
                         aria-label="Submit edit"
                     >
                         <Check class="size-3" />
-                        {msg.role === 'user' ? 'Save & Resend' : 'Save'}
+                        {msg.role === "user" ? "Save & Resend" : "Save"}
                     </button>
                 </div>
             {:else if !msg.streaming && !navigating}
-                <div class="flex justify-end gap-1 mt-1 opacity-0 group-hover/msg:opacity-100 transition-opacity">
-                    {#if oneditassistant || (onedit && msg.role === 'user')}
+                <div
+                    class="flex justify-end gap-1 mt-1 opacity-0 group-hover/msg:opacity-100 transition-opacity"
+                >
+                    {#if oneditassistant || (onedit && msg.role === "user")}
                         <button
                             onclick={() => handleEdit()}
                             class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
-                            aria-label='Edit message'
-                            title='Edit message'
+                            aria-label="Edit message"
+                            title="Edit message"
                         >
                             <Pencil class="size-3" />
                         </button>
                     {/if}
-                    {#if onedit && msg.role === 'assistant'}
+                    {#if onedit && msg.role === "assistant"}
                         <button
                             onclick={() => onedit?.(msg.id, msg.role)}
                             class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
-                            aria-label='Regenerate response'
-                            title='Regenerate response'
+                            aria-label="Regenerate response"
+                            title="Regenerate response"
                         >
                             <RotateCcw class="size-3" />
                         </button>
@@ -328,9 +379,13 @@
                     {#if ondelete}
                         <button
                             onclick={() => handleDelete()}
-                            class="inline-flex items-center gap-1 text-[11px] transition-colors cursor-pointer px-1.5 py-0.5 rounded {confirmDelete ? 'text-destructive bg-destructive/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}"
-                            aria-label={confirmDelete ? 'Confirm delete' : 'Delete message'}
-                            title={confirmDelete ? 'Click again to confirm deletion' : 'Delete message'}
+                            class="inline-flex items-center gap-1 text-[11px] transition-colors cursor-pointer px-1.5 py-0.5 rounded {confirmDelete
+                                ? 'text-destructive bg-destructive/10'
+                                : 'text-muted-foreground hover:text-foreground hover:bg-muted'}"
+                            aria-label={confirmDelete ? "Confirm delete" : "Delete message"}
+                            title={confirmDelete
+                                ? "Click again to confirm deletion"
+                                : "Delete message"}
                         >
                             <Trash2 class="size-3" />
                             {#if confirmDelete}
@@ -359,7 +414,9 @@
                 </div>
             {:else if navigating}
                 <div class="flex justify-end gap-1 mt-1">
-                    <span class="inline-flex items-center gap-1 text-[11px] text-muted-foreground px-1.5 py-0.5">
+                    <span
+                        class="inline-flex items-center gap-1 text-[11px] text-muted-foreground px-1.5 py-0.5"
+                    >
                         <Spinner class="size-3" />
                         Updating...
                     </span>
@@ -368,9 +425,9 @@
         </div>
     {/if}
 
-    <!-- Fetched pages / sources -->
-    {#if msg.role === "assistant" && msg.fetchedPages && msg.fetchedPages.length > 0 && !msg.streaming}
-        <FetchedPages pages={msg.fetchedPages} />
+    <!-- Fetched sources -->
+    {#if msg.role === "assistant" && msg.fetchedSources && msg.fetchedSources.length > 0 && !msg.streaming}
+        <FetchedSources sources={msg.fetchedSources} {onsearchclick} {onpageclick} />
     {/if}
 
     <!-- Tool calls -->

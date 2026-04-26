@@ -185,6 +185,15 @@
         font-weight: 600;
         line-height: 1.4;
     }
+
+    & p {
+        margin: 0.75em 0;
+    }
+
+    & ul,
+    & ol {
+        margin: 0.5em 0;
+    }
 }
 
 /* Thinking section: more compact, uses sans-serif font */

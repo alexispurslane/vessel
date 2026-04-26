@@ -155,13 +155,18 @@ export interface ModelInfo {
 
 // --- Chat UI (client-only, but defined here for consistency) ---
 
-/** A page fetched by the agent's fetch tool during a turn */
-export interface FetchedPage {
+/** A single search result from a web search */
+export interface SearchResultItem {
     url: string;
     title: string;
-    contentLength: number;
-    truncated: boolean;
+    text?: string;
+    publishedDate?: string;
 }
+
+/** A source the agent consulted during a turn (fetched page or web search) */
+export type FetchedSource =
+    | { type: "page"; url: string; title: string; contentLength: number; truncated: boolean; content: string }
+    | { type: "search"; query: string; resultCount: number; results: SearchResultItem[] };
 
 /** A chat message in the UI */
 export interface ChatMessage {
@@ -191,8 +196,8 @@ export interface ChatMessage {
         cacheWrite: number;
         totalTokens: number;
     };
-    /** Pages fetched by the agent's fetch tool since the last assistant message */
-    fetchedPages?: FetchedPage[];
+    /** Sources consulted by the agent (fetched pages & web searches) since the last assistant message */
+    fetchedSources?: FetchedSource[];
 }
 
 /** Info about a tool call being executed */

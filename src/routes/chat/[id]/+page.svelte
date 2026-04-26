@@ -22,8 +22,19 @@
     } from "$lib/components/chat/index.js";
     import { ScrollArea } from "$lib/components/ui/scroll-area";
     import Bot from "@lucide/svelte/icons/bot";
-    import { listModels, getSessionTree, setSessionLeaf, updateConversationSettings } from "$lib/api.js";
-    import type { ChatMessage as ChatMessageType, ConversationSettings, ModelInfo, RenderItem, ThinkingGroup as ThinkingGroupType } from "$lib/types.js";
+    import {
+        listModels,
+        getSessionTree,
+        setSessionLeaf,
+        updateConversationSettings,
+    } from "$lib/api.js";
+    import type {
+        ChatMessage as ChatMessageType,
+        ConversationSettings,
+        ModelInfo,
+        RenderItem,
+        ThinkingGroup as ThinkingGroupType,
+    } from "$lib/types.js";
     import type { SessionTreeNodeData } from "$lib/api.js";
     import { MessageDag } from "$lib/components/chat/index.js";
     import GitBranch from "@lucide/svelte/icons/git-branch";
@@ -44,6 +55,9 @@
     import { Skeleton } from "$lib/components/ui/skeleton";
     import ConversationSecurityPanel from "$lib/components/conversation-settings/ConversationSecurityPanel.svelte";
     import AgentInfoPanel from "$lib/components/conversation-settings/AgentInfoPanel.svelte";
+    import SearchResultsPanel from "$lib/components/chat/search-results-panel.svelte";
+    import FetchedPagePanel from "$lib/components/chat/fetched-page-panel.svelte";
+    import type { SearchResultItem } from "$lib/types.js";
 
     let id = $derived($page.params.id);
     const chat = getChat();
@@ -84,6 +98,15 @@
     let securityOpen = $state(false);
     // Agent info panel state
     let agentInfoOpen = $state(false);
+    // Search results panel state
+    let searchResultsOpen = $state(false);
+    let searchResultsQuery = $state("");
+    let searchResultsData = $state<SearchResultItem[]>([]);
+    // Fetched page panel state
+    let fetchedPageOpen = $state(false);
+    let fetchedPageUrl = $state("");
+    let fetchedPageTitle = $state("");
+    let fetchedPageContent = $state("");
     // Top bar auto-hide state
     let topBarVisible = $state(false);
     let topBarTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -130,14 +153,21 @@
     }
 
     // Whether we're waiting for the model to start responding
-    // (generating is true but no assistant message has visible content yet)
+    // (generating is true but no assistant message has visible content yet,
+    //  or we just sent/regenerated but the SSE stream hasn't started yet)
     let waitingForResponse = $derived.by(() => {
+        // If we're actively navigating (delete/edit in flight), don't show skeleton
+        if (chat.navigating) return false;
         if (!chat.generating) return false;
-        // Check if any assistant message is currently streaming with content
+        // During generation: show skeleton if no streaming message or streaming message has no visible content
         const streamingMsg = displayMessages.find((m) => m.streaming);
-        if (!streamingMsg) return true; // no streaming message at all yet
-        // If the streaming message has no content, thinking, or tool calls, we're still waiting
-        if (!streamingMsg.content?.trim() && !streamingMsg.thinking && !streamingMsg.thinkingStreaming && !(streamingMsg.toolCalls && streamingMsg.toolCalls.length > 0)) {
+        if (!streamingMsg) return true;
+        if (
+            !streamingMsg.content?.trim() &&
+            !streamingMsg.thinking &&
+            !streamingMsg.thinkingStreaming &&
+            !(streamingMsg.toolCalls && streamingMsg.toolCalls.length > 0)
+        ) {
             return true;
         }
         return false;
@@ -156,7 +186,8 @@
         // If it has visible text content (non-empty after trimming), it's not intermediate
         if (msg.content && msg.content.trim()) return false;
         // If it has thinking or tool calls, it IS intermediate
-        if (msg.thinking || msg.thinkingStreaming || (msg.toolCalls && msg.toolCalls.length > 0)) return true;
+        if (msg.thinking || msg.thinkingStreaming || (msg.toolCalls && msg.toolCalls.length > 0))
+            return true;
         // Error messages with content are not intermediate
         if (msg.isError) return false;
         // Empty assistant messages with no thinking/tools are not intermediate either
@@ -242,7 +273,11 @@
                 }
             } else {
                 const msg = item.msg;
-                if (msg.thinkingStreaming === false && thinkingOpen[msg.id] === undefined && msg.thinking) {
+                if (
+                    msg.thinkingStreaming === false &&
+                    thinkingOpen[msg.id] === undefined &&
+                    msg.thinking
+                ) {
                     thinkingOpen[msg.id] = false;
                 }
             }
@@ -369,7 +404,8 @@
                         const mcpServersOnParam = $page.url.searchParams.get("mcpServersOn");
                         const agentModeParam = $page.url.searchParams.get("agentMode");
 
-                        if (sandboxOnParam !== null) sandboxSettings.sandboxEnabled = sandboxOnParam === "true";
+                        if (sandboxOnParam !== null)
+                            sandboxSettings.sandboxEnabled = sandboxOnParam === "true";
                         if (netAllDomainsOnParam === "true") {
                             sandboxSettings.allowNet = true;
                             sandboxSettings.allowAllDomains = true;
@@ -380,7 +416,8 @@
                         // null = use per-server defaultEnabled (effectively "on" for servers not explicitly disabled)
                         // []  = explicitly no MCP servers
                         if (mcpServersOnParam === "true") sandboxSettings.enabledMcpServers = null;
-                        else if (mcpServersOnParam === "false") sandboxSettings.enabledMcpServers = [];
+                        else if (mcpServersOnParam === "false")
+                            sandboxSettings.enabledMcpServers = [];
                         // Agent mode: "agent" = all tools, "chat" = no tools
                         if (agentModeParam === "agent") sandboxSettings.agentMode = "agent";
                         else if (agentModeParam === "chat") sandboxSettings.agentMode = "chat";
@@ -466,6 +503,19 @@
         editAssistantMessage(messageId, newText);
     }
 
+    function handleSearchClick(query: string, results: SearchResultItem[]) {
+        searchResultsQuery = query;
+        searchResultsData = results;
+        searchResultsOpen = true;
+    }
+
+    function handlePageClick(url: string, title: string, content: string) {
+        fetchedPageUrl = url;
+        fetchedPageTitle = title;
+        fetchedPageContent = content;
+        fetchedPageOpen = true;
+    }
+
     async function toggleDag() {
         dagOpen = !dagOpen;
         if (dagOpen) {
@@ -526,17 +576,26 @@
     <!-- Main content -->
     <!-- Top bar: hidden by default, shows on mouse movement, auto-hides after timeout or on send -->
     {#if topBarVisible}
-        <div class="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-4 py-1.5 border-b h-9 bg-background/80 backdrop-blur-sm" transition:fade={{ duration: 150 }}>
+        <div
+            class="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-4 py-1.5 border-b h-9 bg-background/80 backdrop-blur-sm"
+            transition:fade={{ duration: 150 }}
+        >
             <!-- Left: Context usage + token counts -->
             <div class="flex items-center gap-3">
                 <TooltipProvider>
                     <Tooltip>
                         <TooltipTrigger asChild>
                             <div class="flex items-center gap-1.5">
-                                <ContextUsageRing fraction={contextUsageFraction} size={22} strokeWidth={2.5} />
+                                <ContextUsageRing
+                                    fraction={contextUsageFraction}
+                                    size={22}
+                                    strokeWidth={2.5}
+                                />
                             </div>
                         </TooltipTrigger>
-                        <TooltipContent>Context window: {Math.round(contextUsageFraction * 100)}% used</TooltipContent>
+                        <TooltipContent
+                            >Context window: {Math.round(contextUsageFraction * 100)}% used</TooltipContent
+                        >
                     </Tooltip>
                 </TooltipProvider>
                 <TooltipProvider>
@@ -547,7 +606,9 @@
                                 <span>{formatTokens(chat.totalInputTokens)}</span>
                             </div>
                         </TooltipTrigger>
-                        <TooltipContent>Input tokens: {chat.totalInputTokens.toLocaleString()}</TooltipContent>
+                        <TooltipContent
+                            >Input tokens: {chat.totalInputTokens.toLocaleString()}</TooltipContent
+                        >
                     </Tooltip>
                 </TooltipProvider>
                 <TooltipProvider>
@@ -558,7 +619,9 @@
                                 <span>{formatTokens(chat.totalOutputTokens)}</span>
                             </div>
                         </TooltipTrigger>
-                        <TooltipContent>Output tokens: {chat.totalOutputTokens.toLocaleString()}</TooltipContent>
+                        <TooltipContent
+                            >Output tokens: {chat.totalOutputTokens.toLocaleString()}</TooltipContent
+                        >
                     </Tooltip>
                 </TooltipProvider>
             </div>
@@ -569,7 +632,9 @@
                         <TooltipTrigger asChild>
                             <button
                                 onclick={() => (securityOpen = !securityOpen)}
-                                class="inline-flex items-center gap-1 text-[11px] {securityOpen ? 'text-foreground bg-muted' : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
+                                class="inline-flex items-center gap-1 text-[11px] {securityOpen
+                                    ? 'text-foreground bg-muted'
+                                    : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
                                 aria-label="Toggle security panel"
                             >
                                 <Shield class="size-3" />
@@ -584,8 +649,10 @@
                         <TooltipTrigger asChild>
                             <button
                                 onclick={toggleDag}
-                                class="inline-flex items-center gap-1 text-[11px] {dagOpen ? 'text-foreground bg-muted' : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
-                                aria-label={dagOpen ? 'Close history view' : 'Open history view'}
+                                class="inline-flex items-center gap-1 text-[11px] {dagOpen
+                                    ? 'text-foreground bg-muted'
+                                    : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
+                                aria-label={dagOpen ? "Close history view" : "Open history view"}
                             >
                                 <GitBranch class="size-3" />
                                 <span>History</span>
@@ -599,7 +666,9 @@
                         <TooltipTrigger asChild>
                             <button
                                 onclick={() => (agentInfoOpen = !agentInfoOpen)}
-                                class="inline-flex items-center gap-1 text-[11px] {agentInfoOpen ? 'text-foreground bg-muted' : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
+                                class="inline-flex items-center gap-1 text-[11px] {agentInfoOpen
+                                    ? 'text-foreground bg-muted'
+                                    : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
                                 aria-label="Toggle agent info panel"
                             >
                                 <FileText class="size-3" />
@@ -615,141 +684,151 @@
 
     <!-- Content area below the top bar -->
     <div class="flex-1 min-w-0 flex overflow-hidden">
-    <div class="flex-1 min-w-0 flex flex-col overflow-hidden max-w-[100ch] mx-auto">
-
-        <!-- Message area -->
-        <ScrollArea class="flex-1 min-h-0 overflow-hidden" bind:viewportRef={viewportEl}>
-            <div class="flex flex-col gap-6 p-6">
-            {#if displayMessages.length === 0}
-                <div class="flex items-center justify-center py-24">
-                    <div class="flex flex-col items-center gap-4 text-muted-foreground">
-                        <div class="rounded-full bg-muted p-4">
-                            <Bot class="size-8 opacity-60" />
-                        </div>
-                        <div class="text-center">
-                            <p class="text-sm font-medium">Start a conversation</p>
-                            <p class="text-xs mt-1 opacity-70">
-                                Send a message to begin chatting with the AI assistant.
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            {:else}
-                {#each renderItems as item, i (item.type === "thinkingGroup" ? item.id : item.msg.id)}
-                    {#if item.type === "thinkingGroup"}
-                        <!-- Grouped thinking + tool calls -->
-                        <div class="flex w-full justify-start">
-                            <div class="flex gap-3 w-[min(75%,65ch)] font-serif">
-                                <ChatAvatar
-                                    role="assistant"
-                                    isConsecutive={false}
-                                    model={item.model}
-                                    modelProvider={item.modelProvider}
-                                    {getModelDisplayName}
-                                    hasContent={true}
-                                />
-                                <div class="min-w-0 flex-1">
-                                    <ThinkingGroup
-                                        group={item}
-                                        thinkingIsOpen={thinkingOpen[item.id]}
-                                        onthinkingtoggle={(open) => (thinkingOpen[item.id] = open)}
-                                        ondelete={handleDeleteMessage}
-                                        onregenerate={handleEditMessage}
-                                        navigating={chat.navigating}
-                                    />
+        <div class="flex-1 min-w-0 flex flex-col overflow-hidden max-w-[100ch] mx-auto">
+            <!-- Message area -->
+            <ScrollArea class="flex-1 min-h-0 overflow-hidden" bind:viewportRef={viewportEl}>
+                <div class="flex flex-col gap-6 p-6">
+                    {#if displayMessages.length === 0}
+                        <div class="flex items-center justify-center py-24">
+                            <div class="flex flex-col items-center gap-4 text-muted-foreground">
+                                <div class="rounded-full bg-muted p-4">
+                                    <Bot class="size-8 opacity-60" />
+                                </div>
+                                <div class="text-center">
+                                    <p class="text-sm font-medium">Start a conversation</p>
+                                    <p class="text-xs mt-1 opacity-70">
+                                        Send a message to begin chatting with the AI assistant.
+                                    </p>
                                 </div>
                             </div>
                         </div>
                     {:else}
-                        {@const msg = item.msg}
-                        {@const nextItem = renderItems[i + 1]}
-                        {@const isLastConsecutive = nextItem?.type !== "message" || nextItem.msg.role !== msg.role}
-                        <div class="flex w-full {msg.role === 'user' ? 'justify-end' : 'justify-start'} {!isLastConsecutive ? '-mt-4' : ''}">
-                            <div
-                                class="flex gap-3 w-max-[65ch] font-serif {msg.role === 'user'
-                                    ? 'flex-row-reverse items-end'
-                                    : ''}"
-                            >
-                                <!-- Avatar -->
-                                <ChatAvatar
-                                    role={msg.role}
-                                    isConsecutive={!isLastConsecutive}
-                                    username={auth.username}
-                                    model={msg.model}
-                                    modelProvider={msg.modelProvider}
-                                    {getModelDisplayName}
-                                    hasContent={!!(msg.content || msg.thinking)}
-                                />
+                        {#each renderItems as item, i (item.type === "thinkingGroup" ? item.id : item.msg.id)}
+                            {#if item.type === "thinkingGroup"}
+                                <!-- Grouped thinking + tool calls -->
+                                <div class="flex w-full justify-start">
+                                    <div class="flex gap-3 w-[min(75%,65ch)] font-serif">
+                                        <ChatAvatar
+                                            role="assistant"
+                                            isConsecutive={false}
+                                            model={item.model}
+                                            modelProvider={item.modelProvider}
+                                            {getModelDisplayName}
+                                            hasContent={true}
+                                        />
+                                        <div class="min-w-0 flex-1">
+                                            <ThinkingGroup
+                                                group={item}
+                                                thinkingIsOpen={thinkingOpen[item.id]}
+                                                onthinkingtoggle={(open) =>
+                                                    (thinkingOpen[item.id] = open)}
+                                                ondelete={handleDeleteMessage}
+                                                onregenerate={handleEditMessage}
+                                                navigating={chat.navigating}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            {:else}
+                                {@const msg = item.msg}
+                                {@const nextItem = renderItems[i + 1]}
+                                {@const isLastConsecutive =
+                                    nextItem?.type !== "message" || nextItem.msg.role !== msg.role}
+                                <div
+                                    class="flex w-full {msg.role === 'user'
+                                        ? 'justify-end'
+                                        : 'justify-start'} {!isLastConsecutive ? '-mt-4' : ''}"
+                                >
+                                    <div
+                                        class="flex gap-3 w-max-[65ch] font-serif {msg.role ===
+                                        'user'
+                                            ? 'flex-row-reverse items-end'
+                                            : ''}"
+                                    >
+                                        <!-- Avatar -->
+                                        <ChatAvatar
+                                            role={msg.role}
+                                            isConsecutive={!isLastConsecutive}
+                                            username={auth.username}
+                                            model={msg.model}
+                                            modelProvider={msg.modelProvider}
+                                            {getModelDisplayName}
+                                            hasContent={!!(msg.content || msg.thinking)}
+                                        />
 
-                                <!-- Message bubble and tool calls -->
-                                <div class="min-w-0 flex-1">
-                                <ChatMessage
-                                    {msg}
-                                    thinkingIsOpen={thinkingOpen[msg.id]}
-                                    onthinkingtoggle={(open) => (thinkingOpen[msg.id] = open)}
-                                    scrollContainer={viewportEl}
-                                    ondelete={handleDeleteMessage}
-                                    onedit={handleEditMessage}
-                                    oneditassistant={handleEditAssistantMessage}
-                                    navigating={chat.navigating}
-                                />
+                                        <!-- Message bubble and tool calls -->
+                                        <div class="min-w-0 flex-1">
+                                            <ChatMessage
+                                                {msg}
+                                                thinkingIsOpen={thinkingOpen[msg.id]}
+                                                onthinkingtoggle={(open) =>
+                                                    (thinkingOpen[msg.id] = open)}
+                                                scrollContainer={viewportEl}
+                                                ondelete={handleDeleteMessage}
+                                                onedit={handleEditMessage}
+                                                oneditassistant={handleEditAssistantMessage}
+                                                navigating={chat.navigating}
+                                                onsearchclick={handleSearchClick}
+                                                onpageclick={handlePageClick}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            {/if}
+                        {/each}
+
+                        <!-- Skeleton placeholder while waiting for model to start responding -->
+                        {#if waitingForResponse}
+                            <div class="flex w-full justify-start">
+                                <div class="flex gap-3 w-[min(75%,65ch)] font-serif">
+                                    <ChatAvatar
+                                        role="assistant"
+                                        isConsecutive={false}
+                                        model={chat.lastModel?.modelId}
+                                        modelProvider={chat.lastModel?.provider}
+                                        {getModelDisplayName}
+                                        hasContent={false}
+                                    />
+                                    <div class="min-w-0 flex-1 flex flex-col gap-2 py-1">
+                                        <Skeleton class="h-4 w-3/4" />
+                                        <Skeleton class="h-4 w-1/2" />
+                                    </div>
                                 </div>
                             </div>
-                        </div>
+                        {/if}
                     {/if}
-                {/each}
+                </div>
+            </ScrollArea>
 
-                <!-- Skeleton placeholder while waiting for model to start responding -->
-                {#if waitingForResponse}
-                    <div class="flex w-full justify-start">
-                        <div class="flex gap-3 w-[min(75%,65ch)] font-serif">
-                            <ChatAvatar
-                                role="assistant"
-                                isConsecutive={false}
-                                model={chat.lastModel?.modelId}
-                                modelProvider={chat.lastModel?.provider}
-                                {getModelDisplayName}
-                                hasContent={false}
-                            />
-                            <div class="min-w-0 flex-1 flex flex-col gap-2 py-1">
-                                <Skeleton class="h-4 w-3/4" />
-                                <Skeleton class="h-4 w-1/2" />
-                            </div>
-                        </div>
-                    </div>
-                {/if}
-            {/if}
+            <!-- Input area -->
+            <div class="shrink-0 px-4 py-3 bg-background">
+                <ChatInput
+                    bind:value={inputText}
+                    placeholder={chat.connected ? "Type a message..." : "Connecting..."}
+                    disabled={!chat.connected}
+                    generating={chat.generating}
+                    connected={chat.connected}
+                    models={availableModels}
+                    bind:selectedModelId
+                    defaultModelId={settingsStore.defaultModel}
+                    onsend={handleSend}
+                    onabort={handleAbort}
+                />
+                <!-- Connection status / error -->
+                <div class="flex items-center gap-1.5 mt-1.5 min-h-4">
+                    {#if chat.error}
+                        <p class="text-xs text-destructive">{chat.error}</p>
+                    {:else if !chat.connected}
+                        <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <span
+                                class="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-pulse"
+                            ></span>
+                            Connecting...
+                        </span>
+                    {/if}
+                </div>
+            </div>
         </div>
-    </ScrollArea>
-
-    <!-- Input area -->
-    <div class="shrink-0 px-4 py-3 bg-background">
-        <ChatInput
-            bind:value={inputText}
-            placeholder={chat.connected ? "Type a message..." : "Connecting..."}
-            disabled={!chat.connected}
-            generating={chat.generating}
-            connected={chat.connected}
-            models={availableModels}
-            bind:selectedModelId
-            defaultModelId={settingsStore.defaultModel}
-            onsend={handleSend}
-            onabort={handleAbort}
-        />
-        <!-- Connection status / error -->
-        <div class="flex items-center gap-1.5 mt-1.5 min-h-4">
-            {#if chat.error}
-                <p class="text-xs text-destructive">{chat.error}</p>
-            {:else if !chat.connected}
-                <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <span class="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-pulse"
-                    ></span>
-                    Connecting...
-                </span>
-            {/if}
-        </div>
-    </div>
-    </div>
 
         <!-- Right side panels -->
         {#if securityOpen && id}
@@ -772,5 +851,29 @@
                 />
             </div>
         {/if}
-    </div><!-- close content-area flex row -->
+        {#if searchResultsOpen}
+            <div class="w-96 border-l bg-background flex flex-col shrink-0">
+                <SearchResultsPanel
+                    query={searchResultsQuery}
+                    results={searchResultsData}
+                    onclose={() => {
+                        searchResultsOpen = false;
+                    }}
+                />
+            </div>
+        {/if}
+        {#if fetchedPageOpen}
+            <div class="w-[42rem] border-l bg-background flex flex-col shrink-0">
+                <FetchedPagePanel
+                    url={fetchedPageUrl}
+                    title={fetchedPageTitle}
+                    content={fetchedPageContent}
+                    onclose={() => {
+                        fetchedPageOpen = false;
+                    }}
+                />
+            </div>
+        {/if}
+    </div>
+    <!-- close content-area flex row -->
 </div>

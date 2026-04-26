@@ -11,7 +11,7 @@ import {
     releaseConversation,
 } from "$lib/api.js";
 import type { MessageHistory } from "$lib/api.js";
-import type { ChatMessage } from "$lib/types.js";
+import type { ChatMessage, FetchedSource } from "$lib/types.js";
 import { messageHistoryToChatMessages } from "$lib/chat-history.js";
 import { setActiveConversation, updateConversationTitleAndTags } from "./conversations.svelte.js";
 
@@ -239,6 +239,7 @@ export async function connectStream(
                     model: data.message.model,
                     modelProvider: data.message.provider,
                     toolCalls,
+                    fetchedSources: undefined,
                     streaming: true,
                 });
             }
@@ -312,6 +313,7 @@ export async function connectStream(
             content: "",
             timestamp: Date.now(),
             toolCalls: [],
+            fetchedSources: undefined,
             streaming: true,
         });
 
@@ -511,6 +513,7 @@ export async function connectStream(
                 content: "",
                 timestamp: Date.now(),
                 toolCalls: [],
+                fetchedSources: undefined,
                 streaming: true,
             });
         }
@@ -647,6 +650,24 @@ export async function connectStream(
         console.log(`[chat] SSE 'error' event: connection lost`);
         connected = false;
         error = "Connection lost. Reconnecting...";
+    });
+
+    // When the source tracker extension flushes fetched sources, attach them to
+    // the currently streaming assistant message so the UI can show "Sources".
+    es.addEventListener("fetched_sources", (e: MessageEvent) => {
+        if (isStale()) return;
+        try {
+            const data = JSON.parse(e.data);
+            const sources = data?.sources as FetchedSource[] | undefined;
+            if (!sources || sources.length === 0) return;
+            const msg = getStreamingMsg();
+            if (msg && msg.role === "assistant") {
+                // Accumulate sources across multiple flushes within one turn
+                msg.fetchedSources = [...(msg.fetchedSources ?? []), ...sources];
+            }
+        } catch {
+            // ignore parse errors
+        }
     });
 
     // When the session tree is navigated (by us or another client), reload messages
@@ -837,11 +858,13 @@ export async function send(content: string, modelId?: string): Promise<void> {
     });
 
     error = null;
+    generating = true;
 
     try {
         await apiSend(currentConversationId, content, modelId);
     } catch (e) {
         error = e instanceof Error ? e.message : "Failed to send message";
+        generating = false;
     }
 }
 
@@ -872,6 +895,7 @@ export async function reloadMessages(): Promise<void> {
                 })) ?? [],
             isError: msg.isError,
             usage: msg.usage,
+            fetchedSources: msg.fetchedSources,
             streaming: false,
             thinkingStreaming: false,
         }));

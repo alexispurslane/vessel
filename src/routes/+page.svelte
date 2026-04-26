@@ -27,11 +27,37 @@
     let inputValue = $state("");
     let isCreating = $state(false);
 
-    // Sandbox quick-toggle states (defaults match global settings)
-    let sandboxOn = $state(true);
-    let netAllDomainsOn = $state(false);
-    let mcpServersOn = $state(true);
-    let agentMode: "agent" | "chat" = $state("agent");
+    // Sandbox quick-toggle states – restore from localStorage or use defaults
+    let sandboxOn = $state(
+        typeof localStorage !== "undefined"
+            ? localStorage.getItem("home_sandboxOn") !== "false"
+            : true
+    );
+    let netAllDomainsOn = $state(
+        typeof localStorage !== "undefined"
+            ? localStorage.getItem("home_netAllDomainsOn") === "true"
+            : false
+    );
+    let mcpServersOn = $state(
+        typeof localStorage !== "undefined"
+            ? localStorage.getItem("home_mcpServersOn") !== "false"
+            : true
+    );
+    let agentMode: "agent" | "chat" = $state(
+        typeof localStorage !== "undefined" && localStorage.getItem("home_agentMode") === "chat"
+            ? "chat"
+            : "agent"
+    );
+
+    // Persist toggle states to localStorage whenever they change
+    $effect(() => {
+        if (typeof localStorage !== "undefined") {
+            localStorage.setItem("home_sandboxOn", String(sandboxOn));
+            localStorage.setItem("home_netAllDomainsOn", String(netAllDomainsOn));
+            localStorage.setItem("home_mcpServersOn", String(mcpServersOn));
+            localStorage.setItem("home_agentMode", agentMode);
+        }
+    });
     let availableModels = $state<ModelInfo[]>([]);
     let selectedModelId = $state(""); // Just the model ID
 
@@ -42,6 +68,16 @@
         } catch {
             // Models will be empty, user can still chat with default
         }
+
+        // Restore toggle states from localStorage on mount (handles SSR mismatch)
+        const storedSandbox = localStorage.getItem("home_sandboxOn");
+        if (storedSandbox !== null) sandboxOn = storedSandbox !== "false";
+        const storedNetAll = localStorage.getItem("home_netAllDomainsOn");
+        if (storedNetAll !== null) netAllDomainsOn = storedNetAll === "true";
+        const storedMcp = localStorage.getItem("home_mcpServersOn");
+        if (storedMcp !== null) mcpServersOn = storedMcp !== "false";
+        const storedAgent = localStorage.getItem("home_agentMode");
+        if (storedAgent !== null) agentMode = storedAgent === "chat" ? "chat" : "agent";
     });
 
     // Initialize model selector: set the default model once settings load,

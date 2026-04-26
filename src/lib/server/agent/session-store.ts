@@ -1,5 +1,5 @@
 import { join, resolve } from "path";
-import { writeFileSync, mkdirSync, rmSync, existsSync } from "fs";
+import { writeFileSync, mkdirSync, rmSync, existsSync, readFileSync } from "fs";
 import {
     createAgentSession,
     createEventBus,
@@ -18,7 +18,7 @@ import { createSandboxedCodingTools } from "./sandboxed-tools.js";
 import { createFetchTool } from "./sandboxed-fetch-tool.js";
 import { createSearchTool, SEARCH_SETTINGS_KEYS } from "./sandboxed-search-tool.js";
 import { fetchTracker } from "./extensions/fetch-tracker.js";
-import type { FetchedPage } from "./extensions/fetch-tracker.js";
+import type { FetchedSource } from "./extensions/fetch-tracker.js";
 import { createSessionSandbox, getSessionWorkDir, loadConversationSettingsFromDb, saveConversationSettingsToDb, isNetworkAllowed, getEffectiveAgentMode } from "./sandbox-factory.js";
 import type { Model as PiModel, Api } from "@mariozechner/pi-ai";
 import { getDb } from "../db/index.js";
@@ -34,6 +34,22 @@ const DATA_DIR = resolve(process.cwd(), "data");
 const SESSIONS_DIR = resolve(DATA_DIR, "sessions");
 const AGENT_DIR = resolve(DATA_DIR, "agent");
 const MODELS_JSON_PATH = resolve(DATA_DIR, "models.json");
+const VESSEL_APPEND_PATH = resolve(AGENT_DIR, "VESSEL_APPEND.md");
+
+/**
+ * Read the Vessel-specific append system prompt from disk.
+ * Returns the trimmed file content, or an empty string if the file doesn't exist.
+ */
+function loadVesselAppendPrompt(): string {
+    try {
+        if (existsSync(VESSEL_APPEND_PATH)) {
+            return readFileSync(VESSEL_APPEND_PATH, "utf-8").trim();
+        }
+    } catch {
+        // File not found or unreadable — skip
+    }
+    return "";
+}
 
 /** How long to keep a session in memory after all subscribers disconnect.
  * This is a safety net — the primary release mechanism is the explicit
@@ -813,21 +829,22 @@ export async function getOrCreateSession(conversationId: string): Promise<PiAgen
         }
     }
     // Migrate legacy string-typed appendSystemPrompt to array
-    const appendSystemPrompt: string[] | null = rawAppend
+    const userAppend: string[] = rawAppend
         ? Array.isArray(rawAppend)
             ? rawAppend
             : [rawAppend as string]
-        : null;
-    if (customSystemPrompt !== null || appendSystemPrompt !== null) {
+        : [];
+    // Prepend the Vessel-specific append prompt (from VESSEL_APPEND.md)
+    const vesselAppend = loadVesselAppendPrompt();
+    const appendSystemPrompt: string[] = vesselAppend
+        ? [vesselAppend, ...userAppend]
+        : userAppend;
+    if (customSystemPrompt !== null || appendSystemPrompt.length > 0) {
         const resourceLoader = agentSession.resourceLoader as any;
         if (customSystemPrompt !== null) {
             resourceLoader.systemPrompt = customSystemPrompt;
         }
-        if (appendSystemPrompt !== null) {
-            resourceLoader.appendSystemPrompt = (appendSystemPrompt && appendSystemPrompt.length > 0)
-                ? appendSystemPrompt
-                : [];
-        }
+        resourceLoader.appendSystemPrompt = appendSystemPrompt;
         // Rebuild the system prompt with the new values
         agentSession.setActiveToolsByName(agentSession.getActiveToolNames());
     }
@@ -858,14 +875,14 @@ export async function getOrCreateSession(conversationId: string): Promise<PiAgen
 
     // Subscribe to the shared EventBus for extension-originated events that
     // don't flow through the agent's subscribe() channel (e.g., pi.appendEntry
-    // doesn't emit message_start/message_end). The fetch tracker extension emits
-    // "fetched_pages" via pi.events, and we broadcast it as a custom SSE event.
-    const unsubscribeEventBus = eventBus.on("fetched_pages", (data) => {
-        const pages = data as FetchedPage[];
-        console.log("[fetch-tracker] EventBus received fetched_pages:", pages.length, "pages for conversation", conversationId);
+    // doesn't emit message_start/message_end). The source tracker extension emits
+    // "fetched_sources" via pi.events, and we broadcast it as a custom SSE event.
+    const unsubscribeEventBus = eventBus.on("fetched_sources", (data) => {
+        const sources = data as FetchedSource[];
+        console.log("[fetch-tracker] EventBus received fetched_sources:", sources.length, "sources for conversation", conversationId);
         broadcast(conversationId, {
-            event: "fetched_pages",
-            data: { pages },
+            event: "fetched_sources",
+            data: { sources },
         });
     });
 
@@ -1072,9 +1089,12 @@ export function updateSessionSystemPrompt(
         resourceLoader.systemPrompt = options.customSystemPrompt ?? undefined;
     }
     if ("appendSystemPrompt" in options) {
-        resourceLoader.appendSystemPrompt = (options.appendSystemPrompt && options.appendSystemPrompt.length > 0)
-            ? options.appendSystemPrompt
-            : [];
+        // Always prepend the Vessel-specific append prompt
+        const vesselAppend = loadVesselAppendPrompt();
+        const userAppend: string[] = options.appendSystemPrompt ?? [];
+        resourceLoader.appendSystemPrompt = vesselAppend
+            ? [vesselAppend, ...userAppend]
+            : userAppend;
     }
 
     // Rebuild the system prompt with the new values
@@ -1223,6 +1243,7 @@ export async function getSessionHistory(conversationId: string): Promise<{
             totalTokens: number;
         };
         timestamp: number;
+        fetchedSources?: FetchedSource[];
     }>;
     model: { provider: string; modelId: string } | null;
 }> {
@@ -1354,6 +1375,7 @@ function buildHistoryFromSession(
             totalTokens: number;
         };
         timestamp: number;
+        fetchedSources?: FetchedSource[];
     }>;
     model: { provider: string; modelId: string } | null;
 } {
@@ -1383,6 +1405,7 @@ function buildHistoryFromSession(
             totalTokens: number;
         };
         timestamp: number;
+        fetchedSources?: FetchedSource[];
     }> = [];
 
     // Track tool call IDs to match results from tool-role messages
@@ -1530,6 +1553,34 @@ function buildHistoryFromSession(
             : row.model_provider && row.model_id
                 ? { provider: row.model_provider, modelId: row.model_id }
                 : null;
+
+    // Reconstruct fetchedSources from CustomEntry records written by the source-tracker
+    // extension. Each CustomEntry with customType "fetched_sources" holds an array of
+    // FetchedSource objects. We attach the accumulated sources to the last assistant
+    // message, matching the streaming behavior where sources are shown on the
+    // assistant response that produced them.
+    let lastAssistantMsgIndex = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === "assistant") {
+            lastAssistantMsgIndex = i;
+            break;
+        }
+    }
+
+    if (lastAssistantMsgIndex >= 0) {
+        const fetchedSources: FetchedSource[] = [];
+        for (const entry of branchEntries) {
+            if (entry.type === "custom" && (entry as any).customType === "fetched_sources") {
+                const sources = (entry as any).data as FetchedSource[] | undefined;
+                if (sources) {
+                    fetchedSources.push(...sources);
+                }
+            }
+        }
+        if (fetchedSources.length > 0) {
+            (messages[lastAssistantMsgIndex] as any).fetchedSources = fetchedSources;
+        }
+    }
 
     return { messages, model };
 }

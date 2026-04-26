@@ -1,32 +1,31 @@
 /**
- * Fetch tracker extension for pi-coding-agent.
+ * Source tracker extension for pi-coding-agent.
  *
- * Tracks which pages the fetch tool has visited since the model's last full
- * message to the user. Uses the extension lifecycle events:
+ * Tracks which sources the agent has consulted (fetched pages and web searches)
+ * since the model's last full message to the user. Uses the extension lifecycle
+ * events:
  *
- *   - tool_result (toolName === "fetch") → record the page
+ *   - tool_result (toolName === "fetch")    → record the page
+ *   - tool_result (toolName === "web_search") → record the search
  *   - turn_end (only when the turn produced visible text) → persist & notify, then clear
  *   - agent_end → final flush (catches the case where the loop ends mid-turn)
  *
  * Persistence: `pi.appendEntry()` writes a `CustomEntry` to the .jsonl session
  * file. These entries are NOT sent to the LLM context window, so they don't
- * waste tokens. On session reload, scan entries for `customType: "fetched_pages"`
+ * waste tokens. On session reload, scan entries for `customType: "fetched_sources"`
  * to reconstruct state.
  *
- * Real-time delivery: `pi.events.emit("fetched_pages", ...)` signals the host
+ * Real-time delivery: `pi.events.emit("fetched_sources", ...)` signals the host
  * app (session-store) via the shared EventBus, which broadcasts an SSE event
  * to the frontend.
  */
 
 import type { ExtensionFactory, TurnEndEvent } from "@mariozechner/pi-coding-agent";
 import type { FetchToolDetails } from "../sandboxed-fetch-tool.js";
+import type { SearchToolDetails } from "../sandboxed-search-tool.js";
+import type { FetchedSource } from "$lib/types.js";
 
-export interface FetchedPage {
-    url: string;
-    title: string;
-    contentLength: number;
-    truncated: boolean;
-}
+export type { FetchedSource };
 
 /**
  * Check if a turn's assistant message contains visible text content for the
@@ -51,44 +50,65 @@ function hasVisibleText(message: TurnEndEvent["message"]): boolean {
 }
 
 export const fetchTracker: ExtensionFactory = (pi) => {
-    let fetchedPages: FetchedPage[] = [];
+    let sources: FetchedSource[] = [];
 
     pi.on("tool_result", (event) => {
-        if (event.toolName !== "fetch" || event.isError) return;
+        if (event.isError) return;
 
-        const details = event.details as FetchToolDetails | undefined;
+        if (event.toolName === "fetch") {
+            const details = event.details as FetchToolDetails | undefined;
 
-        if (details?.url) {
-            console.log("[fetch-tracker] recorded fetch:", details.url);
-            fetchedPages.push({
-                url: details.url,
-                title: details.title ?? "",
-                contentLength: details.contentLength ?? 0,
-                truncated: details.truncated ?? false,
-            });
+            if (details?.url) {
+                console.log("[fetch-tracker] recorded fetch:", details.url);
+                sources.push({
+                    type: "page",
+                    url: details.url,
+                    title: details.title ?? "",
+                    contentLength: details.contentLength ?? 0,
+                    truncated: details.truncated ?? false,
+                    content: details.content ?? "",
+                });
+            }
+        } else if (event.toolName === "web_search") {
+            const details = event.details as SearchToolDetails | undefined;
+
+            if (details?.query) {
+                console.log("[fetch-tracker] recorded search:", details.query);
+                sources.push({
+                    type: "search",
+                    query: details.query,
+                    resultCount: details.resultCount ?? 0,
+                    results: (details.results ?? []).map((r) => ({
+                        url: r.url,
+                        title: r.title,
+                        text: r.text,
+                        publishedDate: r.publishedDate,
+                    })),
+                });
+            }
         }
     });
 
     const flush = () => {
-        if (fetchedPages.length === 0) return;
+        if (sources.length === 0) return;
 
-        console.log("[fetch-tracker] flushing", fetchedPages.length, "pages");
+        console.log("[fetch-tracker] flushing", sources.length, "sources");
 
         // Persist in session file as a CustomEntry — NOT sent to LLM context.
-        pi.appendEntry("fetched_pages", fetchedPages);
+        pi.appendEntry("fetched_sources", sources);
 
         // Signal the SSE layer outside the extension system via the shared EventBus.
-        pi.events.emit("fetched_pages", fetchedPages);
+        pi.events.emit("fetched_sources", sources);
 
-        fetchedPages = [];
+        sources = [];
     };
 
     pi.on("turn_end", (event: TurnEndEvent) => {
         // Only flush when the turn produced visible text for the user.
         // Intermediate turns (tool call + thinking only) should keep
-        // accumulating pages until the final response or agent_end.
+        // accumulating sources until the final response or agent_end.
         const visible = hasVisibleText(event.message);
-        console.log("[fetch-tracker] turn_end, hasVisibleText:", visible, "accumulated pages:", fetchedPages.length);
+        console.log("[fetch-tracker] turn_end, hasVisibleText:", visible, "accumulated sources:", sources.length);
         if (!visible) return;
         flush();
     });

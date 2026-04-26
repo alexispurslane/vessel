@@ -69,6 +69,8 @@ export interface FetchToolDetails {
     contentLength: number;
     /** Whether the output was truncated. */
     truncated: boolean;
+    /** The fetched and defuddle'd markdown content the model saw. */
+    content: string;
 }
 
 // --- Tool options ---
@@ -178,8 +180,9 @@ const { Defuddle } = require(path.join(process.env.NODE_PATH, "defuddle", "dist"
             },
         });
         const page = browser.newPage();
-        await page.goto(${urlJson});
+        const response = await page.goto(${urlJson});
         await page.waitUntilComplete();
+        const httpStatus = response ? response.status : 200;
         const document = page.mainFrame.document;
         // --- CAPTCHA detection ---
         let captchaDetected = false;
@@ -230,7 +233,7 @@ const { Defuddle } = require(path.join(process.env.NODE_PATH, "defuddle", "dist"
         const defuddleResult = await Defuddle(document, ${urlJson}, { markdown: true, removeImages: true });
         const content = defuddleResult.content;
         const title = defuddleResult.title || document.title;
-        const result = JSON.stringify({ content, title, captchaDetected });
+        const result = JSON.stringify({ content, title, captchaDetected, httpStatus });
         console.log(result);
     } finally {
         if (browser) await browser.close();
@@ -277,7 +280,7 @@ function replaceImagesWithAltText(document: any): void {
 
 // --- Local (non-sandboxed) fetch ---
 
-async function fetchPageLocally(url: string, timeout: number = 30): Promise<{ content: string; title: string; captchaDetected: boolean }> {
+async function fetchPageLocally(url: string, timeout: number = 30): Promise<{ content: string; title: string; captchaDetected: boolean; httpStatus: number }> {
     const { Browser, BrowserErrorCaptureEnum } = await import(/* @vite-ignore */ "happy-dom");
     const { Defuddle } = await import(/* @vite-ignore */ "defuddle/node");
     let browser: InstanceType<typeof Browser> | undefined;
@@ -289,8 +292,9 @@ async function fetchPageLocally(url: string, timeout: number = 30): Promise<{ co
             },
         }) as InstanceType<typeof Browser>;
         const page = browser.newPage();
-        await page.goto(url);
+        const response = await page.goto(url);
         await page.waitUntilComplete();
+        const httpStatus = response?.status ?? 200;
         const document = page.mainFrame.document;
         // Check for CAPTCHA/anti-bot challenge pages before extracting content
         const captchaDetected = detectCaptcha(document as any);
@@ -303,7 +307,7 @@ async function fetchPageLocally(url: string, timeout: number = 30): Promise<{ co
         const defuddleResult = await Defuddle(document as any, url, { markdown: true, removeImages: true });
         const content = defuddleResult.content;
         const title = defuddleResult.title || document.title;
-        return { content, title, captchaDetected };
+        return { content, title, captchaDetected, httpStatus };
     } finally {
         if (browser) await browser.close();
     }
@@ -311,7 +315,7 @@ async function fetchPageLocally(url: string, timeout: number = 30): Promise<{ co
 
 // --- Sandboxed fetch ---
 
-async function fetchPageInSandbox(sandbox: Sandbox, url: string, timeout: number = 30): Promise<{ content: string; title: string; captchaDetected: boolean }> {
+async function fetchPageInSandbox(sandbox: Sandbox, url: string, timeout: number = 30): Promise<{ content: string; title: string; captchaDetected: boolean; httpStatus: number }> {
     const jsCode = buildFetchJs(url, timeout);
     // sandbox.exec is used instead of sandbox.js because we need to pass
     // --use-env-proxy to the Node process. Node.js fetch doesn't respect
@@ -337,10 +341,10 @@ async function fetchPageInSandbox(sandbox: Sandbox, url: string, timeout: number
 
     try {
         const parsed = JSON.parse(result.stdout.trim());
-        return { content: parsed.content, title: parsed.title ?? "", captchaDetected: !!parsed.captchaDetected };
+        return { content: parsed.content, title: parsed.title ?? "", captchaDetected: !!parsed.captchaDetected, httpStatus: parsed.httpStatus ?? 200 };
     } catch {
         // If JSON parsing fails, return raw stdout as the content
-        return { content: result.stdout, title: "", captchaDetected: false };
+        return { content: result.stdout, title: "", captchaDetected: false, httpStatus: 200 };
     }
 }
 
@@ -412,7 +416,7 @@ export function createFetchTool(options?: FetchToolOptions): AgentTool<typeof fe
                     content: [
                         { type: "text", text: "Invalid URL: " + url + ". Make sure to include the protocol (e.g. https://)." },
                     ],
-                    details: { url, title: "", contentLength: 0, truncated: false },
+                    details: { url, title: "", contentLength: 0, truncated: false, content: "" },
                 };
             }
 
@@ -425,59 +429,79 @@ export function createFetchTool(options?: FetchToolOptions): AgentTool<typeof fe
                         url,
                         title: "",
                         contentLength: 0,
-                        truncated: false
+                        truncated: false,
+                        content: "",
                     },
                 };
             }
 
+            let content: string;
+            let title: string;
+            let captchaDetected: boolean;
+            let httpStatus: number;
+
             try {
-                const { content, title, captchaDetected } = sandbox
+                const result = sandbox
                     ? await fetchPageInSandbox(sandbox, url, effectiveTimeout)
                     : await fetchPageLocally(url, effectiveTimeout);
-
-                // Throwing causes the agent loop to mark the tool call as isError,
-                // which is the correct semantic for a failed fetch.
-                if (captchaDetected) {
-                    throw new Error(
-                        "CAPTCHA or anti-bot challenge page detected. " +
-                        "The site is blocking automated access and the page content could not be retrieved."
-                    );
-                }
-
-                // Treat effectively empty content as a failure too — the page didn't
-                // return usable text, so the agent should know it got nothing.
-                if (!content || content.trim().length === 0) {
-                    throw new Error(
-                        "The page returned no readable content. " +
-                        "The site may be blocking automated access, require JavaScript that happy-dom doesn't support, " +
-                        "or the page may be empty."
-                    );
-                }
-
-                const { content: truncatedContent, truncated } = truncateContent(content);
-
-                const textContent: TextContent[] = [
-                    { type: "text", text: truncatedContent },
-                ];
-
-                return {
-                    content: textContent,
-                    details: {
-                        url,
-                        title,
-                        contentLength: content.length,
-                        truncated,
-                    },
-                };
+                content = result.content;
+                title = result.title;
+                captchaDetected = result.captchaDetected;
+                httpStatus = result.httpStatus;
             } catch (err) {
+                // Network/parse errors from the fetch itself — return as tool error
+                // so the model sees what went wrong without the whole tool call failing.
                 const message = err instanceof Error ? err.message : String(err);
                 return {
                     content: [
                         { type: "text", text: "Error fetching " + url + ": " + message },
                     ],
-                    details: { url, title: "", contentLength: 0, truncated: false },
+                    details: { url, title: "", contentLength: 0, truncated: false, content: "" },
                 };
             }
+
+            // Throwing causes the agent loop to mark the tool call as isError,
+            // which is the correct semantic for a semantically failed fetch.
+            if (httpStatus >= 400) {
+                throw new Error(
+                    "The page returned HTTP " + httpStatus + ". " +
+                    "The site may be blocking automated access or the page may not exist."
+                );
+            }
+
+            if (captchaDetected) {
+                throw new Error(
+                    "CAPTCHA or anti-bot challenge page detected. " +
+                    "The site is blocking automated access and the page content could not be retrieved."
+                );
+            }
+
+            // Treat effectively empty content as a failure too — the page didn't
+            // return usable text, so the agent should know it got nothing.
+            if (!content || content.trim().length === 0) {
+                throw new Error(
+                    "The page returned no readable content. " +
+                    "The site may be blocking automated access, require JavaScript that happy-dom doesn't support, " +
+                    "or the page may be empty."
+                );
+            }
+
+            const { content: truncatedContent, truncated } = truncateContent(content);
+
+            const textContent: TextContent[] = [
+                { type: "text", text: truncatedContent },
+            ];
+
+            return {
+                content: textContent,
+                details: {
+                    url,
+                    title,
+                    contentLength: content.length,
+                    truncated,
+                    content: truncatedContent,
+                },
+            };
         },
     };
 }

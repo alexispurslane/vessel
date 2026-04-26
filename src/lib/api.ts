@@ -10,6 +10,7 @@ import type {
     CustomModelDef,
     ModelInfo,
     ConversationSettings,
+    FetchedSource,
 } from "$lib/types.js";
 
 class ApiError extends Error {
@@ -311,6 +312,7 @@ export interface MessageHistoryItem {
         totalTokens: number;
     };
     timestamp: number;
+    fetchedSources?: FetchedSource[];
 }
 
 export interface MessageHistory {
