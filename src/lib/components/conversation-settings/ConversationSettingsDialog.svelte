@@ -15,11 +15,10 @@
         PillList,
         PathAutocompletePillList,
         PillKeyValueList,
+        type PillItem,
+        type KeyValueItem,
     } from "$lib/components/pill-list/index.js";
-    import {
-        getConversationSettings,
-        updateConversationSettings,
-    } from "$lib/api.js";
+    import { getConversationSettings, updateConversationSettings } from "$lib/api.js";
     import type { ConversationSettings } from "$lib/types.js";
     import { reconnectStream } from "$lib/stores/chat.svelte.js";
     import Shield from "@lucide/svelte/icons/shield";
@@ -73,13 +72,13 @@
     let writePaths = $state<Array<{ path: string; editing?: boolean }>>([]);
 
     let useCustomDomains = $state(false);
-    let allowedDomains = $state<Array<{ domain: string; editing?: boolean }>>([]);
+    let allowedDomains = $state<PillItem[]>([]);
 
     let useCustomEnvVars = $state(false);
-    let allowedEnvVars = $state<Array<{ name: string; editing?: boolean }>>([]);
+    let allowedEnvVars = $state<PillItem[]>([]);
 
     let useCustomSecrets = $state(false);
-    let secrets = $state<Array<{ key: string; value: string; hosts: string; editing?: boolean }>>([]);
+    let secrets = $state<KeyValueItem[]>([]);
 
     // Conversation mode: "agent" = all tools, "chat" = no tools, null = inherit global
     let agentMode: "agent" | "chat" | null = $state(null);
@@ -98,7 +97,10 @@
 
             if (settings.extraReadPaths !== null && settings.extraReadPaths !== undefined) {
                 useCustomReadPaths = true;
-                readPaths = settings.extraReadPaths.map((p: string) => ({ path: p, editing: false }));
+                readPaths = settings.extraReadPaths.map((p: string) => ({
+                    path: p,
+                    editing: false,
+                }));
             } else {
                 useCustomReadPaths = false;
                 readPaths = [];
@@ -106,7 +108,10 @@
 
             if (settings.extraWritePaths !== null && settings.extraWritePaths !== undefined) {
                 useCustomWritePaths = true;
-                writePaths = settings.extraWritePaths.map((p: string) => ({ path: p, editing: false }));
+                writePaths = settings.extraWritePaths.map((p: string) => ({
+                    path: p,
+                    editing: false,
+                }));
             } else {
                 useCustomWritePaths = false;
                 writePaths = [];
@@ -114,7 +119,10 @@
 
             if (settings.allowedNetDomains !== null && settings.allowedNetDomains !== undefined) {
                 useCustomDomains = true;
-                allowedDomains = settings.allowedNetDomains.map((d: string) => ({ domain: d, editing: false }));
+                allowedDomains = settings.allowedNetDomains.map((d: string) => ({
+                    domain: d,
+                    editing: false,
+                }));
             } else {
                 useCustomDomains = false;
                 allowedDomains = [];
@@ -122,7 +130,10 @@
 
             if (settings.allowEnv !== null && settings.allowEnv !== undefined) {
                 useCustomEnvVars = true;
-                allowedEnvVars = settings.allowEnv.map((e: string) => ({ name: e, editing: false }));
+                allowedEnvVars = settings.allowEnv.map((e: string) => ({
+                    name: e,
+                    editing: false,
+                }));
             } else {
                 useCustomEnvVars = false;
                 allowedEnvVars = [];
@@ -171,20 +182,26 @@
                 : null;
 
             settings.allowedNetDomains = useCustomDomains
-                ? allowedDomains.map((d) => d.domain).filter(Boolean)
+                ? allowedDomains.map((d) => d["domain"] as string).filter(Boolean)
                 : null;
 
             settings.allowEnv = useCustomEnvVars
-                ? allowedEnvVars.map((e) => e.name).filter(Boolean)
+                ? allowedEnvVars.map((e) => e["name"] as string).filter(Boolean)
                 : null;
 
             if (useCustomSecrets) {
                 const secretsObj: Record<string, { value: string; hosts: string[] }> = {};
                 for (const s of secrets) {
-                    if (s.key.trim()) {
-                        secretsObj[s.key.trim()] = {
-                            value: s.value,
-                            hosts: s.hosts.split(",").map((h: string) => h.trim()).filter(Boolean),
+                    const key = (s["key"] as string) ?? "";
+                    const value = (s["value"] as string) ?? "";
+                    const hosts = (s["hosts"] as string) ?? "";
+                    if (key.trim()) {
+                        secretsObj[key.trim()] = {
+                            value,
+                            hosts: hosts
+                                .split(",")
+                                .map((h: string) => h.trim())
+                                .filter(Boolean),
                         };
                     }
                 }
@@ -241,7 +258,10 @@
                 {/if}
 
                 {#if saved}
-                    <p class="text-sm text-green-600">Settings saved{#if sandboxEnabledState !== null || allowNetState !== null || useCustomReadPaths || useCustomWritePaths || useCustomDomains || useCustomEnvVars || useCustomSecrets || agentMode !== null}. Session will restart on next interaction.{/if}</p>
+                    <p class="text-sm text-green-600">
+                        Settings saved{#if sandboxEnabledState !== null || allowNetState !== null || useCustomReadPaths || useCustomWritePaths || useCustomDomains || useCustomEnvVars || useCustomSecrets || agentMode !== null}.
+                            Session will restart on next interaction.{/if}
+                    </p>
                 {/if}
 
                 <!-- Sandbox Enabled -->
@@ -250,24 +270,34 @@
                         <div>
                             <Label class="text-base font-medium">Sandbox</Label>
                             <p class="text-sm text-muted-foreground mt-1">
-                                Control whether this conversation uses a sandbox. When "Inherit" is selected, the global sandbox setting applies.
+                                Control whether this conversation uses a sandbox. When "Inherit" is
+                                selected, the global sandbox setting applies.
                             </p>
                         </div>
                         <div class="flex gap-2">
                             <button
-                                class="px-3 py-1.5 text-sm rounded-md border transition-colors {sandboxEnabledState === null ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+                                class="px-3 py-1.5 text-sm rounded-md border transition-colors {sandboxEnabledState ===
+                                null
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'hover:bg-muted'}"
                                 onclick={() => (sandboxEnabledState = null)}
                             >
                                 Inherit
                             </button>
                             <button
-                                class="px-3 py-1.5 text-sm rounded-md border transition-colors {sandboxEnabledState === true ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+                                class="px-3 py-1.5 text-sm rounded-md border transition-colors {sandboxEnabledState ===
+                                true
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'hover:bg-muted'}"
                                 onclick={() => (sandboxEnabledState = true)}
                             >
                                 On
                             </button>
                             <button
-                                class="px-3 py-1.5 text-sm rounded-md border transition-colors {sandboxEnabledState === false ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+                                class="px-3 py-1.5 text-sm rounded-md border transition-colors {sandboxEnabledState ===
+                                false
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'hover:bg-muted'}"
                                 onclick={() => (sandboxEnabledState = false)}
                             >
                                 Off
@@ -282,25 +312,35 @@
                         <div>
                             <Label class="text-base font-medium">Mode</Label>
                             <p class="text-sm text-muted-foreground mt-1">
-                                Agent mode enables all tools (read, write, bash, fetch, etc.). Chat mode disables tools for plain conversation.
+                                Agent mode enables all tools (read, write, bash, fetch, etc.). Chat
+                                mode disables tools for plain conversation.
                             </p>
                         </div>
                         <div class="flex gap-2">
                             <button
-                                class="px-3 py-1.5 text-sm rounded-md border transition-colors {agentMode === null ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+                                class="px-3 py-1.5 text-sm rounded-md border transition-colors {agentMode ===
+                                null
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'hover:bg-muted'}"
                                 onclick={() => (agentMode = null)}
                             >
                                 Inherit
                             </button>
                             <button
-                                class="px-3 py-1.5 text-sm rounded-md border transition-colors {agentMode === 'agent' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
-                                onclick={() => (agentMode = 'agent')}
+                                class="px-3 py-1.5 text-sm rounded-md border transition-colors {agentMode ===
+                                'agent'
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'hover:bg-muted'}"
+                                onclick={() => (agentMode = "agent")}
                             >
                                 Agent
                             </button>
                             <button
-                                class="px-3 py-1.5 text-sm rounded-md border transition-colors {agentMode === 'chat' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
-                                onclick={() => (agentMode = 'chat')}
+                                class="px-3 py-1.5 text-sm rounded-md border transition-colors {agentMode ===
+                                'chat'
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'hover:bg-muted'}"
+                                onclick={() => (agentMode = "chat")}
                             >
                                 Chat
                             </button>
@@ -315,7 +355,9 @@
                             <div>
                                 <Label class="text-base font-medium">Extra Read Paths</Label>
                                 <p class="text-sm text-muted-foreground mt-1">
-                                    {useCustomReadPaths ? "Custom paths for this conversation" : "Using global settings"}
+                                    {useCustomReadPaths
+                                        ? "Custom paths for this conversation"
+                                        : "Using global settings"}
                                 </p>
                             </div>
                             <Switch bind:checked={useCustomReadPaths} />
@@ -336,7 +378,9 @@
                             <div>
                                 <Label class="text-base font-medium">Extra Write Paths</Label>
                                 <p class="text-sm text-muted-foreground mt-1">
-                                    {useCustomWritePaths ? "Custom paths for this conversation" : "Using global settings"}
+                                    {useCustomWritePaths
+                                        ? "Custom paths for this conversation"
+                                        : "Using global settings"}
                                 </p>
                             </div>
                             <Switch bind:checked={useCustomWritePaths} />
@@ -359,24 +403,37 @@
                             <div>
                                 <Label class="text-base font-medium">Network Access</Label>
                                 <p class="text-sm text-muted-foreground mt-1">
-                                    {allowNetState === null ? "Using global settings" : allowNetState ? "Network access allowed" : "Network access denied"}
+                                    {allowNetState === null
+                                        ? "Using global settings"
+                                        : allowNetState
+                                          ? "Network access allowed"
+                                          : "Network access denied"}
                                 </p>
                             </div>
                             <div class="flex gap-2">
                                 <button
-                                    class="px-3 py-1.5 text-sm rounded-md border transition-colors {allowNetState === null ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+                                    class="px-3 py-1.5 text-sm rounded-md border transition-colors {allowNetState ===
+                                    null
+                                        ? 'bg-primary text-primary-foreground'
+                                        : 'hover:bg-muted'}"
                                     onclick={() => (allowNetState = null)}
                                 >
                                     Inherit
                                 </button>
                                 <button
-                                    class="px-3 py-1.5 text-sm rounded-md border transition-colors {allowNetState === true ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+                                    class="px-3 py-1.5 text-sm rounded-md border transition-colors {allowNetState ===
+                                    true
+                                        ? 'bg-primary text-primary-foreground'
+                                        : 'hover:bg-muted'}"
                                     onclick={() => (allowNetState = true)}
                                 >
                                     Allow
                                 </button>
                                 <button
-                                    class="px-3 py-1.5 text-sm rounded-md border transition-colors {allowNetState === false ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+                                    class="px-3 py-1.5 text-sm rounded-md border transition-colors {allowNetState ===
+                                    false
+                                        ? 'bg-primary text-primary-foreground'
+                                        : 'hover:bg-muted'}"
                                     onclick={() => (allowNetState = false)}
                                 >
                                     Deny
@@ -389,24 +446,37 @@
                                 <div>
                                     <Label class="text-sm font-medium">Domain Access</Label>
                                     <p class="text-xs text-muted-foreground mt-0.5">
-                                        {allowAllDomainsState === null ? "Using global settings" : allowAllDomainsState ? "All domains allowed" : "Specific domains only"}
+                                        {allowAllDomainsState === null
+                                            ? "Using global settings"
+                                            : allowAllDomainsState
+                                              ? "All domains allowed"
+                                              : "Specific domains only"}
                                     </p>
                                 </div>
                                 <div class="flex gap-2">
                                     <button
-                                        class="px-3 py-1.5 text-sm rounded-md border transition-colors {allowAllDomainsState === null ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+                                        class="px-3 py-1.5 text-sm rounded-md border transition-colors {allowAllDomainsState ===
+                                        null
+                                            ? 'bg-primary text-primary-foreground'
+                                            : 'hover:bg-muted'}"
                                         onclick={() => (allowAllDomainsState = null)}
                                     >
                                         Inherit
                                     </button>
                                     <button
-                                        class="px-3 py-1.5 text-sm rounded-md border transition-colors {allowAllDomainsState === true ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+                                        class="px-3 py-1.5 text-sm rounded-md border transition-colors {allowAllDomainsState ===
+                                        true
+                                            ? 'bg-primary text-primary-foreground'
+                                            : 'hover:bg-muted'}"
                                         onclick={() => (allowAllDomainsState = true)}
                                     >
                                         All Domains
                                     </button>
                                     <button
-                                        class="px-3 py-1.5 text-sm rounded-md border transition-colors {allowAllDomainsState === false ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+                                        class="px-3 py-1.5 text-sm rounded-md border transition-colors {allowAllDomainsState ===
+                                        false
+                                            ? 'bg-primary text-primary-foreground'
+                                            : 'hover:bg-muted'}"
                                         onclick={() => (allowAllDomainsState = false)}
                                     >
                                         Specific
@@ -418,9 +488,13 @@
                                 <div class="mt-2 space-y-3 mb-4">
                                     <div class="flex items-center justify-between">
                                         <div>
-                                            <Label class="text-sm font-medium">Allowed Domains</Label>
+                                            <Label class="text-sm font-medium"
+                                                >Allowed Domains</Label
+                                            >
                                             <p class="text-xs text-muted-foreground mt-0.5">
-                                                {useCustomDomains ? "Custom domains for this conversation" : "Using global settings"}
+                                                {useCustomDomains
+                                                    ? "Custom domains for this conversation"
+                                                    : "Using global settings"}
                                             </p>
                                         </div>
                                         <Switch bind:checked={useCustomDomains} />
@@ -445,7 +519,9 @@
                                     <div>
                                         <Label class="text-sm font-medium">Secrets</Label>
                                         <p class="text-xs text-muted-foreground mt-0.5">
-                                            {useCustomSecrets ? "Custom secrets for this conversation" : "Using global settings"}
+                                            {useCustomSecrets
+                                                ? "Custom secrets for this conversation"
+                                                : "Using global settings"}
                                         </p>
                                     </div>
                                     <Switch bind:checked={useCustomSecrets} />
@@ -454,9 +530,25 @@
                                     <PillKeyValueList
                                         items={secrets}
                                         fields={[
-                                            { key: "key", placeholder: "KEY", width: "w-20", mono: true },
-                                            { key: "value", placeholder: "value", width: "w-20", type: "password", viewDisplay: "mask" },
-                                            { key: "hosts", placeholder: "hosts", width: "w-20", showInView: false },
+                                            {
+                                                key: "key",
+                                                placeholder: "KEY",
+                                                width: "w-20",
+                                                mono: true,
+                                            },
+                                            {
+                                                key: "value",
+                                                placeholder: "value",
+                                                width: "w-20",
+                                                type: "password",
+                                                viewDisplay: "mask",
+                                            },
+                                            {
+                                                key: "hosts",
+                                                placeholder: "hosts",
+                                                width: "w-20",
+                                                showInView: false,
+                                            },
                                         ]}
                                         onChange={(items) => (secrets = items)}
                                         addButtonLabel="Add Secret"
@@ -472,9 +564,13 @@
                     <div class="rounded-lg border p-4 space-y-3">
                         <div class="flex items-center justify-between">
                             <div>
-                                <Label class="text-base font-medium">Allowed Environment Variables</Label>
+                                <Label class="text-base font-medium"
+                                    >Allowed Environment Variables</Label
+                                >
                                 <p class="text-sm text-muted-foreground mt-1">
-                                    {useCustomEnvVars ? "Custom env vars for this conversation" : "Using global settings"}
+                                    {useCustomEnvVars
+                                        ? "Custom env vars for this conversation"
+                                        : "Using global settings"}
                                 </p>
                             </div>
                             <Switch bind:checked={useCustomEnvVars} />
@@ -499,7 +595,8 @@
                     <div class="space-y-0.5">
                         <Label class="text-base font-medium">Delete workspace on trash</Label>
                         <p class="text-sm text-muted-foreground">
-                            When enabled, the sandbox workspace is permanently deleted when you trash this conversation.
+                            When enabled, the sandbox workspace is permanently deleted when you
+                            trash this conversation.
                         </p>
                     </div>
                     <Switch bind:checked={deleteWorkspaceWithConversation} />

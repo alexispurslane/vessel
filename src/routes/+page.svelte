@@ -161,15 +161,20 @@
             <div class="flex items-center gap-1 mt-2">
                 <TooltipProvider>
                     <Tooltip>
-                        <TooltipTrigger asChild>
-                            <button
-                                type="button"
-                                class="inline-flex items-center justify-center size-7 rounded-md transition-colors {sandboxOn ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
-                                onclick={() => (sandboxOn = !sandboxOn)}
-                                aria-label="Toggle sandbox"
-                            >
-                                <Box class="size-4" />
-                            </button>
+                        <TooltipTrigger>
+                            {#snippet child({ props })}
+                                <button
+                                    {...props}
+                                    type="button"
+                                    class="inline-flex items-center justify-center size-7 rounded-md transition-colors {sandboxOn
+                                        ? 'bg-primary text-primary-foreground'
+                                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+                                    onclick={() => (sandboxOn = !sandboxOn)}
+                                    aria-label="Toggle sandbox"
+                                >
+                                    <Box class="size-4" />
+                                </button>
+                            {/snippet}
                         </TooltipTrigger>
                         <TooltipContent>Sandbox</TooltipContent>
                     </Tooltip>
@@ -177,15 +182,20 @@
 
                 <TooltipProvider>
                     <Tooltip>
-                        <TooltipTrigger asChild>
-                            <button
-                                type="button"
-                                class="inline-flex items-center justify-center size-7 rounded-md transition-colors {netAllDomainsOn ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
-                                onclick={() => (netAllDomainsOn = !netAllDomainsOn)}
-                                aria-label="Toggle network & all domains"
-                            >
-                                <Globe class="size-4" />
-                            </button>
+                        <TooltipTrigger>
+                            {#snippet child({ props })}
+                                <button
+                                    {...props}
+                                    type="button"
+                                    class="inline-flex items-center justify-center size-7 rounded-md transition-colors {netAllDomainsOn
+                                        ? 'bg-primary text-primary-foreground'
+                                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+                                    onclick={() => (netAllDomainsOn = !netAllDomainsOn)}
+                                    aria-label="Toggle network & all domains"
+                                >
+                                    <Globe class="size-4" />
+                                </button>
+                            {/snippet}
                         </TooltipTrigger>
                         <TooltipContent>Network &amp; all domains</TooltipContent>
                     </Tooltip>
@@ -193,15 +203,20 @@
 
                 <TooltipProvider>
                     <Tooltip>
-                        <TooltipTrigger asChild>
-                            <button
-                                type="button"
-                                class="inline-flex items-center justify-center size-7 rounded-md transition-colors {mcpServersOn ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
-                                onclick={() => (mcpServersOn = !mcpServersOn)}
-                                aria-label="Toggle MCP servers"
-                            >
-                                <Puzzle class="size-4" />
-                            </button>
+                        <TooltipTrigger>
+                            {#snippet child({ props })}
+                                <button
+                                    {...props}
+                                    type="button"
+                                    class="inline-flex items-center justify-center size-7 rounded-md transition-colors {mcpServersOn
+                                        ? 'bg-primary text-primary-foreground'
+                                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+                                    onclick={() => (mcpServersOn = !mcpServersOn)}
+                                    aria-label="Toggle MCP servers"
+                                >
+                                    <Puzzle class="size-4" />
+                                </button>
+                            {/snippet}
                         </TooltipTrigger>
                         <TooltipContent>MCP servers</TooltipContent>
                     </Tooltip>
@@ -209,17 +224,28 @@
 
                 <TooltipProvider>
                     <Tooltip>
-                        <TooltipTrigger asChild>
-                            <button
-                                type="button"
-                                class="inline-flex items-center justify-center size-7 rounded-md transition-colors {agentMode === 'agent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
-                                onclick={() => (agentMode = agentMode === 'agent' ? 'chat' : 'agent')}
-                                aria-label="Toggle agent/chat mode"
-                            >
-                                <Wrench class="size-4" />
-                            </button>
+                        <TooltipTrigger>
+                            {#snippet child({ props })}
+                                <button
+                                    {...props}
+                                    type="button"
+                                    class="inline-flex items-center justify-center size-7 rounded-md transition-colors {agentMode ===
+                                    'agent'
+                                        ? 'bg-primary text-primary-foreground'
+                                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+                                    onclick={() =>
+                                        (agentMode = agentMode === "agent" ? "chat" : "agent")}
+                                    aria-label="Toggle agent/chat mode"
+                                >
+                                    <Wrench class="size-4" />
+                                </button>
+                            {/snippet}
                         </TooltipTrigger>
-                        <TooltipContent>{agentMode === 'agent' ? 'Agent mode (tools on)' : 'Chat mode (tools off)'}</TooltipContent>
+                        <TooltipContent
+                            >{agentMode === "agent"
+                                ? "Agent mode (tools on)"
+                                : "Chat mode (tools off)"}</TooltipContent
+                        >
                     </Tooltip>
                 </TooltipProvider>
             </div>

@@ -21,7 +21,7 @@
         /** Model provider */
         modelProvider?: string;
         /** Function to resolve a model ID to a display name */
-        getModelDisplayName: (modelId: string | undefined) => string;
+        getModelDisplayName: (modelId: string) => string;
         /** Whether the message has visible content (affects assistant avatar vs spacer) */
         hasContent: boolean;
     }
@@ -43,12 +43,15 @@
             {#if username}
                 <TooltipProvider>
                     <Tooltip>
-                        <TooltipTrigger asChild>
-                            <span
-                                class="text-[10px] text-muted-foreground leading-none max-w-[4.5rem] truncate block overflow-hidden text-ellipsis whitespace-nowrap"
-                            >
-                                {username}
-                            </span>
+                        <TooltipTrigger>
+                            {#snippet child({ props })}
+                                <span
+                                    {...props}
+                                    class="text-[10px] text-muted-foreground leading-none max-w-[4.5rem] truncate block overflow-hidden text-ellipsis whitespace-nowrap"
+                                >
+                                    {username}
+                                </span>
+                            {/snippet}
                         </TooltipTrigger>
                         <TooltipContent side="top" class="text-xs">
                             {username}
@@ -68,15 +71,18 @@
             {#if model || modelProvider}
                 <TooltipProvider>
                     <Tooltip>
-                        <TooltipTrigger asChild>
-                            <span
-                                class="text-[10px] text-muted-foreground leading-none max-w-18 truncate block overflow-hidden text-ellipsis whitespace-nowrap"
-                            >
-                                {getModelDisplayName(model)}
-                            </span>
+                        <TooltipTrigger>
+                            {#snippet child({ props })}
+                                <span
+                                    {...props}
+                                    class="text-[10px] text-muted-foreground leading-none max-w-18 truncate block overflow-hidden text-ellipsis whitespace-nowrap"
+                                >
+                                    {getModelDisplayName(model ?? "")}
+                                </span>
+                            {/snippet}
                         </TooltipTrigger>
                         <TooltipContent side="top" class="text-xs">
-                            {getModelDisplayName(model)}
+                            {getModelDisplayName(model ?? "")}
                         </TooltipContent>
                     </Tooltip>
                 </TooltipProvider>

@@ -1,5 +1,6 @@
 <script lang="ts">
-    import SvelteMarkdown from "@humanspeak/svelte-markdown";
+    import { Streamdown } from "svelte-streamdown";
+    import { type DeepPartialTheme } from "$lib/types/theme.js";
     import { Spinner } from "$lib/components/ui/spinner/index.js";
     import Brain from "@lucide/svelte/icons/brain";
     import ChevronDown from "@lucide/svelte/icons/chevron-down";
@@ -24,11 +25,33 @@
         navigating?: boolean;
     }
 
-    let { group, thinkingIsOpen, onthinkingtoggle, ondelete, onregenerate, navigating = false }: Props = $props();
+    let {
+        group,
+        thinkingIsOpen,
+        onthinkingtoggle,
+        ondelete,
+        onregenerate,
+        navigating = false,
+    }: Props = $props();
 
-    /** Custom renderers for SvelteMarkdown */
-    const renderers = {
-        code: CodeBlock,
+    /** Theme override for thinking block — very compact */
+    const thinkingTheme: DeepPartialTheme = {
+        h1: { base: "mt-2 mb-0.5 text-xs font-semibold" },
+        h2: { base: "mt-2 mb-0.5 text-xs font-semibold" },
+        h3: { base: "mt-1 mb-0.5 text-[11px] font-semibold" },
+        h4: { base: "mt-1 mb-0.5 text-[11px] font-semibold" },
+        h5: { base: "mt-1 mb-0.5 text-[11px] font-semibold" },
+        h6: { base: "mt-1 mb-0.5 text-[11px] font-semibold" },
+        paragraph: { base: "my-0.5" },
+        ul: { base: "my-0.5" },
+        ol: { base: "my-0.5" },
+        li: { base: "ml-4" },
+        code: {
+            base: "my-1 w-full overflow-hidden rounded-lg border border-border flex flex-col max-w-full text-[0.8rem]",
+        },
+        codespan: { base: "bg-muted/50 px-1 py-0.5 rounded text-[0.8rem]" },
+        blockquote: { base: "border-l-2 border-muted pl-3 my-1" },
+        hr: { base: "border-border my-2" },
     };
 
     let thinkingEl: HTMLDivElement | undefined = $state();
@@ -78,19 +101,13 @@
     }
 
     /** Count tool calls in the group */
-    let toolCallCount = $derived(
-        group.steps.filter((s) => s.type === "toolCall").length
-    );
+    let toolCallCount = $derived(group.steps.filter((s) => s.type === "toolCall").length);
 
     /** Whether any thinking step is still streaming */
-    let thinkingStreaming = $derived(
-        group.steps.some((s) => s.type === "thinking" && s.streaming)
-    );
+    let thinkingStreaming = $derived(group.steps.some((s) => s.type === "thinking" && s.streaming));
 
     /** Whether to show the action bar */
-    let showActions = $derived(
-        !group.streaming && !navigating && (onregenerate || ondelete)
-    );
+    let showActions = $derived(!group.streaming && !navigating && (onregenerate || ondelete));
 </script>
 
 <div class="flex flex-col gap-1.5 w-full font-sans group/tg">
@@ -116,24 +133,31 @@
             </span>
             {#if toolCallCount > 0}
                 <span class="text-muted-foreground/60">
-                    &middot; {toolCallCount} {toolCallCount === 1 ? 'tool call' : 'tool calls'}
+                    &middot; {toolCallCount}
+                    {toolCallCount === 1 ? "tool call" : "tool calls"}
                 </span>
             {/if}
             <ChevronDown
                 class="size-3 ml-auto shrink-0 transition-transform group-open:rotate-180"
             />
         </summary>
-        <div bind:this={thinkingEl} class="border-t px-3 py-2 text-xs text-muted-foreground max-h-96 overflow-auto">
+        <div
+            bind:this={thinkingEl}
+            class="border-t px-3 py-2 text-xs text-muted-foreground max-h-96 overflow-auto"
+        >
             {#each group.steps as step, stepIdx (step.id)}
                 {#if step.type === "thinking" && step.thinking}
                     <div class="markdown-prose markdown-thinking">
-                        <SvelteMarkdown
-                            source={step.thinking}
-                            streaming={step.streaming}
-                            codeStreaming={step.streaming ?? false}
-                            {renderers}
-                            options={{ gfm: true, breaks: true }}
-                        />
+                        <Streamdown
+                            content={step.thinking}
+                            baseTheme="shadcn"
+                            theme={thinkingTheme}
+                            parseIncompleteMarkdown={step.streaming ?? false}
+                        >
+                            {#snippet code({ token })}
+                                <CodeBlock lang={token.lang} text={token.text} />
+                            {/snippet}
+                        </Streamdown>
                     </div>
                 {:else if step.type === "toolCall" && step.toolCall}
                     <ToolCall toolCall={step.toolCall} compact={true} />
@@ -158,9 +182,11 @@
             {#if ondelete}
                 <button
                     onclick={() => handleDelete()}
-                    class="inline-flex items-center gap-1 text-[11px] transition-colors cursor-pointer px-1.5 py-0.5 rounded {confirmDelete ? 'text-destructive bg-destructive/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}"
-                    aria-label={confirmDelete ? 'Confirm delete' : 'Delete message'}
-                    title={confirmDelete ? 'Click again to confirm deletion' : 'Delete message'}
+                    class="inline-flex items-center gap-1 text-[11px] transition-colors cursor-pointer px-1.5 py-0.5 rounded {confirmDelete
+                        ? 'text-destructive bg-destructive/10'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'}"
+                    aria-label={confirmDelete ? "Confirm delete" : "Delete message"}
+                    title={confirmDelete ? "Click again to confirm deletion" : "Delete message"}
                 >
                     <Trash2 class="size-3" />
                     {#if confirmDelete}
@@ -171,7 +197,9 @@
         </div>
     {:else if navigating}
         <div class="flex justify-end gap-1 mt-0">
-            <span class="inline-flex items-center gap-1 text-[11px] text-muted-foreground px-1.5 py-0.5">
+            <span
+                class="inline-flex items-center gap-1 text-[11px] text-muted-foreground px-1.5 py-0.5"
+            >
                 <Spinner class="size-3" />
                 Updating...
             </span>

@@ -59,7 +59,7 @@
     import FetchedPagePanel from "$lib/components/chat/fetched-page-panel.svelte";
     import type { SearchResultItem } from "$lib/types.js";
 
-    let id = $derived($page.params.id);
+    let id = $derived($page.params.id!);
     const chat = getChat();
     const conversations = getConversations();
     const auth = getAuth();
@@ -160,7 +160,7 @@
         if (chat.navigating) return false;
         if (!chat.generating) return false;
         // During generation: show skeleton if no streaming message or streaming message has no visible content
-        const streamingMsg = displayMessages.find((m) => m.streaming);
+        const streamingMsg = displayMessages.find((m: ChatMessageType) => m.streaming);
         if (!streamingMsg) return true;
         if (
             !streamingMsg.content?.trim() &&
@@ -485,7 +485,7 @@
     // Look up a model's display name from the available models list.
     // Model IDs are unique, so we only need the modelId to find it.
     // Falls back to the modelId if not found.
-    function getModelDisplayName(modelId: string | undefined): string {
+    function getModelDisplayName(modelId: string): string {
         if (!modelId) return "AI";
         const found = availableModels.find((m) => m.id === modelId);
         return found?.name || modelId;
@@ -584,14 +584,16 @@
             <div class="flex items-center gap-3">
                 <TooltipProvider>
                     <Tooltip>
-                        <TooltipTrigger asChild>
-                            <div class="flex items-center gap-1.5">
-                                <ContextUsageRing
-                                    fraction={contextUsageFraction}
-                                    size={22}
-                                    strokeWidth={2.5}
-                                />
-                            </div>
+                        <TooltipTrigger>
+                            {#snippet child({ props })}
+                                <div {...props} class="flex items-center gap-1.5">
+                                    <ContextUsageRing
+                                        fraction={contextUsageFraction}
+                                        size={22}
+                                        strokeWidth={2.5}
+                                    />
+                                </div>
+                            {/snippet}
                         </TooltipTrigger>
                         <TooltipContent
                             >Context window: {Math.round(contextUsageFraction * 100)}% used</TooltipContent
@@ -600,11 +602,16 @@
                 </TooltipProvider>
                 <TooltipProvider>
                     <Tooltip>
-                        <TooltipTrigger asChild>
-                            <div class="flex items-center gap-1 text-[11px] text-muted-foreground">
-                                <ArrowUp class="size-3" />
-                                <span>{formatTokens(chat.totalInputTokens)}</span>
-                            </div>
+                        <TooltipTrigger>
+                            {#snippet child({ props })}
+                                <div
+                                    {...props}
+                                    class="flex items-center gap-1 text-[11px] text-muted-foreground"
+                                >
+                                    <ArrowUp class="size-3" />
+                                    <span>{formatTokens(chat.totalInputTokens)}</span>
+                                </div>
+                            {/snippet}
                         </TooltipTrigger>
                         <TooltipContent
                             >Input tokens: {chat.totalInputTokens.toLocaleString()}</TooltipContent
@@ -613,11 +620,16 @@
                 </TooltipProvider>
                 <TooltipProvider>
                     <Tooltip>
-                        <TooltipTrigger asChild>
-                            <div class="flex items-center gap-1 text-[11px] text-muted-foreground">
-                                <ArrowDown class="size-3" />
-                                <span>{formatTokens(chat.totalOutputTokens)}</span>
-                            </div>
+                        <TooltipTrigger>
+                            {#snippet child({ props })}
+                                <div
+                                    {...props}
+                                    class="flex items-center gap-1 text-[11px] text-muted-foreground"
+                                >
+                                    <ArrowDown class="size-3" />
+                                    <span>{formatTokens(chat.totalOutputTokens)}</span>
+                                </div>
+                            {/snippet}
                         </TooltipTrigger>
                         <TooltipContent
                             >Output tokens: {chat.totalOutputTokens.toLocaleString()}</TooltipContent
@@ -629,51 +641,62 @@
             <div class="flex items-center gap-1">
                 <TooltipProvider>
                     <Tooltip>
-                        <TooltipTrigger asChild>
-                            <button
-                                onclick={() => (securityOpen = !securityOpen)}
-                                class="inline-flex items-center gap-1 text-[11px] {securityOpen
-                                    ? 'text-foreground bg-muted'
-                                    : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
-                                aria-label="Toggle security panel"
-                            >
-                                <Shield class="size-3" />
-                                <span>Security</span>
-                            </button>
+                        <TooltipTrigger>
+                            {#snippet child({ props })}
+                                <button
+                                    {...props}
+                                    onclick={() => (securityOpen = !securityOpen)}
+                                    class="inline-flex items-center gap-1 text-[11px] {securityOpen
+                                        ? 'text-foreground bg-muted'
+                                        : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
+                                    aria-label="Toggle security panel"
+                                >
+                                    <Shield class="size-3" />
+                                    <span>Security</span>
+                                </button>
+                            {/snippet}
                         </TooltipTrigger>
                         <TooltipContent>Security settings</TooltipContent>
                     </Tooltip>
                 </TooltipProvider>
                 <TooltipProvider>
                     <Tooltip>
-                        <TooltipTrigger asChild>
-                            <button
-                                onclick={toggleDag}
-                                class="inline-flex items-center gap-1 text-[11px] {dagOpen
-                                    ? 'text-foreground bg-muted'
-                                    : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
-                                aria-label={dagOpen ? "Close history view" : "Open history view"}
-                            >
-                                <GitBranch class="size-3" />
-                                <span>History</span>
-                            </button>
+                        <TooltipTrigger>
+                            {#snippet child({ props })}
+                                <button
+                                    {...props}
+                                    onclick={toggleDag}
+                                    class="inline-flex items-center gap-1 text-[11px] {dagOpen
+                                        ? 'text-foreground bg-muted'
+                                        : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
+                                    aria-label={dagOpen
+                                        ? "Close history view"
+                                        : "Open history view"}
+                                >
+                                    <GitBranch class="size-3" />
+                                    <span>History</span>
+                                </button>
+                            {/snippet}
                         </TooltipTrigger>
                         <TooltipContent>Message history</TooltipContent>
                     </Tooltip>
                 </TooltipProvider>
                 <TooltipProvider>
                     <Tooltip>
-                        <TooltipTrigger asChild>
-                            <button
-                                onclick={() => (agentInfoOpen = !agentInfoOpen)}
-                                class="inline-flex items-center gap-1 text-[11px] {agentInfoOpen
-                                    ? 'text-foreground bg-muted'
-                                    : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
-                                aria-label="Toggle agent info panel"
-                            >
-                                <FileText class="size-3" />
-                                <span>Agent</span>
-                            </button>
+                        <TooltipTrigger>
+                            {#snippet child({ props })}
+                                <button
+                                    {...props}
+                                    onclick={() => (agentInfoOpen = !agentInfoOpen)}
+                                    class="inline-flex items-center gap-1 text-[11px] {agentInfoOpen
+                                        ? 'text-foreground bg-muted'
+                                        : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
+                                    aria-label="Toggle agent info panel"
+                                >
+                                    <FileText class="size-3" />
+                                    <span>Agent</span>
+                                </button>
+                            {/snippet}
                         </TooltipTrigger>
                         <TooltipContent>Agent configuration</TooltipContent>
                     </Tooltip>

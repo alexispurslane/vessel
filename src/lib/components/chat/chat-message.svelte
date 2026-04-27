@@ -1,5 +1,6 @@
 <script lang="ts">
-    import { Streamdown, type DeepPartialTheme } from "svelte-streamdown";
+    import { Streamdown } from "svelte-streamdown";
+    import { type DeepPartialTheme } from "$lib/types/theme.js";
     import { Spinner } from "$lib/components/ui/spinner/index.js";
     import Brain from "@lucide/svelte/icons/brain";
     import ChevronDown from "@lucide/svelte/icons/chevron-down";
@@ -145,7 +146,9 @@
     $effect(() => {
         if (msg.thinkingStreaming && thinkingEl) {
             requestAnimationFrame(() => {
-                thinkingEl.scrollTop = thinkingEl.scrollHeight;
+                if (thinkingEl) {
+                    thinkingEl.scrollTop = thinkingEl.scrollHeight;
+                }
             });
         }
     });

@@ -172,16 +172,21 @@
         <DropdownMenu>
             <TooltipProvider>
                 <Tooltip>
-                    <TooltipTrigger asChild>
-                        <DropdownMenuTrigger
-                            class="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-muted text-foreground transition-colors cursor-pointer"
-                            aria-label="Select model"
-                        >
-                            <Cpu class="size-4" />
-                            {#if modelIsNonDefault}
-                                <span class="absolute top-1 right-1 size-2 rounded-full bg-primary"></span>
-                            {/if}
-                        </DropdownMenuTrigger>
+                    <TooltipTrigger>
+                        {#snippet child({ props })}
+                            <DropdownMenuTrigger
+                                {...props}
+                                class="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-muted text-foreground transition-colors cursor-pointer"
+                                aria-label="Select model"
+                            >
+                                <Cpu class="size-4" />
+                                {#if modelIsNonDefault}
+                                    <span
+                                        class="absolute top-1 right-1 size-2 rounded-full bg-primary"
+                                    ></span>
+                                {/if}
+                            </DropdownMenuTrigger>
+                        {/snippet}
                     </TooltipTrigger>
                     <TooltipContent>Model: {getModelDisplayName(selectedModelId)}</TooltipContent>
                 </Tooltip>
@@ -218,7 +223,7 @@
                 bind:ref={textareaRef}
                 bind:value
                 {placeholder}
-                rows="1"
+                rows={1}
                 class="border-0 bg-transparent dark:bg-transparent focus-visible:ring-0 resize-none py-1 w-full overflow-hidden min-h-0 max-h-[200px]"
                 onkeydown={handleKeydown}
                 oninput={adjustTextareaHeight}

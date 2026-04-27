@@ -2,7 +2,8 @@
     import ExternalLink from "@lucide/svelte/icons/external-link";
     import X from "@lucide/svelte/icons/x";
     import Globe from "@lucide/svelte/icons/globe";
-    import { Streamdown, type DeepPartialTheme } from "svelte-streamdown";
+    import { Streamdown } from "svelte-streamdown";
+    import { type DeepPartialTheme } from "$lib/types/theme.js";
     import { ScrollArea } from "$lib/components/ui/scroll-area";
 
     interface Props {

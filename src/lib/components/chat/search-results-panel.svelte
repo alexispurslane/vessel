@@ -3,7 +3,8 @@
     import X from "@lucide/svelte/icons/x";
     import Search from "@lucide/svelte/icons/search";
     import Calendar from "@lucide/svelte/icons/calendar";
-    import { Streamdown, type DeepPartialTheme } from "svelte-streamdown";
+    import { Streamdown } from "svelte-streamdown";
+    import { type DeepPartialTheme } from "$lib/types/theme.js";
     import type { SearchResultItem } from "$lib/types.js";
 
     interface Props {

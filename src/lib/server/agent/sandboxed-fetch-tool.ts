@@ -2,24 +2,27 @@
  * Fetch tool — fetches the fully-rendered content of any web page using
  * happy-dom, then extracts the main content as Markdown via defuddle.
  *
- * Two execution modes:
+ * Two execution modes, both powered by the same JS code (built by `buildFetchJs`):
  *
  * **Sandboxed** (preferred): Pass a zerobox `Sandbox` instance to
- * `createFetchTool({ sandbox })`. The tool builds an inline JS string
- * containing the fetch logic, injects it into
- * `sandbox.exec("node", ["-e", code])`, and the browser runs entirely inside
- * the sandbox. Network and filesystem access are governed by the sandbox
- * policy — the agent can only reach domains that `allowNet` permits.
+ * `createFetchTool({ sandbox })`. The JS code runs inside a sandbox via
+ * `sandbox.exec("node", ["-e", code])`, with network and filesystem access
+ * governed by the sandbox policy.
  *
- * **Local** (fallback): Call `createFetchTool()` with no options. Runs
- * happy-dom directly in the main process — NOT sandboxed. Only use when
- * sandboxing is disabled.
+ * **Local** (fallback): Call `createFetchTool()` with no options. The same JS
+ * code runs in a plain Node subprocess with `NODE_PATH` set to the project's
+ * `node_modules`. No sandbox restrictions apply. Only use when sandboxing is
+ * disabled.
+ *
+ * Both paths share a single source of truth — `buildFetchJs` — so the impit
+ * TLS fingerprinting, navigator patches, fetch interceptor, CAPTCHA detection,
+ * img/SVG replacement, and defuddle extraction are never duplicated.
  *
  * Inline string template vs. `Function.toString()` / `import()`:
  *
- * The sandboxed path writes the fetch function as an inline string template
- * (in `buildFetchJs`) using `require()` for module loading. This is necessary
- * because: (a) Vite's SSR transform rewrites `import()` into
+ * The JS code is written as an inline string template (in `buildFetchJs`)
+ * using `require()` for module loading. This is necessary because:
+ * (a) Vite's SSR transform rewrites `import()` into
  * `__vite_ssr_dynamic_import__()` — even with `@vite-ignore` — which fails
  * in a standalone Node process; and (b) ESM `import()` doesn't use NODE_PATH
  * for resolution, so modules in the sandbox deps dir can't be found.
@@ -31,6 +34,11 @@ import { Type, type Static } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { TextContent } from "@mariozechner/pi-ai";
 import type { Sandbox, CommandOutput } from "zerobox";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { resolve } from "node:path";
+
+const execFileAsync = promisify(execFile);
 
 // --- Chrome 131 on Windows Spoof ---
 
@@ -125,56 +133,25 @@ export interface FetchToolOptions {
     sandbox?: Sandbox;
 }
 
-// --- CAPTCHA detection ---
+// --- Fetch result parsing ---
 
 /**
- * Check the rendered document for signs of a CAPTCHA or anti-bot challenge page.
+ * Parse the JSON output produced by `buildFetchJs` from a process's stdout.
  *
- * Detects common indicators across major providers:
- * - **Cloudflare**: "Just a moment" title, `#challenge-running`, `#challenge-stage`
- * - **reCAPTCHA**: `.g-recaptcha`, Google recaptcha iframes
- * - **hCaptcha**: `.h-captcha`, hcaptcha iframes
- * - **Turnstile**: `.cf-turnstile`, `[data-sitekey]` on Turnstile containers
- * - **Generic**: very short body with keywords like "captcha", "verify", "access denied"
+ * Both `fetchPageLocally` and `fetchPageInSandbox` run the same JS code
+ * (produced by `buildFetchJs`) and parse the same JSON result, so this
+ * logic is shared.
  */
-function detectCaptcha(document: any): boolean {
-    // --- Cloudflare challenge page ---
-    const title = (document.title || "").toLowerCase();
-    if (title.includes("just a moment") || title.includes("attention required")) return true;
-
-    if (document.querySelector("#challenge-running") || document.querySelector("#challenge-stage")) return true;
-
-    // Cloudflare Turnstile widget
-    if (document.querySelector(".cf-turnstile")) return true;
-
-    // --- reCAPTCHA ---
-    if (document.querySelector(".g-recaptcha")) return true;
-    if (document.querySelector('iframe[src*="google.com/recaptcha"]')) return true;
-
-    // --- hCaptcha ---
-    if (document.querySelector(".h-captcha")) return true;
-    if (document.querySelector('iframe[src*="hcaptcha.com"]')) return true;
-
-    // --- Generic heuristics ---
-    // If the body is very short and contains captcha/verification keywords,
-    // it's likely a challenge page rather than real content.
-    const bodyText = (document.body?.textContent || "").trim();
-    if (bodyText.length > 0 && bodyText.length < 500) {
-        const lower = bodyText.toLowerCase();
-        if (
-            lower.includes("captcha") ||
-            lower.includes("verify you") ||
-            lower.includes("verify you are human") ||
-            lower.includes("are you a robot") ||
-            lower.includes("are you human") ||
-            lower.includes("access denied") ||
-            lower.includes("blocked") && lower.includes("bot")
-        ) {
-            return true;
-        }
+function parseFetchOutput(stdout: string, url: string): { content: string; title: string; captchaDetected: boolean; httpStatus: number } {
+    if (!stdout.trim()) {
+        throw new Error("Failed to fetch " + url + ": empty response");
     }
-
-    return false;
+    try {
+        const parsed = JSON.parse(stdout.trim());
+        return { content: parsed.content, title: parsed.title ?? "", captchaDetected: !!parsed.captchaDetected, httpStatus: parsed.httpStatus ?? 200 };
+    } catch {
+        return { content: stdout, title: "", captchaDetected: false, httpStatus: 200 };
+    }
 }
 
 // --- Sandboxed fetch function (injected as inline JS string) ---
@@ -285,6 +262,14 @@ const { Impit } = require(path.join(process.env.NODE_PATH, "impit"));
                             }),
                             configurable: true,
                         });
+                        // Stub Element.prototype.getBoundingClientRect so anti-bot scripts
+                        // that probe element geometry see plausible values instead of zeros.
+                        win.Element.prototype.getBoundingClientRect = function() {
+                            return { width: 100, height: 100, top: 0, left: 0, bottom: 100, right: 100 };
+                        };
+                        // Stub requestAnimationFrame so scripts that rely on the animation
+                        // loop heartbeat get a functional callback instead of a no-op.
+                        win.requestAnimationFrame = (callback) => setTimeout(callback, 16);
                     },
                 },
                 fetch: {
@@ -379,153 +364,43 @@ const { Impit } = require(path.join(process.env.NODE_PATH, "impit"));
 })().catch(e => { console.error(e.message || e); process.exit(1); });`;
 }
 
-/**
- * Replace `<img>` and `<svg>` elements in a document with `<p>` elements
- * containing their alt text (or remove them if no alt text is available).
- *
- * This prevents huge SVG markup from polluting the defuddle output while
- * preserving image descriptions where available.
- *
- * - `<img>`: uses the `alt` attribute
- * - `<svg>`: tries `aria-label`, then `title` attribute, then `<title>` child
- */
-function replaceImagesWithAltText(document: any): void {
-    document.querySelectorAll("img").forEach((el: any) => {
-        const alt = el.getAttribute("alt");
-        if (alt && alt.trim()) {
-            const p = document.createElement("p");
-            p.textContent = "[Image: " + alt.trim() + "]";
-            el.parentNode.replaceChild(p, el);
-        } else {
-            el.remove();
-        }
-    });
-    document.querySelectorAll("svg").forEach((el: any) => {
-        const ariaLabel = el.getAttribute("aria-label");
-        const titleAttr = el.getAttribute("title");
-        const titleEl = el.querySelector("title");
-        const titleText = titleEl ? titleEl.textContent : null;
-        const label = (ariaLabel && ariaLabel.trim()) || (titleAttr && titleAttr.trim()) || (titleText && titleText.trim());
-        if (label) {
-            const p = document.createElement("p");
-            p.textContent = "[Image: " + label + "]";
-            el.parentNode.replaceChild(p, el);
-        } else {
-            el.remove();
-        }
-    });
-}
-
 // --- Local (non-sandboxed) fetch ---
 
+/**
+ * Fetch a page locally (outside the sandbox) by running the same JS code that
+ * `buildFetchJs` produces in a Node subprocess.
+ *
+ * Both execution paths (sandboxed and local) share a single source of truth:
+ * the inline JS built by `buildFetchJs`. The sandboxed path injects it into
+ * `sandbox.exec()`, while this path spawns a plain `node` subprocess with
+ * `NODE_PATH` set to the project's `node_modules` so that `require()` can
+ * resolve happy-dom, defuddle, and impit.
+ *
+ * This eliminates all code duplication between the two paths — the navigator
+ * patches, fetch interceptor, CAPTCHA detection, img/SVG replacement, and
+ * defuddle extraction only exist in `buildFetchJs`.
+ */
 async function fetchPageLocally(url: string, timeout: number = 30): Promise<{ content: string; title: string; captchaDetected: boolean; httpStatus: number }> {
-    const { Browser, BrowserErrorCaptureEnum } = await import(/* @vite-ignore */ "happy-dom");
-    const { Defuddle } = await import(/* @vite-ignore */ "defuddle/node");
-    const { Impit } = await import(/* @vite-ignore */ "impit");
-    let browser: InstanceType<typeof Browser> | undefined;
-    try {
-        // Use impit to fetch the page with Chrome 131's TLS fingerprint and HTTP headers.
-        // The chrome131 profile gives us the right Sec-CH-UA brands; we override
-        // User-Agent and Sec-CH-UA-Platform via instance-level headers to match Windows.
-        const impit = new Impit({ browser: IMPIT_BROWSER_PROFILE, timeout: timeout * 1000, headers: CHROME_CLIENT_HINT_HEADERS });
-        const impitResponse = await impit.fetch(url);
-        const httpStatus = impitResponse.status;
-        const html = await impitResponse.text();
+    const jsCode = buildFetchJs(url, timeout);
+    const nodePath = resolve(process.cwd(), "node_modules");
 
-        browser = new Browser({
-            settings: {
-                errorCapture: BrowserErrorCaptureEnum.processLevel,
-                navigator: { userAgent: CHROME_WINDOWS_UA },
-                navigation: {
-                    beforeContentCallback: (win: any) => {
-                        // Patch Navigator properties that happy-dom gets wrong for Chrome.
-                        // Missing or mismatched values are a common anti-bot detection signal.
-                        //
-                        // navigator.vendor: Chrome returns "Google Inc.", happy-dom defaults to "" (Firefox)
-                        // navigator.productSub: Chrome returns "20030107", happy-dom defaults to "20100101" (Firefox)
-                        // navigator.platform: Should be "Win32" on 64-bit Windows, but happy-dom parses
-                        //   it from the UA string and gets "Windows NT 10.0; Win64; x64" instead.
-                        // navigator.userAgentData: Chrome implements the User-Agent Client Hints JS API
-                        //   (navigator.userAgentData.brands, .mobile, .platform), but happy-dom
-                        //   doesn't implement it at all. We inject a matching stub.
-                        Object.defineProperty(win.Navigator.prototype, 'vendor', { get: () => 'Google Inc.', configurable: true });
-                        Object.defineProperty(win.Navigator.prototype, 'productSub', { get: () => '20030107', configurable: true });
-                        Object.defineProperty(win.Navigator.prototype, 'platform', { get: () => 'Win32', configurable: true });
-                        // Inject navigator.userAgentData to match the Sec-CH-UA headers impit sends.
-                        // Parse the Sec-CH-UA value into brand objects.
-                        const brands = CHROME_SEC_CH_UA.split(', ').map((part: string) => {
-                            const m = part.match(/"([^"]+)";v="([^"]+)"/);
-                            return m ? { brand: m[1], version: m[2] } : null;
-                        }).filter(Boolean);
-                        Object.defineProperty(win.Navigator.prototype, 'userAgentData', {
-                            get: () => ({
-                                brands,
-                                mobile: false,
-                                platform: CHROME_PLATFORM,
-                                getHighEntropyValues: async (hints: string[]) => {
-                                    const result: Record<string, unknown> = { brands, mobile: false, platform: CHROME_PLATFORM };
-                                    if (hints.includes('platformVersion')) result.platformVersion = '15.0.0';
-                                    if (hints.includes('architecture')) result.architecture = 'x86';
-                                    if (hints.includes('model')) result.model = '';
-                                    if (hints.includes('bitness')) result.bitness = '64';
-                                    if (hints.includes('fullVersionList')) result.fullVersionList = brands.map((b: any) => ({ brand: b.brand, version: b.version }));
-                                    return result;
-                                },
-                            }),
-                            configurable: true,
-                        });
-                    },
-                },
-                fetch: {
-                    interceptor: {
-                        beforeAsyncRequest: async ({ request, window: win }) => {
-                            // Route all sub-requests through impit so they also have
-                            // Chrome's TLS fingerprint instead of Node's default
-                            try {
-                                const subImpit = new Impit({ browser: IMPIT_BROWSER_PROFILE, timeout: timeout * 1000, headers: CHROME_CLIENT_HINT_HEADERS });
-                                const subResponse = await subImpit.fetch(request.url, {
-                                    method: request.method as any,
-                                    headers: Object.fromEntries(request.headers.entries()),
-                                    body: request.method !== "GET" && request.method !== "HEAD" ? await request.text() : undefined,
-                                });
-                                const body = await subResponse.text();
-                                const headerEntries: [string, string][] = [];
-                                subResponse.headers.forEach((value, key) => headerEntries.push([key, value]));
-                                return new win.Response(body, {
-                                    status: subResponse.status,
-                                    statusText: subResponse.statusText,
-                                    headers: headerEntries,
-                                });
-                            } catch {
-                                // Let happy-dom handle the error (return void = no interception)
-                            }
-                        },
-                    },
-                },
-            },
-        }) as InstanceType<typeof Browser>;
-        const page = browser.newPage();
-        // Inject the impit-fetched HTML directly instead of using page.goto(),
-        // which would make a separate HTTP request with Node's generic TLS fingerprint
-        page.url = url;
-        page.content = html;
-        await page.waitUntilComplete();
-        const document = page.mainFrame.document;
-        // Check for CAPTCHA/anti-bot challenge pages before extracting content
-        const captchaDetected = detectCaptcha(document as any);
-        // Replace img and SVG elements with paragraphs containing their alt text
-        // before passing to defuddle. Huge SVGs (diagrams, icons, charts) dump
-        // pages of markup into the output. For <img>, use the alt attribute.
-        // For <svg>, check aria-label, title attribute, or <title> child.
-        // If no descriptive text is found, remove the element entirely.
-        replaceImagesWithAltText(document as any);
-        const defuddleResult = await Defuddle(document as any, url, { markdown: true, removeImages: true });
-        const content = defuddleResult.content;
-        const title = defuddleResult.title || document.title;
-        return { content, title, captchaDetected, httpStatus };
-    } finally {
-        if (browser) await browser.close();
+    let stdout: string;
+    try {
+        const result = await execFileAsync("node", ["-e", jsCode], {
+            cwd: process.cwd(),
+            env: { ...process.env, NODE_PATH: nodePath },
+            timeout: (timeout + 15) * 1000, // buffer beyond the fetch timeout
+            maxBuffer: 50 * 1024 * 1024, // 50MB for large pages
+        });
+        stdout = result.stdout;
+    } catch (err: any) {
+        // execFile throws on non-zero exit code — include stderr for diagnostics
+        const stderr = (err.stderr || "").trim();
+        const stderrSummary = stderr ? " (" + stderr.split("\n").slice(-3).join("; ") + ")" : "";
+        throw new Error("Failed to fetch " + url + ": " + (err.message || String(err)) + stderrSummary);
     }
+
+    return parseFetchOutput(stdout, url);
 }
 
 // --- Sandboxed fetch ---
@@ -550,17 +425,7 @@ async function fetchPageInSandbox(sandbox: Sandbox, url: string, timeout: number
         throw new Error("Failed to fetch " + url + ": exit code " + result.code + stderrSummary);
     }
 
-    if (!result.stdout?.trim()) {
-        throw new Error("Failed to fetch " + url + ": empty response" + stderrSummary);
-    }
-
-    try {
-        const parsed = JSON.parse(result.stdout.trim());
-        return { content: parsed.content, title: parsed.title ?? "", captchaDetected: !!parsed.captchaDetected, httpStatus: parsed.httpStatus ?? 200 };
-    } catch {
-        // If JSON parsing fails, return raw stdout as the content
-        return { content: result.stdout, title: "", captchaDetected: false, httpStatus: 200 };
-    }
+    return parseFetchOutput(result.stdout ?? "", url);
 }
 
 // --- Truncation ---

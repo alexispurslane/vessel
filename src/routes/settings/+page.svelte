@@ -47,7 +47,13 @@
     import X from "@lucide/svelte/icons/x";
     import PageLayout from "$lib/components/page-layout/index.svelte";
     import SystemPromptEditor from "$lib/components/conversation-settings/SystemPromptEditor.svelte";
-    import { PillList, PathAutocompletePillList, PillKeyValueList } from "$lib/components/pill-list/index.js";
+    import {
+        PillList,
+        PathAutocompletePillList,
+        PillKeyValueList,
+        type PillItem,
+        type KeyValueItem,
+    } from "$lib/components/pill-list/index.js";
     import {
         Select,
         SelectContent,
@@ -196,7 +202,9 @@
         activeTab = "models";
         // Scroll to the form after Svelte renders it
         setTimeout(() => {
-            document.getElementById("custom-model-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+            document
+                .getElementById("custom-model-form")
+                ?.scrollIntoView({ behavior: "smooth", block: "start" });
         }, 0);
     }
 
@@ -346,7 +354,9 @@
         editingModelId = cm.id;
         showAddModel = true;
         setTimeout(() => {
-            document.getElementById("custom-model-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+            document
+                .getElementById("custom-model-form")
+                ?.scrollIntoView({ behavior: "smooth", block: "start" });
         }, 0);
     }
 
@@ -441,34 +451,47 @@
     // Pill-based list states
     let readPaths = $state<Array<{ path: string; editing?: boolean }>>([]);
     let writePaths = $state<Array<{ path: string; editing?: boolean }>>([]);
-    let allowedDomains = $state<Array<{ domain: string; editing?: boolean }>>([]);
-    let allowedEnvVars = $state<Array<{ name: string; editing?: boolean }>>([]);
+    let allowedDomains = $state<PillItem[]>([]);
+    let allowedEnvVars = $state<PillItem[]>([]);
 
     // Secrets state for custom pill UI
-    let secrets = $state<Array<{ key: string; value: string; hosts: string; editing?: boolean }>>([]);
+    let secrets = $state<KeyValueItem[]>([]);
 
     function loadPillListsFromSettings() {
-        readPaths = (JSON.parse(appSettings["sandbox.extraReadPaths"] || "[]") as string[])
-            .map((p: string) => ({ path: p, editing: false }));
-        writePaths = (JSON.parse(appSettings["sandbox.extraWritePaths"] || "[]") as string[])
-            .map((p: string) => ({ path: p, editing: false }));
-        allowedDomains = (JSON.parse(appSettings["sandbox.allowedNetDomains"] || "[]") as string[])
-            .map((d: string) => ({ domain: d, editing: false }));
-        allowedEnvVars = (JSON.parse(appSettings["sandbox.allowEnv"] || "[]") as string[])
-            .map((e: string) => ({ name: e, editing: false }));
+        readPaths = (JSON.parse(appSettings["sandbox.extraReadPaths"] || "[]") as string[]).map(
+            (p: string) => ({ path: p, editing: false })
+        );
+        writePaths = (JSON.parse(appSettings["sandbox.extraWritePaths"] || "[]") as string[]).map(
+            (p: string) => ({ path: p, editing: false })
+        );
+        allowedDomains = (
+            JSON.parse(appSettings["sandbox.allowedNetDomains"] || "[]") as string[]
+        ).map((d: string) => ({ domain: d, editing: false }));
+        allowedEnvVars = (JSON.parse(appSettings["sandbox.allowEnv"] || "[]") as string[]).map(
+            (e: string) => ({ name: e, editing: false })
+        );
     }
 
     function savePillListsToSettings(): Record<string, string> {
         return {
             "sandbox.extraReadPaths": JSON.stringify(readPaths.map((p) => p.path).filter(Boolean)),
-            "sandbox.extraWritePaths": JSON.stringify(writePaths.map((p) => p.path).filter(Boolean)),
-            "sandbox.allowedNetDomains": JSON.stringify(allowedDomains.map((d) => d.domain).filter(Boolean)),
-            "sandbox.allowEnv": JSON.stringify(allowedEnvVars.map((e) => e.name).filter(Boolean)),
+            "sandbox.extraWritePaths": JSON.stringify(
+                writePaths.map((p) => p.path).filter(Boolean)
+            ),
+            "sandbox.allowedNetDomains": JSON.stringify(
+                allowedDomains.map((d) => d["domain"] as string).filter(Boolean)
+            ),
+            "sandbox.allowEnv": JSON.stringify(
+                allowedEnvVars.map((e) => e["name"] as string).filter(Boolean)
+            ),
         };
     }
 
     function loadSecretsFromSettings() {
-        const secretsObj = JSON.parse(appSettings["sandbox.secrets"] || "{}") as Record<string, { value: string; hosts: string[] }>;
+        const secretsObj = JSON.parse(appSettings["sandbox.secrets"] || "{}") as Record<
+            string,
+            { value: string; hosts: string[] }
+        >;
         secrets = Object.entries(secretsObj).map(([key, config]) => ({
             key,
             value: config.value,
@@ -483,7 +506,8 @@
             sandboxEnabled = appSettings["sandbox.enabled"] !== "false";
             sandboxAllowNet = appSettings["sandbox.allowNet"] === "true";
             sandboxAllowAllDomains = appSettings["sandbox.allowAllDomains"] === "true";
-            defaultAgentMode = (appSettings["sandbox.defaultAgentMode"] as "agent" | "chat") || "agent";
+            defaultAgentMode =
+                (appSettings["sandbox.defaultAgentMode"] as "agent" | "chat") || "agent";
             loadPillListsFromSettings();
             loadSecretsFromSettings();
             sandboxSnapshotEnabled = appSettings["sandbox.snapshotEnabled"] !== "false";
@@ -502,10 +526,16 @@
 
             const secretsObj: Record<string, { value: string; hosts: string[] }> = {};
             for (const s of secrets) {
-                if (s.key.trim()) {
-                    secretsObj[s.key.trim()] = {
-                        value: s.value,
-                        hosts: s.hosts.split(",").map((h: string) => h.trim()).filter(Boolean),
+                const key = (s["key"] as string) ?? "";
+                const value = (s["value"] as string) ?? "";
+                const hosts = (s["hosts"] as string) ?? "";
+                if (key.trim()) {
+                    secretsObj[key.trim()] = {
+                        value,
+                        hosts: hosts
+                            .split(",")
+                            .map((h: string) => h.trim())
+                            .filter(Boolean),
                     };
                 }
             }
@@ -523,9 +553,12 @@
             await restartAllSessions();
 
             sandboxSettingsSaved = true;
-            setTimeout(() => { sandboxSettingsSaved = false; }, 2000);
+            setTimeout(() => {
+                sandboxSettingsSaved = false;
+            }, 2000);
         } catch (e) {
-            sandboxSettingsError = e instanceof Error ? e.message : "Failed to save sandbox settings";
+            sandboxSettingsError =
+                e instanceof Error ? e.message : "Failed to save sandbox settings";
         }
     }
 
@@ -569,7 +602,9 @@
         agentSettingsSaved = false;
         try {
             const updates: Record<string, string> = {
-                "agent.appendSystemPrompt": JSON.stringify(agentInstructions.length > 0 ? agentInstructions : []),
+                "agent.appendSystemPrompt": JSON.stringify(
+                    agentInstructions.length > 0 ? agentInstructions : []
+                ),
             };
 
             if (agentCustomSystemPrompt) {
@@ -585,7 +620,9 @@
 
             agentSettingsSaved = true;
             agentNeedsSave = false;
-            setTimeout(() => { agentSettingsSaved = false; }, 2000);
+            setTimeout(() => {
+                agentSettingsSaved = false;
+            }, 2000);
         } catch (e) {
             agentSettingsError = e instanceof Error ? e.message : "Failed to save agent settings";
         }
@@ -682,7 +719,8 @@
         }
     }
 
-    const mcpConfigExample = '{ "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"] }';
+    const mcpConfigExample =
+        '{ "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"] }';
 
     async function removeMcpServer(name: string) {
         try {
@@ -732,7 +770,9 @@
             await restartAllSessions();
 
             searchSettingsSaved = true;
-            setTimeout(() => { searchSettingsSaved = false; }, 2000);
+            setTimeout(() => {
+                searchSettingsSaved = false;
+            }, 2000);
         } catch (e) {
             searchSettingsError = e instanceof Error ? e.message : "Failed to save search settings";
         }
@@ -762,7 +802,10 @@
                         <!-- Default Models Section -->
                         <div>
                             <h3 class="text-base font-medium">Default Models</h3>
-                            <p class="text-sm text-muted-foreground">Choose the default model for new chats and the secondary model used for auto-generating titles and tags.</p>
+                            <p class="text-sm text-muted-foreground">
+                                Choose the default model for new chats and the secondary model used
+                                for auto-generating titles and tags.
+                            </p>
                         </div>
                         {#if settingsLoading}
                             <div class="flex items-center justify-center py-8">
@@ -808,8 +851,8 @@
                                 <div class="space-y-2">
                                     <Label>Secondary Model (Titles & Tags)</Label>
                                     <p class="text-xs text-muted-foreground">
-                                        Used for auto-generating conversation titles and tags. A fast,
-                                        cheap model is recommended.
+                                        Used for auto-generating conversation titles and tags. A
+                                        fast, cheap model is recommended.
                                     </p>
                                     <Select
                                         type="single"
@@ -826,7 +869,7 @@
                                                     {model.name}
                                                     <span class="text-muted-foreground ml-1"
                                                         >({model.provider})</span
-                                                        >
+                                                    >
                                                 </SelectItem>
                                             {/each}
                                         </SelectContent>
@@ -840,212 +883,224 @@
                         <!-- API Providers Section -->
                         <div>
                             <h3 class="text-base font-medium">API Providers</h3>
-                            <p class="text-sm text-muted-foreground">Configure LLM provider API keys and base URLs. OpenAI-compatible providers can auto-discover models from a <code class="text-xs bg-muted px-1 py-0.5 rounded">/v1/models</code> endpoint.</p>
+                            <p class="text-sm text-muted-foreground">
+                                Configure LLM provider API keys and base URLs. OpenAI-compatible
+                                providers can auto-discover models from a <code
+                                    class="text-xs bg-muted px-1 py-0.5 rounded">/v1/models</code
+                                > endpoint.
+                            </p>
                         </div>
                         {#if providerLoading}
                             <div class="flex items-center justify-center py-8">
                                 <Spinner class="h-6 w-6" />
                             </div>
                         {:else}
-                        {#if providers.length > 0}
-                            <div class="mb-6 space-y-3">
-                                {#each providers as prov (prov.provider)}
-                                    <div class="rounded-lg border p-3">
-                                        <div class="flex items-center justify-between">
-                                            <div class="flex items-center gap-3">
-                                                <span class="font-medium">
-                                                    {prov.displayName ?? prov.provider}
-                                                </span>
-                                                {#if prov.displayName && prov.displayName !== prov.provider}
-                                                    <Badge variant="outline" class="text-xs"
-                                                        >{prov.provider}</Badge
-                                                    >
-                                                {/if}
-                                                {#if prov.hasKey}
-                                                    <Badge variant="secondary" class="text-xs"
-                                                        >Key set</Badge
-                                                    >
-                                                {:else}
-                                                    <Badge variant="destructive" class="text-xs"
-                                                        >No key</Badge
-                                                    >
-                                                {/if}
-                                            </div>
-                                            <div class="flex items-center gap-1">
-                                                {#if providerSupportsFetch(prov)}
+                            {#if providers.length > 0}
+                                <div class="mb-6 space-y-3">
+                                    {#each providers as prov (prov.provider)}
+                                        <div class="rounded-lg border p-3">
+                                            <div class="flex items-center justify-between">
+                                                <div class="flex items-center gap-3">
+                                                    <span class="font-medium">
+                                                        {prov.displayName ?? prov.provider}
+                                                    </span>
+                                                    {#if prov.displayName && prov.displayName !== prov.provider}
+                                                        <Badge variant="outline" class="text-xs"
+                                                            >{prov.provider}</Badge
+                                                        >
+                                                    {/if}
+                                                    {#if prov.hasKey}
+                                                        <Badge variant="secondary" class="text-xs"
+                                                            >Key set</Badge
+                                                        >
+                                                    {:else}
+                                                        <Badge variant="destructive" class="text-xs"
+                                                            >No key</Badge
+                                                        >
+                                                    {/if}
+                                                </div>
+                                                <div class="flex items-center gap-1">
+                                                    {#if providerSupportsFetch(prov)}
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            onclick={() =>
+                                                                handleFetchModels(prov.provider)}
+                                                            disabled={fetchingModels[prov.provider]}
+                                                        >
+                                                            {#if fetchingModels[prov.provider]}
+                                                                <Spinner class="mr-1 h-3 w-3" />
+                                                            {:else}
+                                                                <RefreshCw class="mr-1 h-3 w-3" />
+                                                            {/if}
+                                                            Fetch Models
+                                                        </Button>
+                                                    {/if}
                                                     <Button
                                                         variant="ghost"
                                                         size="sm"
                                                         onclick={() =>
-                                                            handleFetchModels(prov.provider)}
-                                                        disabled={fetchingModels[prov.provider]}
+                                                            removeProvider(prov.provider)}
                                                     >
-                                                        {#if fetchingModels[prov.provider]}
-                                                            <Spinner class="mr-1 h-3 w-3" />
-                                                        {:else}
-                                                            <RefreshCw class="mr-1 h-3 w-3" />
-                                                        {/if}
-                                                        Fetch Models
+                                                        <Trash2 class="h-4 w-4" />
                                                     </Button>
-                                                {/if}
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    onclick={() => removeProvider(prov.provider)}
-                                                >
-                                                    <Trash2 class="h-4 w-4" />
-                                                </Button>
-                                            </div>
-                                        </div>
-                                        {#if prov.baseUrl}
-                                            <p class="mt-1 text-sm text-muted-foreground">
-                                                Base: {prov.baseUrl}
-                                            </p>
-                                        {/if}
-                                        {#if prov.modelsEndpoint}
-                                            <p class="text-sm text-muted-foreground">
-                                                Models: {prov.modelsEndpoint}
-                                            </p>
-                                        {/if}
-
-                                        <!-- Fetched models list -->
-                                        {#if fetchError[prov.provider]}
-                                            <p class="mt-2 text-sm text-destructive">
-                                                {fetchError[prov.provider]}
-                                            </p>
-                                        {/if}
-                                        {#if fetchedModels[prov.provider]?.length > 0}
-                                            <div class="mt-3 border-t pt-3">
-                                                <p
-                                                    class="mb-2 text-xs font-medium text-muted-foreground"
-                                                >
-                                                    Available models ({fetchedModels[prov.provider]
-                                                        .length})
-                                                </p>
-                                                <div class="flex flex-wrap gap-1.5">
-                                                    {#each fetchedModels[prov.provider] as modelId}
-                                                        {@const alreadyAdded =
-                                                            isModelAdded(modelId)}
-                                                        <Badge
-                                                            variant={alreadyAdded
-                                                                ? "secondary"
-                                                                : "outline"}
-                                                            class="cursor-pointer select-none text-xs {alreadyAdded
-                                                                ? 'opacity-60'
-                                                                : 'hover:bg-accent'}"
-                                                            onclick={() => {
-                                                                addFetchedModelAsCustom(
-                                                                    prov.provider,
-                                                                    modelId
-                                                                );
-                                                            }}
-                                                        >
-                                                            {modelId}
-                                                            {#if alreadyAdded}
-                                                                <Check class="ml-1 h-2.5 w-2.5" />
-                                                            {:else}
-                                                                <Pencil class="ml-1 h-2.5 w-2.5" />
-                                                            {/if}
-                                                        </Badge>
-                                                    {/each}
                                                 </div>
-                                                <p class="mt-1.5 text-xs text-muted-foreground">
-                                                    Click a model to configure and add it as a
-                                                    custom model
-                                                </p>
                                             </div>
-                                        {/if}
-                                    </div>
-                                {/each}
-                            </div>
-                            <Separator class="my-4" />
-                        {/if}
+                                            {#if prov.baseUrl}
+                                                <p class="mt-1 text-sm text-muted-foreground">
+                                                    Base: {prov.baseUrl}
+                                                </p>
+                                            {/if}
+                                            {#if prov.modelsEndpoint}
+                                                <p class="text-sm text-muted-foreground">
+                                                    Models: {prov.modelsEndpoint}
+                                                </p>
+                                            {/if}
 
-                        {#if providerError}
-                            <p class="mb-4 text-sm text-destructive">
-                                {providerError}
-                            </p>
-                        {/if}
+                                            <!-- Fetched models list -->
+                                            {#if fetchError[prov.provider]}
+                                                <p class="mt-2 text-sm text-destructive">
+                                                    {fetchError[prov.provider]}
+                                                </p>
+                                            {/if}
+                                            {#if fetchedModels[prov.provider]?.length > 0}
+                                                <div class="mt-3 border-t pt-3">
+                                                    <p
+                                                        class="mb-2 text-xs font-medium text-muted-foreground"
+                                                    >
+                                                        Available models ({fetchedModels[
+                                                            prov.provider
+                                                        ].length})
+                                                    </p>
+                                                    <div class="flex flex-wrap gap-1.5">
+                                                        {#each fetchedModels[prov.provider] as modelId}
+                                                            {@const alreadyAdded =
+                                                                isModelAdded(modelId)}
+                                                            <Badge
+                                                                variant={alreadyAdded
+                                                                    ? "secondary"
+                                                                    : "outline"}
+                                                                class="cursor-pointer select-none text-xs {alreadyAdded
+                                                                    ? 'opacity-60'
+                                                                    : 'hover:bg-accent'}"
+                                                                onclick={() => {
+                                                                    addFetchedModelAsCustom(
+                                                                        prov.provider,
+                                                                        modelId
+                                                                    );
+                                                                }}
+                                                            >
+                                                                {modelId}
+                                                                {#if alreadyAdded}
+                                                                    <Check
+                                                                        class="ml-1 h-2.5 w-2.5"
+                                                                    />
+                                                                {:else}
+                                                                    <Pencil
+                                                                        class="ml-1 h-2.5 w-2.5"
+                                                                    />
+                                                                {/if}
+                                                            </Badge>
+                                                        {/each}
+                                                    </div>
+                                                    <p class="mt-1.5 text-xs text-muted-foreground">
+                                                        Click a model to configure and add it as a
+                                                        custom model
+                                                    </p>
+                                                </div>
+                                            {/if}
+                                        </div>
+                                    {/each}
+                                </div>
+                                <Separator class="my-4" />
+                            {/if}
+
+                            {#if providerError}
+                                <p class="mb-4 text-sm text-destructive">
+                                    {providerError}
+                                </p>
+                            {/if}
 
                             {#if showAddProvider}
-                            <div class="space-y-3">
-                                <p class="text-sm font-medium">Add Provider</p>
-                            <div class="grid grid-cols-2 gap-3">
-                                <div>
-                                    <Label for="prov-name">Provider</Label>
-                                    <select
-                                        id="prov-name"
-                                        bind:value={newProviderName}
-                                        class="mt-1 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                <div class="space-y-3">
+                                    <p class="text-sm font-medium">Add Provider</p>
+                                    <div class="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <Label for="prov-name">Provider</Label>
+                                            <select
+                                                id="prov-name"
+                                                bind:value={newProviderName}
+                                                class="mt-1 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                            >
+                                                <option value="" disabled>Select provider</option>
+                                                {#each PROVIDER_OPTIONS as opt}
+                                                    <option value={opt}>{opt}</option>
+                                                {/each}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <Label for="prov-key">API Key</Label>
+                                            <Input
+                                                id="prov-key"
+                                                type="password"
+                                                bind:value={newProviderKey}
+                                                placeholder="sk-..."
+                                                class="mt-1"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <Label for="prov-display-name"
+                                            >Display Name <span class="text-muted-foreground"
+                                                >(optional)</span
+                                            ></Label
+                                        >
+                                        <Input
+                                            id="prov-display-name"
+                                            bind:value={newProviderDisplayName}
+                                            placeholder="My Local Server"
+                                            class="mt-1"
+                                        />
+                                    </div>
+                                    <div>
+                                        <Label for="prov-url"
+                                            >Base URL <span class="text-muted-foreground"
+                                                >(optional)</span
+                                            ></Label
+                                        >
+                                        <Input
+                                            id="prov-url"
+                                            bind:value={newProviderBaseUrl}
+                                            placeholder="https://api.openai.com/v1"
+                                            class="mt-1"
+                                        />
+                                    </div>
+                                    {#if isOpenAICompatible}
+                                        <div>
+                                            <Label for="prov-models-endpoint"
+                                                >Models Endpoint <span class="text-muted-foreground"
+                                                    >(optional)</span
+                                                ></Label
+                                            >
+                                            <Input
+                                                id="prov-models-endpoint"
+                                                bind:value={newProviderModelsEndpoint}
+                                                placeholder="https://my-server.com/v1/models"
+                                                class="mt-1"
+                                            />
+                                            <p class="mt-1 text-xs text-muted-foreground">
+                                                URL to fetch available models. Click "Fetch Models"
+                                                after adding to auto-discover.
+                                            </p>
+                                        </div>
+                                    {/if}
+                                    <Button
+                                        onclick={addProvider}
+                                        disabled={!newProviderName || !newProviderKey}
                                     >
-                                        <option value="" disabled>Select provider</option>
-                                        {#each PROVIDER_OPTIONS as opt}
-                                            <option value={opt}>{opt}</option>
-                                        {/each}
-                                    </select>
+                                        <Plus class="mr-1.5 h-4 w-4" /> Add Provider
+                                    </Button>
                                 </div>
-                                <div>
-                                    <Label for="prov-key">API Key</Label>
-                                    <Input
-                                        id="prov-key"
-                                        type="password"
-                                        bind:value={newProviderKey}
-                                        placeholder="sk-..."
-                                        class="mt-1"
-                                    />
-                                </div>
-                            </div>
-                            <div>
-                                <Label for="prov-display-name"
-                                    >Display Name <span class="text-muted-foreground"
-                                        >(optional)</span
-                                    ></Label
-                                >
-                                <Input
-                                    id="prov-display-name"
-                                    bind:value={newProviderDisplayName}
-                                    placeholder="My Local Server"
-                                    class="mt-1"
-                                />
-                            </div>
-                            <div>
-                                <Label for="prov-url"
-                                    >Base URL <span class="text-muted-foreground">(optional)</span
-                                    ></Label
-                                >
-                                <Input
-                                    id="prov-url"
-                                    bind:value={newProviderBaseUrl}
-                                    placeholder="https://api.openai.com/v1"
-                                    class="mt-1"
-                                />
-                            </div>
-                            {#if isOpenAICompatible}
-                                <div>
-                                    <Label for="prov-models-endpoint"
-                                        >Models Endpoint <span class="text-muted-foreground"
-                                            >(optional)</span
-                                        ></Label
-                                    >
-                                    <Input
-                                        id="prov-models-endpoint"
-                                        bind:value={newProviderModelsEndpoint}
-                                        placeholder="https://my-server.com/v1/models"
-                                        class="mt-1"
-                                    />
-                                    <p class="mt-1 text-xs text-muted-foreground">
-                                        URL to fetch available models. Click "Fetch Models" after
-                                        adding to auto-discover.
-                                    </p>
-                                </div>
-                            {/if}
-                                <Button
-                                    onclick={addProvider}
-                                    disabled={!newProviderName || !newProviderKey}
-                                >
-                                    <Plus class="mr-1.5 h-4 w-4" /> Add Provider
-                                </Button>
-                            </div>
                             {:else}
                                 <Button variant="outline" onclick={() => (showAddProvider = true)}>
                                     <Plus class="mr-1.5 h-4 w-4" /> Add Provider
@@ -1058,7 +1113,10 @@
                         <!-- Custom Models Section -->
                         <div>
                             <h3 class="text-base font-medium">Custom Models</h3>
-                            <p class="text-sm text-muted-foreground">Custom models configured for local providers like Ollama, vLLM, or LM Studio.</p>
+                            <p class="text-sm text-muted-foreground">
+                                Custom models configured for local providers like Ollama, vLLM, or
+                                LM Studio.
+                            </p>
                         </div>
                         {#if customModelLoading}
                             <div class="flex items-center justify-center py-8">
@@ -1068,245 +1126,248 @@
                             {#if customModels.length > 0}
                                 <div class="mb-6 space-y-3">
                                     {#each customModels as cm (cm.id + cm.provider)}
-                                    <div class="rounded-lg border p-3">
-                                        <div class="flex items-center justify-between">
-                                            <div class="flex items-center gap-3">
-                                                <span class="font-medium">{cm.name}</span>
-                                                <Badge variant="outline" class="text-xs"
-                                                    >{cm.provider}</Badge
-                                                >
-                                                <Badge variant="outline" class="text-xs"
-                                                    >{cm.api}</Badge
-                                                >
-                                                {#if cm.reasoning}
-                                                    <Badge variant="secondary" class="text-xs"
-                                                        >reasoning</Badge
+                                        <div class="rounded-lg border p-3">
+                                            <div class="flex items-center justify-between">
+                                                <div class="flex items-center gap-3">
+                                                    <span class="font-medium">{cm.name}</span>
+                                                    <Badge variant="outline" class="text-xs"
+                                                        >{cm.provider}</Badge
                                                     >
-                                                {/if}
+                                                    <Badge variant="outline" class="text-xs"
+                                                        >{cm.api}</Badge
+                                                    >
+                                                    {#if cm.reasoning}
+                                                        <Badge variant="secondary" class="text-xs"
+                                                            >reasoning</Badge
+                                                        >
+                                                    {/if}
+                                                </div>
+                                                <div class="flex items-center gap-2">
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onclick={() => editCustomModel(cm)}
+                                                    >
+                                                        <Pencil class="h-4 w-4" />
+                                                    </Button>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onclick={() => removeCustomModel(cm.id)}
+                                                    >
+                                                        <Trash2 class="h-4 w-4" />
+                                                    </Button>
+                                                </div>
                                             </div>
-                                            <div class="flex items-center gap-2">
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    onclick={() => editCustomModel(cm)}
+                                            <div
+                                                class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground"
+                                            >
+                                                <span>ID: {cm.id}</span>
+                                                <span>Base: {cm.baseUrl}</span>
+                                                <span>Inputs: {cm.inputTypes.join(", ")}</span>
+                                                <span
+                                                    >{cm.contextWindow.toLocaleString()}
+                                                    ctx</span
                                                 >
-                                                    <Pencil class="h-4 w-4" />
-                                                </Button>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    onclick={() => removeCustomModel(cm.id)}
+                                                <span
+                                                    >{cm.maxTokens.toLocaleString()}
+                                                    out</span
                                                 >
-                                                    <Trash2 class="h-4 w-4" />
-                                                </Button>
                                             </div>
                                         </div>
-                                        <div
-                                            class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground"
-                                        >
-                                            <span>ID: {cm.id}</span>
-                                            <span>Base: {cm.baseUrl}</span>
-                                            <span>Inputs: {cm.inputTypes.join(", ")}</span>
-                                            <span
-                                                >{cm.contextWindow.toLocaleString()}
-                                                ctx</span
-                                            >
-                                            <span
-                                                >{cm.maxTokens.toLocaleString()}
-                                                out</span
-                                            >
-                                        </div>
-                                    </div>
-                                {/each}
-                            </div>
-                            <Separator class="my-4" />
-                        {:else}
-                            <p class="mb-4 text-center text-muted-foreground">
-                                No custom models yet. Add one below.
-                            </p>
-                        {/if}
-
-                        {#if customModelError}
-                            <p class="mb-4 text-sm text-destructive">
-                                {customModelError}
-                            </p>
-                        {/if}
-
-                        <Separator class="my-4" />
-
-                        {#if showAddModel}
-                            <div id="custom-model-form" class="space-y-4 rounded-lg border p-4">
-                                <p class="font-medium">
-                                    {editingModelId ? "Edit Model" : "Add Custom Model"}
+                                    {/each}
+                                </div>
+                                <Separator class="my-4" />
+                            {:else}
+                                <p class="mb-4 text-center text-muted-foreground">
+                                    No custom models yet. Add one below.
                                 </p>
-                                <div class="grid grid-cols-2 gap-3">
-                                    <div>
-                                        <Label for="cm-id">Model ID</Label>
-                                        <Input
-                                            id="cm-id"
-                                            bind:value={cmId}
-                                            placeholder="llama3.2"
-                                            class="mt-1"
-                                            disabled={!!editingModelId}
-                                        />
+                            {/if}
+
+                            {#if customModelError}
+                                <p class="mb-4 text-sm text-destructive">
+                                    {customModelError}
+                                </p>
+                            {/if}
+
+                            <Separator class="my-4" />
+
+                            {#if showAddModel}
+                                <div id="custom-model-form" class="space-y-4 rounded-lg border p-4">
+                                    <p class="font-medium">
+                                        {editingModelId ? "Edit Model" : "Add Custom Model"}
+                                    </p>
+                                    <div class="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <Label for="cm-id">Model ID</Label>
+                                            <Input
+                                                id="cm-id"
+                                                bind:value={cmId}
+                                                placeholder="llama3.2"
+                                                class="mt-1"
+                                                disabled={!!editingModelId}
+                                            />
+                                        </div>
+                                        <div>
+                                            <Label for="cm-provider">Provider</Label>
+                                            <Input
+                                                id="cm-provider"
+                                                bind:value={cmProvider}
+                                                placeholder="ollama"
+                                                class="mt-1"
+                                                disabled={!!editingModelId}
+                                            />
+                                        </div>
+                                        <div>
+                                            <Label for="cm-name">Display Name</Label>
+                                            <Input
+                                                id="cm-name"
+                                                bind:value={cmName}
+                                                placeholder="Llama 3.2"
+                                                class="mt-1"
+                                            />
+                                        </div>
+                                        <div>
+                                            <Label for="cm-api">API Type</Label>
+                                            <select
+                                                id="cm-api"
+                                                bind:value={cmApi}
+                                                class="mt-1 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                            >
+                                                {#each API_OPTIONS as opt}
+                                                    <option value={opt}>{opt}</option>
+                                                {/each}
+                                            </select>
+                                        </div>
                                     </div>
                                     <div>
-                                        <Label for="cm-provider">Provider</Label>
+                                        <Label for="cm-base-url">Base URL</Label>
                                         <Input
-                                            id="cm-provider"
-                                            bind:value={cmProvider}
-                                            placeholder="ollama"
-                                            class="mt-1"
-                                            disabled={!!editingModelId}
-                                        />
-                                    </div>
-                                    <div>
-                                        <Label for="cm-name">Display Name</Label>
-                                        <Input
-                                            id="cm-name"
-                                            bind:value={cmName}
-                                            placeholder="Llama 3.2"
+                                            id="cm-base-url"
+                                            bind:value={cmBaseUrl}
+                                            placeholder="http://localhost:11434"
                                             class="mt-1"
                                         />
                                     </div>
-                                    <div>
-                                        <Label for="cm-api">API Type</Label>
-                                        <select
-                                            id="cm-api"
-                                            bind:value={cmApi}
-                                            class="mt-1 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                    <div class="flex items-center gap-6">
+                                        <div class="flex items-center gap-3">
+                                            <Switch bind:checked={cmReasoning} />
+                                            <Label>Reasoning</Label>
+                                        </div>
+                                        <Separator orientation="vertical" class="h-4" />
+                                        <div class="flex items-center gap-2 text-sm">
+                                            <Label class="text-xs">Inputs:</Label>
+                                            <label class="flex items-center gap-1.5 cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    bind:checked={cmInputText}
+                                                    class="rounded border-input"
+                                                />
+                                                <span class="text-xs">Text</span>
+                                            </label>
+                                            <label class="flex items-center gap-1.5 cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    bind:checked={cmInputImage}
+                                                    class="rounded border-input"
+                                                />
+                                                <span class="text-xs">Image</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <Label for="cm-ctx">Context Window (tokens)</Label>
+                                            <Input
+                                                id="cm-ctx"
+                                                type="number"
+                                                bind:value={cmContextWindow}
+                                                class="mt-1"
+                                            />
+                                        </div>
+                                        <div>
+                                            <Label for="cm-max">Max Output Tokens</Label>
+                                            <Input
+                                                id="cm-max"
+                                                type="number"
+                                                bind:value={cmMaxTokens}
+                                                class="mt-1"
+                                            />
+                                        </div>
+                                    </div>
+                                    <details class="group">
+                                        <summary
+                                            class="cursor-pointer text-sm text-muted-foreground hover:text-foreground"
                                         >
-                                            {#each API_OPTIONS as opt}
-                                                <option value={opt}>{opt}</option>
-                                            {/each}
-                                        </select>
-                                    </div>
-                                </div>
-                                <div>
-                                    <Label for="cm-base-url">Base URL</Label>
-                                    <Input
-                                        id="cm-base-url"
-                                        bind:value={cmBaseUrl}
-                                        placeholder="http://localhost:11434"
-                                        class="mt-1"
-                                    />
-                                </div>
-                                <div class="flex items-center gap-6">
-                                    <div class="flex items-center gap-3">
-                                        <Switch bind:checked={cmReasoning} />
-                                        <Label>Reasoning</Label>
-                                    </div>
-                                    <Separator orientation="vertical" class="h-4" />
-                                    <div class="flex items-center gap-2 text-sm">
-                                        <Label class="text-xs">Inputs:</Label>
-                                        <label class="flex items-center gap-1.5 cursor-pointer">
-                                            <input
-                                                type="checkbox"
-                                                bind:checked={cmInputText}
-                                                class="rounded border-input"
-                                            />
-                                            <span class="text-xs">Text</span>
-                                        </label>
-                                        <label class="flex items-center gap-1.5 cursor-pointer">
-                                            <input
-                                                type="checkbox"
-                                                bind:checked={cmInputImage}
-                                                class="rounded border-input"
-                                            />
-                                            <span class="text-xs">Image</span>
-                                        </label>
-                                    </div>
-                                </div>
-                                <div class="grid grid-cols-2 gap-3">
-                                    <div>
-                                        <Label for="cm-ctx">Context Window (tokens)</Label>
-                                        <Input
-                                            id="cm-ctx"
-                                            type="number"
-                                            bind:value={cmContextWindow}
-                                            class="mt-1"
-                                        />
-                                    </div>
-                                    <div>
-                                        <Label for="cm-max">Max Output Tokens</Label>
-                                        <Input
-                                            id="cm-max"
-                                            type="number"
-                                            bind:value={cmMaxTokens}
-                                            class="mt-1"
-                                        />
-                                    </div>
-                                </div>
-                                <details class="group">
-                                    <summary
-                                        class="cursor-pointer text-sm text-muted-foreground hover:text-foreground"
-                                    >
-                                        Cost settings (optional)
-                                    </summary>
-                                    <div class="mt-3 grid grid-cols-2 gap-3">
-                                        <div>
-                                            <Label for="cm-ci">Cost Input (per 1M tokens)</Label>
-                                            <Input
-                                                id="cm-ci"
-                                                type="number"
-                                                step="0.01"
-                                                bind:value={cmCostInput}
-                                                class="mt-1"
-                                            />
+                                            Cost settings (optional)
+                                        </summary>
+                                        <div class="mt-3 grid grid-cols-2 gap-3">
+                                            <div>
+                                                <Label for="cm-ci">Cost Input (per 1M tokens)</Label
+                                                >
+                                                <Input
+                                                    id="cm-ci"
+                                                    type="number"
+                                                    step="0.01"
+                                                    bind:value={cmCostInput}
+                                                    class="mt-1"
+                                                />
+                                            </div>
+                                            <div>
+                                                <Label for="cm-co"
+                                                    >Cost Output (per 1M tokens)</Label
+                                                >
+                                                <Input
+                                                    id="cm-co"
+                                                    type="number"
+                                                    step="0.01"
+                                                    bind:value={cmCostOutput}
+                                                    class="mt-1"
+                                                />
+                                            </div>
+                                            <div>
+                                                <Label for="cm-cr">Cost Cache Read</Label>
+                                                <Input
+                                                    id="cm-cr"
+                                                    type="number"
+                                                    step="0.01"
+                                                    bind:value={cmCostCacheRead}
+                                                    class="mt-1"
+                                                />
+                                            </div>
+                                            <div>
+                                                <Label for="cm-cw">Cost Cache Write</Label>
+                                                <Input
+                                                    id="cm-cw"
+                                                    type="number"
+                                                    step="0.01"
+                                                    bind:value={cmCostCacheWrite}
+                                                    class="mt-1"
+                                                />
+                                            </div>
                                         </div>
-                                        <div>
-                                            <Label for="cm-co">Cost Output (per 1M tokens)</Label>
-                                            <Input
-                                                id="cm-co"
-                                                type="number"
-                                                step="0.01"
-                                                bind:value={cmCostOutput}
-                                                class="mt-1"
-                                            />
-                                        </div>
-                                        <div>
-                                            <Label for="cm-cr">Cost Cache Read</Label>
-                                            <Input
-                                                id="cm-cr"
-                                                type="number"
-                                                step="0.01"
-                                                bind:value={cmCostCacheRead}
-                                                class="mt-1"
-                                            />
-                                        </div>
-                                        <div>
-                                            <Label for="cm-cw">Cost Cache Write</Label>
-                                            <Input
-                                                id="cm-cw"
-                                                type="number"
-                                                step="0.01"
-                                                bind:value={cmCostCacheWrite}
-                                                class="mt-1"
-                                            />
-                                        </div>
+                                    </details>
+                                    <div class="flex gap-2">
+                                        <Button
+                                            onclick={addCustomModel}
+                                            disabled={!cmId || !cmProvider || !cmName || !cmBaseUrl}
+                                        >
+                                            {#if editingModelId}
+                                                <Check class="mr-1.5 h-4 w-4" /> Save Changes
+                                            {:else}
+                                                <Plus class="mr-1.5 h-4 w-4" /> Add Model
+                                            {/if}
+                                        </Button>
+                                        <Button variant="outline" onclick={resetCustomModelForm}
+                                            >Cancel</Button
+                                        >
                                     </div>
-                                </details>
-                                <div class="flex gap-2">
-                                    <Button
-                                        onclick={addCustomModel}
-                                        disabled={!cmId || !cmProvider || !cmName || !cmBaseUrl}
-                                    >
-                                        {#if editingModelId}
-                                            <Check class="mr-1.5 h-4 w-4" /> Save Changes
-                                        {:else}
-                                            <Plus class="mr-1.5 h-4 w-4" /> Add Model
-                                        {/if}
-                                    </Button>
-                                    <Button variant="outline" onclick={resetCustomModelForm}
-                                        >Cancel</Button
-                                    >
                                 </div>
-                            </div>
-                        {:else}
-                            <Button variant="outline" onclick={() => (showAddModel = true)}>
-                                <Plus class="mr-1.5 h-4 w-4" /> Add Custom Model
-                            </Button>
-                        {/if}
+                            {:else}
+                                <Button variant="outline" onclick={() => (showAddModel = true)}>
+                                    <Plus class="mr-1.5 h-4 w-4" /> Add Custom Model
+                                </Button>
+                            {/if}
                         {/if}
                     </div>
                 </CardContent>
@@ -1343,11 +1404,11 @@
                             <div class="flex items-center justify-between rounded-lg border p-4">
                                 <div class="space-y-0.5">
                                     <Label class="text-base font-medium">Enable Sandboxing</Label>
-                                    <p class="text-sm text-muted-foreground"
-                                        >When disabled, agent tools run without any isolation. Enable for
-                                        safer execution of AI-generated commands and file
-                                        operations.</p
-                                    >
+                                    <p class="text-sm text-muted-foreground">
+                                        When disabled, agent tools run without any isolation. Enable
+                                        for safer execution of AI-generated commands and file
+                                        operations.
+                                    </p>
                                 </div>
                                 <Switch bind:checked={sandboxEnabled} />
                             </div>
@@ -1356,11 +1417,13 @@
                                 <!-- Extra Read Paths -->
                                 <div class="rounded-lg border p-4 space-y-3">
                                     <div>
-                                        <Label class="text-base font-medium">Extra Readable Paths</Label>
-                                        <p class="text-sm text-muted-foreground mt-1"
-                                            >Additional paths the agent can read from. The project directory
-                                            and session workspace are always readable.</p
+                                        <Label class="text-base font-medium"
+                                            >Extra Readable Paths</Label
                                         >
+                                        <p class="text-sm text-muted-foreground mt-1">
+                                            Additional paths the agent can read from. The project
+                                            directory and session workspace are always readable.
+                                        </p>
                                     </div>
 
                                     <PathAutocompletePillList
@@ -1374,11 +1437,13 @@
                                 <!-- Extra Write Paths -->
                                 <div class="rounded-lg border p-4 space-y-3">
                                     <div>
-                                        <Label class="text-base font-medium">Extra Writable Paths</Label>
-                                        <p class="text-sm text-muted-foreground mt-1"
-                                            >Additional paths the agent can write to. The session workspace
-                                            is always writable.</p
+                                        <Label class="text-base font-medium"
+                                            >Extra Writable Paths</Label
                                         >
+                                        <p class="text-sm text-muted-foreground mt-1">
+                                            Additional paths the agent can write to. The session
+                                            workspace is always writable.
+                                        </p>
                                     </div>
 
                                     <PathAutocompletePillList
@@ -1395,10 +1460,13 @@
                                 <div class="rounded-lg border p-4 space-y-3">
                                     <div class="flex items-center justify-between">
                                         <div class="space-y-0.5">
-                                            <Label class="text-base font-medium">Network Access</Label>
-                                            <p class="text-sm text-muted-foreground"
-                                                >When enabled, tools can make outbound network requests.</p
+                                            <Label class="text-base font-medium"
+                                                >Network Access</Label
                                             >
+                                            <p class="text-sm text-muted-foreground">
+                                                When enabled, tools can make outbound network
+                                                requests.
+                                            </p>
                                         </div>
                                         <Switch bind:checked={sandboxAllowNet} />
                                     </div>
@@ -1408,11 +1476,14 @@
 
                                         <div class="flex items-center justify-between">
                                             <div class="space-y-0.5">
-                                                <Label class="text-sm font-medium">Allow All Domains</Label>
-                                                <p class="text-xs text-muted-foreground"
-                                                    >When enabled, tools can access any domain. When disabled, only
-                                                    explicitly allowed domains are accessible.</p
+                                                <Label class="text-sm font-medium"
+                                                    >Allow All Domains</Label
                                                 >
+                                                <p class="text-xs text-muted-foreground">
+                                                    When enabled, tools can access any domain. When
+                                                    disabled, only explicitly allowed domains are
+                                                    accessible.
+                                                </p>
                                             </div>
                                             <Switch bind:checked={sandboxAllowAllDomains} />
                                         </div>
@@ -1422,10 +1493,13 @@
 
                                             <div class="space-y-3">
                                                 <div>
-                                                    <Label class="text-sm font-medium">Allowed Domains</Label>
-                                                    <p class="text-xs text-muted-foreground mt-0.5"
-                                                        >Only these domains will be accessible by sandboxed tools.</p
+                                                    <Label class="text-sm font-medium"
+                                                        >Allowed Domains</Label
                                                     >
+                                                    <p class="text-xs text-muted-foreground mt-0.5">
+                                                        Only these domains will be accessible by
+                                                        sandboxed tools.
+                                                    </p>
                                                 </div>
 
                                                 <PillList
@@ -1444,19 +1518,35 @@
                                         <div class="space-y-3">
                                             <div>
                                                 <Label class="text-sm font-medium">Secrets</Label>
-                                                <p class="text-xs text-muted-foreground mt-0.5"
-                                                    >Credentials injected by the sandbox. The agent sees placeholders —
-                                                    the real value is only substituted for requests to the specified
-                                                    hosts.</p
-                                                >
+                                                <p class="text-xs text-muted-foreground mt-0.5">
+                                                    Credentials injected by the sandbox. The agent
+                                                    sees placeholders — the real value is only
+                                                    substituted for requests to the specified hosts.
+                                                </p>
                                             </div>
 
                                             <PillKeyValueList
                                                 items={secrets}
                                                 fields={[
-                                                    { key: "key", placeholder: "KEY", width: "w-24", mono: true },
-                                                    { key: "value", placeholder: "value", width: "w-28", type: "password", viewDisplay: "mask" },
-                                                    { key: "hosts", placeholder: "hosts", width: "w-20", showInView: false },
+                                                    {
+                                                        key: "key",
+                                                        placeholder: "KEY",
+                                                        width: "w-24",
+                                                        mono: true,
+                                                    },
+                                                    {
+                                                        key: "value",
+                                                        placeholder: "value",
+                                                        width: "w-28",
+                                                        type: "password",
+                                                        viewDisplay: "mask",
+                                                    },
+                                                    {
+                                                        key: "hosts",
+                                                        placeholder: "hosts",
+                                                        width: "w-20",
+                                                        showInView: false,
+                                                    },
                                                 ]}
                                                 onChange={(items) => (secrets = items)}
                                                 addButtonLabel="Add Secret"
@@ -1472,11 +1562,13 @@
                                     class="flex items-center justify-between rounded-lg border p-4"
                                 >
                                     <div class="space-y-0.5">
-                                        <Label class="text-base font-medium">Snapshot Filesystem Changes</Label>
-                                        <p class="text-sm text-muted-foreground"
-                                            >Record all filesystem changes made by the agent for audit and
-                                            potential undo.</p
+                                        <Label class="text-base font-medium"
+                                            >Snapshot Filesystem Changes</Label
                                         >
+                                        <p class="text-sm text-muted-foreground">
+                                            Record all filesystem changes made by the agent for
+                                            audit and potential undo.
+                                        </p>
                                     </div>
                                     <Switch bind:checked={sandboxSnapshotEnabled} />
                                 </div>
@@ -1486,12 +1578,15 @@
                                 <!-- Environment Variables -->
                                 <div class="rounded-lg border p-4 space-y-3">
                                     <div>
-                                        <Label class="text-base font-medium">Allowed Environment Variables</Label>
-                                        <p class="text-sm text-muted-foreground mt-1"
-                                            >Only these environment variables will be visible inside the
-                                            sandbox. PATH, HOME, USER, SHELL, TERM, LANG, and NODE_ENV are
-                                            always included. All others are stripped unless added here.</p
+                                        <Label class="text-base font-medium"
+                                            >Allowed Environment Variables</Label
                                         >
+                                        <p class="text-sm text-muted-foreground mt-1">
+                                            Only these environment variables will be visible inside
+                                            the sandbox. PATH, HOME, USER, SHELL, TERM, LANG, and
+                                            NODE_ENV are always included. All others are stripped
+                                            unless added here.
+                                        </p>
                                     </div>
 
                                     <PillList
@@ -1527,7 +1622,9 @@
                 <CardHeader>
                     <CardTitle>Agent</CardTitle>
                     <CardDescription
-                        >Configure the AI agent's behavior for all conversations. Custom instructions are appended to the system prompt on every turn. Per-conversation settings override these globals when set.</CardDescription
+                        >Configure the AI agent's behavior for all conversations. Custom
+                        instructions are appended to the system prompt on every turn.
+                        Per-conversation settings override these globals when set.</CardDescription
                     >
                 </CardHeader>
                 <CardContent>
@@ -1545,7 +1642,8 @@
                             {/if}
 
                             <p class="text-sm text-muted-foreground">
-                                Instructions appended to the system prompt for every conversation. These supplement the default prompt — they don't replace it.
+                                Instructions appended to the system prompt for every conversation.
+                                These supplement the default prompt — they don't replace it.
                                 Per-conversation settings override these globals when set.
                             </p>
 
@@ -1583,7 +1681,9 @@
                 <CardHeader>
                     <CardTitle>Tools</CardTitle>
                     <CardDescription
-                        >Configure the agent's default mode and external tools: MCP servers for custom integrations, and web search for grounding responses in real-time information.</CardDescription
+                        >Configure the agent's default mode and external tools: MCP servers for
+                        custom integrations, and web search for grounding responses in real-time
+                        information.</CardDescription
                     >
                 </CardHeader>
                 <CardContent>
@@ -1594,20 +1694,40 @@
                                 <div>
                                     <Label class="text-base font-medium">Default Mode</Label>
                                     <p class="text-sm text-muted-foreground mt-1">
-                                        Agent mode enables all tools by default. Chat mode disables tools for plain conversation. Individual conversations can override this.
+                                        Agent mode enables all tools by default. Chat mode disables
+                                        tools for plain conversation. Individual conversations can
+                                        override this.
                                     </p>
                                 </div>
                                 <div class="flex items-center gap-2">
                                     <div class="flex gap-2">
                                         <button
-                                            class="px-3 py-1.5 text-sm rounded-md border transition-colors {defaultAgentMode === 'agent' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
-                                            onclick={async () => { defaultAgentMode = 'agent'; await updateSettings({ 'sandbox.defaultAgentMode': 'agent' }); await restartAllSessions(); }}
+                                            class="px-3 py-1.5 text-sm rounded-md border transition-colors {defaultAgentMode ===
+                                            'agent'
+                                                ? 'bg-primary text-primary-foreground'
+                                                : 'hover:bg-muted'}"
+                                            onclick={async () => {
+                                                defaultAgentMode = "agent";
+                                                await updateSettings({
+                                                    "sandbox.defaultAgentMode": "agent",
+                                                });
+                                                await restartAllSessions();
+                                            }}
                                         >
                                             Agent
                                         </button>
                                         <button
-                                            class="px-3 py-1.5 text-sm rounded-md border transition-colors {defaultAgentMode === 'chat' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
-                                            onclick={async () => { defaultAgentMode = 'chat'; await updateSettings({ 'sandbox.defaultAgentMode': 'chat' }); await restartAllSessions(); }}
+                                            class="px-3 py-1.5 text-sm rounded-md border transition-colors {defaultAgentMode ===
+                                            'chat'
+                                                ? 'bg-primary text-primary-foreground'
+                                                : 'hover:bg-muted'}"
+                                            onclick={async () => {
+                                                defaultAgentMode = "chat";
+                                                await updateSettings({
+                                                    "sandbox.defaultAgentMode": "chat",
+                                                });
+                                                await restartAllSessions();
+                                            }}
                                         >
                                             Chat
                                         </button>
@@ -1632,19 +1752,34 @@
                                                 <div class="flex items-center gap-3">
                                                     <span class="font-medium">{server.name}</span>
                                                     {#if server.config.command}
-                                                        <Badge variant="outline" class="text-xs">stdio</Badge>
+                                                        <Badge variant="outline" class="text-xs"
+                                                            >stdio</Badge
+                                                        >
                                                     {:else if server.config.url}
-                                                        <Badge variant="outline" class="text-xs">http</Badge>
+                                                        <Badge variant="outline" class="text-xs"
+                                                            >http</Badge
+                                                        >
                                                     {/if}
-                                                    <div class="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                                    <div
+                                                        class="flex items-center gap-1.5 text-xs text-muted-foreground"
+                                                    >
                                                         <Switch
-                                                            checked={server.config.defaultEnabled !== false}
+                                                            checked={server.config
+                                                                .defaultEnabled !== false}
                                                             onCheckedChange={(checked: boolean) => {
-                                                                server.config.defaultEnabled = checked;
-                                                                upsertMcpServer(server.name, server.config);
+                                                                server.config.defaultEnabled =
+                                                                    checked;
+                                                                upsertMcpServer(
+                                                                    server.name,
+                                                                    server.config
+                                                                );
                                                             }}
                                                         />
-                                                        <span>{server.config.defaultEnabled !== false ? 'On by default' : 'Off by default'}</span>
+                                                        <span
+                                                            >{server.config.defaultEnabled !== false
+                                                                ? "On by default"
+                                                                : "Off by default"}</span
+                                                        >
                                                     </div>
                                                 </div>
                                                 <div class="flex items-center gap-1">
@@ -1666,7 +1801,13 @@
                                             </div>
                                             {#if server.config.command}
                                                 <p class="mt-1 text-sm text-muted-foreground">
-                                                    <code class="text-xs">{server.config.command}{#if server.config.args?.length} {server.config.args.join(' ')}{/if}</code>
+                                                    <code class="text-xs"
+                                                        >{server.config
+                                                            .command}{#if server.config.args?.length}
+                                                            {server.config.args.join(
+                                                                " "
+                                                            )}{/if}</code
+                                                    >
                                                 </p>
                                             {:else if server.config.url}
                                                 <p class="mt-1 text-sm text-muted-foreground">
@@ -1678,7 +1819,9 @@
                                 </div>
                                 <Separator class="my-4" />
                             {:else}
-                                <p class="mb-4 text-center text-muted-foreground">No MCP servers configured yet.</p>
+                                <p class="mb-4 text-center text-muted-foreground">
+                                    No MCP servers configured yet.
+                                </p>
                             {/if}
 
                             {#if mcpError}
@@ -1687,7 +1830,9 @@
 
                             {#if showAddMcp}
                                 <div class="space-y-4 rounded-lg border p-4">
-                                    <p class="font-medium">{editingMcpName ? 'Edit' : 'Add'} MCP Server</p>
+                                    <p class="font-medium">
+                                        {editingMcpName ? "Edit" : "Add"} MCP Server
+                                    </p>
                                     <div>
                                         <Label for="mcp-name" class="mb-1">Name</Label>
                                         <Input
@@ -1698,9 +1843,13 @@
                                         />
                                     </div>
                                     <div>
-                                        <Label for="mcp-config" class="mb-1">Configuration (JSON)</Label>
+                                        <Label for="mcp-config" class="mb-1"
+                                            >Configuration (JSON)</Label
+                                        >
                                         <p class="text-xs text-muted-foreground mb-1">
-                                            Standard MCP server config: <code class="text-xs">{mcpConfigExample}</code>
+                                            Standard MCP server config: <code class="text-xs"
+                                                >{mcpConfigExample}</code
+                                            >
                                         </p>
                                         <textarea
                                             id="mcp-config"
@@ -1718,9 +1867,11 @@
                                             {:else}
                                                 <Plus class="mr-1.5 h-4 w-4" />
                                             {/if}
-                                            {editingMcpName ? 'Update' : 'Add'} Server
+                                            {editingMcpName ? "Update" : "Add"} Server
                                         </Button>
-                                        <Button variant="outline" onclick={resetMcpForm}>Cancel</Button>
+                                        <Button variant="outline" onclick={resetMcpForm}
+                                            >Cancel</Button
+                                        >
                                     </div>
                                 </div>
                             {:else}
@@ -1747,8 +1898,18 @@
                                 {/if}
                                 <div class="space-y-3">
                                     <div class="space-y-2">
-                                        <Label for="search-base-url" class="text-sm font-medium">Search API Base URL</Label>
-                                        <p class="text-xs text-muted-foreground">The search API endpoint. Defaults to <code class="text-xs">https://api.exa.ai/search</code> if left empty. For testing with Synthetic, use <code class="text-xs">https://api.synthetic.new/v2/search</code>.</p>
+                                        <Label for="search-base-url" class="text-sm font-medium"
+                                            >Search API Base URL</Label
+                                        >
+                                        <p class="text-xs text-muted-foreground">
+                                            The search API endpoint. Defaults to <code
+                                                class="text-xs">https://api.exa.ai/search</code
+                                            >
+                                            if left empty. For testing with Synthetic, use
+                                            <code class="text-xs"
+                                                >https://api.synthetic.new/v2/search</code
+                                            >.
+                                        </p>
                                         <Input
                                             id="search-base-url"
                                             type="url"
@@ -1757,8 +1918,13 @@
                                         />
                                     </div>
                                     <div class="space-y-2">
-                                        <Label for="search-api-key" class="text-sm font-medium">Search API Key</Label>
-                                        <p class="text-xs text-muted-foreground">Your search API key. Required for the web search tool to work.</p>
+                                        <Label for="search-api-key" class="text-sm font-medium"
+                                            >Search API Key</Label
+                                        >
+                                        <p class="text-xs text-muted-foreground">
+                                            Your search API key. Required for the web search tool to
+                                            work.
+                                        </p>
                                         <Input
                                             id="search-api-key"
                                             type="password"
@@ -1782,6 +1948,5 @@
                 </CardContent>
             </Card>
         </TabsContent>
-
     </Tabs>
 </PageLayout>

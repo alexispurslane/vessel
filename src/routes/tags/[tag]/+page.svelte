@@ -9,7 +9,7 @@
     import { hashHue } from "$lib/utils.js";
     import PageLayout from "$lib/components/page-layout/index.svelte";
 
-    const tag = $derived($page.params.tag);
+    const tag = $derived($page.params.tag!);
 
     // Start with SSR data — conversations are in the HTML before JS loads.
     // Then refresh client-side when the tag changes.
@@ -54,9 +54,7 @@
     }
 </script>
 
-<PageLayout
-    onback={() => window.history.back()}
->
+<PageLayout onback={() => window.history.back()}>
     {#snippet heading()}
         <h1 class="text-2xl font-bold">
             <span
@@ -87,7 +85,9 @@
                     <MessageSquare class="h-4 w-4 shrink-0 text-muted-foreground" />
                     <div class="flex-1 min-w-0">
                         <span class="truncate block">{conv.title}</span>
-                        <span class="text-xs text-muted-foreground">{formatDate(conv.updatedAt)}</span>
+                        <span class="text-xs text-muted-foreground"
+                            >{formatDate(conv.updatedAt)}</span
+                        >
                     </div>
                     {#if conv.tags.length > 1}
                         <div class="flex items-center gap-1 shrink-0">
