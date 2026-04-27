@@ -120,6 +120,8 @@ export interface FetchToolDetails {
     truncated: boolean;
     /** The fetched and defuddle'd markdown content the model saw. */
     content: string;
+    /** Whether the URL was already present in search results, so the fetch was skipped. */
+    wasSearchResult?: boolean;
 }
 
 // --- Tool options ---
@@ -131,6 +133,12 @@ export interface FetchToolOptions {
      * When omitted, happy-dom runs locally in the main process.
      */
     sandbox?: Sandbox;
+    /**
+     * A shared Set shared with the search tool to track URLs that appeared in search results.
+     * When the fetch tool encounters a URL in this set, it skips the actual fetch and
+     * returns a message indicating the page was already seen in search results.
+     */
+    searchResultUrls?: Set<string>;
 }
 
 // --- Fetch result parsing ---
@@ -469,6 +477,7 @@ function truncateContent(content: string, maxChars: number = DEFAULT_MAX_CONTENT
  */
 export function createFetchTool(options?: FetchToolOptions): AgentTool<typeof fetchSchema, FetchToolDetails> {
     const sandbox = options?.sandbox;
+    const searchResultUrls = options?.searchResultUrls;
 
     return {
         name: "fetch",
@@ -512,6 +521,17 @@ export function createFetchTool(options?: FetchToolOptions): AgentTool<typeof fe
                         truncated: false,
                         content: "",
                     },
+                };
+            }
+
+            // Check if this URL was already seen in search results — skip re-fetching
+            // and inform the model that the page content is available from the search excerpt.
+            if (searchResultUrls?.has(url)) {
+                return {
+                    content: [
+                        { type: "text", text: `This page (${url}) was already fetched in previous search results. The excerpt from the search results is all the content available for this page without a full fetch. If you need more detail, consider searching for a more specific query about this topic.` },
+                    ],
+                    details: { url, title: "", contentLength: 0, truncated: false, content: "", wasSearchResult: true },
                 };
             }
 

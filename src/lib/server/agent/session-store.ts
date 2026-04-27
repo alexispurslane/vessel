@@ -746,9 +746,15 @@ export async function getOrCreateSession(conversationId: string): Promise<PiAgen
     //   _toolDefinitions    — used by getAllTools() / getSessionAgentInfo() to list available tools
     //   _baseToolDefinitions — used by _refreshToolRegistry() to rebuild maps from scratch
     // Without all three, the tool would be callable but invisible in the UI/agent-info.
+
+    // Shared URL tracker: records URLs that appeared in web search results so the
+    // fetch tool can skip re-fetching them and instead tell the model the page was
+    // already fetched in search results.
+    const searchResultUrls = new Set<string>();
+
     const fetchTool = sandbox
-        ? createFetchTool({ sandbox })
-        : createFetchTool();
+        ? createFetchTool({ sandbox, searchResultUrls })
+        : createFetchTool({ searchResultUrls });
     const toolRegistry = (agentSession as any)._toolRegistry as Map<string, AgentTool<any>>;
     const toolDefinitions = (agentSession as any)._toolDefinitions as Map<string, any>;
     const baseToolDefinitions = (agentSession as any)._baseToolDefinitions as Map<string, any>;
@@ -771,7 +777,7 @@ export async function getOrCreateSession(conversationId: string): Promise<PiAgen
         const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(SEARCH_SETTINGS_KEYS.API_KEY) as { value: string } | undefined;
         return row?.value || undefined;
     })();
-    const searchTool = createSearchTool({ baseUrl: searchBaseUrl, apiKey: searchApiKey });
+    const searchTool = createSearchTool({ baseUrl: searchBaseUrl, apiKey: searchApiKey, searchResultUrls });
     toolRegistry.set(searchTool.name, searchTool);
     toolDefinitions.set(searchTool.name, {
         definition: searchTool,
@@ -782,7 +788,7 @@ export async function getOrCreateSession(conversationId: string): Promise<PiAgen
     if (sandbox) {
         // Sandbox mode: replace default tool execution with sandboxed operations
         // while keeping the default tool definitions (with promptSnippet) intact.
-        const sandboxedTools = createSandboxedCodingTools(sessionWorkDir, sandbox);
+        const sandboxedTools = createSandboxedCodingTools(sessionWorkDir, sandbox, { searchResultUrls });
         // Note: grep is intentionally omitted from sandboxed tools because its
         // search runs directly on the host. If grep is not disabled and sandbox
         // is on, we still don't include it for security consistency.

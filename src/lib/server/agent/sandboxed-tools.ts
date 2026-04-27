@@ -26,6 +26,15 @@ import {
 } from "./sandboxed-ops.js";
 import { createFetchTool } from "./sandboxed-fetch-tool.js";
 
+export interface SandboxedCodingToolsOptions {
+    /**
+     * A shared Set shared with the search tool to track URLs that appeared in search results.
+     * When the fetch tool encounters a URL in this set, it skips the actual fetch and
+     * returns a message indicating the page was already seen in search results.
+     */
+    searchResultUrls?: Set<string>;
+}
+
 /**
  * Create the standard set of coding tools (bash, read, write, edit, find, ls, fetch)
  * with all operations routed through the given zerobox sandbox.
@@ -38,7 +47,7 @@ import { createFetchTool } from "./sandboxed-fetch-tool.js";
  * can use bash with grep/rg commands instead, which goes through the sandboxed
  * bash operations.
  */
-export function createSandboxedCodingTools(cwd: string, sandbox: Sandbox): AgentTool<any>[] {
+export function createSandboxedCodingTools(cwd: string, sandbox: Sandbox, options?: SandboxedCodingToolsOptions): AgentTool<any>[] {
     return [
         createBashTool(cwd, {
             operations: createSandboxedBashOps(sandbox),
@@ -60,6 +69,7 @@ export function createSandboxedCodingTools(cwd: string, sandbox: Sandbox): Agent
         }),
         createFetchTool({
             sandbox,
+            searchResultUrls: options?.searchResultUrls,
         }),
     ];
 }

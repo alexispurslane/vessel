@@ -148,6 +148,12 @@ export interface SearchToolOptions {
     baseUrl?: string;
     /** API key for the search API. Required — the tool returns a helpful message if missing. */
     apiKey?: string;
+    /**
+     * A shared Set shared with the fetch tool to track URLs that appeared in search results.
+     * When the fetch tool encounters a URL in this set, it skips the actual fetch and
+     * returns a message indicating the page was already seen in search results.
+     */
+    searchResultUrls?: Set<string>;
 }
 
 // --- Tool ---
@@ -162,6 +168,7 @@ export interface SearchToolOptions {
 export function createSearchTool(options?: SearchToolOptions): AgentTool<typeof searchSchema, SearchToolDetails> {
     const baseUrl = options?.baseUrl || "https://api.exa.ai/search";
     const apiKey = options?.apiKey;
+    const searchResultUrls = options?.searchResultUrls;
 
     return {
         name: "web_search",
@@ -246,6 +253,17 @@ export function createSearchTool(options?: SearchToolOptions): AgentTool<typeof 
 
                 const data: unknown = await response.json();
                 const results = normalizeResults(data);
+
+                // Record search result URLs in the shared tracker so the fetch tool
+                // can skip re-fetching pages the model already has excerpts from.
+                if (searchResultUrls) {
+                    for (const r of results) {
+                        if (r.url) {
+                            searchResultUrls.add(r.url);
+                        }
+                    }
+                }
+
                 const text = formatResults(results, query);
 
                 const textContent: TextContent[] = [

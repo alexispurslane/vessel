@@ -58,6 +58,9 @@ export const fetchTracker: ExtensionFactory = (pi) => {
         if (event.toolName === "fetch") {
             const details = event.details as FetchToolDetails | undefined;
 
+            // Skip if this was a skipped fetch (URL was already in search results)
+            if (details?.wasSearchResult) return;
+
             if (details?.url) {
                 console.log("[fetch-tracker] recorded fetch:", details.url);
                 sources.push({
