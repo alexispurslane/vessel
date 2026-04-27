@@ -32,7 +32,7 @@ import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { TextContent } from "@mariozechner/pi-ai";
 import type { Sandbox, CommandOutput } from "zerobox";
 
-// --- User Agent ---
+// --- Chrome 131 on Windows Spoof ---
 
 /**
  * A realistic Chrome-on-Windows user agent string.
@@ -40,9 +40,50 @@ import type { Sandbox, CommandOutput } from "zerobox";
  * By default happy-dom advertises itself with a `HappyDOM` user agent,
  * which some sites detect and block. Spoofing a common browser avoids
  * this without any downside for content extraction.
+ *
+ * This must match impit's `chrome131` profile (which sets Chrome 131 in
+ * `Sec-CH-UA`), but with a Windows platform instead of the default macOS.
  */
 const CHROME_WINDOWS_UA =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+/**
+ * HTTP Client Hints that Chrome 131 on Windows sends by default (low-entropy).
+ *
+ * impit's `chrome131` profile sets `Sec-CH-UA` correctly but defaults to
+ * `"macOS"` for the platform. We override `Sec-CH-UA-Platform` and
+ * `User-Agent` to match our Windows UA string.
+ */
+const CHROME_CLIENT_HINT_HEADERS: Record<string, string> = {
+    "User-Agent": CHROME_WINDOWS_UA,
+    "Sec-CH-UA-Platform": '"Windows"',
+};
+
+/**
+ * The `Sec-CH-UA` header value impit's chrome131 profile sends.
+ *
+ * We capture this as a constant so the JS-level `navigator.userAgentData`
+ * patch can stay in sync with the HTTP-level `Sec-CH-UA` header.
+ *
+ * Format: `"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"`
+ */
+const CHROME_SEC_CH_UA =
+    '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"';
+
+/**
+ * The `Sec-CH-UA-Platform` value for Windows.
+ *
+ * Used in the JS-level `navigator.userAgentData.platform` patch.
+ */
+const CHROME_PLATFORM = "Windows";
+
+/**
+ * The impit browser profile that matches our Chrome 131 spoof.
+ *
+ * This gives us the correct TLS fingerprint (JA3/JA4), HTTP/2 frame settings,
+ * and default `Sec-CH-UA` brand formatting for Chrome 131.
+ */
+const IMPIT_BROWSER_PROFILE = "chrome131" as const;
 
 // --- Schema ---
 
@@ -165,16 +206,28 @@ function buildFetchJs(url: string, timeoutSeconds: number): string {
     const urlJson = JSON.stringify(url);
     const uaJson = JSON.stringify(CHROME_WINDOWS_UA);
     const timeoutMs = timeoutSeconds * 1000;
+    const clientHintHeadersJson = JSON.stringify(CHROME_CLIENT_HINT_HEADERS);
+    const secChUaJson = JSON.stringify(CHROME_SEC_CH_UA);
+    const platformJson = JSON.stringify(CHROME_PLATFORM);
+    const profileJson = JSON.stringify(IMPIT_BROWSER_PROFILE);
     // The promise rejection is handled by the process — unhandled rejections
     // cause a non-zero exit code, which we catch in fetchPageInSandbox.
     //
-    // Fetch strategy: use impit (with browser: "chrome") for the initial HTTP
+    // Fetch strategy: use impit (with browser: "chrome131") for the initial HTTP
     // request so that the TLS handshake and HTTP/2 frames match a real Chrome
-    // browser. Then inject the fetched HTML into happy-dom via page.content /
+    // browser. The chrome131 profile sets Sec-CH-UA brands correctly; we override
+    // User-Agent and Sec-CH-UA-Platform via instance headers to match our Windows
+    // UA string. Then we inject the fetched HTML into happy-dom via page.content /
     // page.url setters instead of page.goto(), which would use Node's built-in
     // fetch (and its generic TLS fingerprint that gets flagged by anti-bot
     // services). A fetch.interceptor.beforeAsyncRequest hook routes all
     // sub-requests made by happy-dom (JS, CSS, XHR, etc.) through impit too.
+    //
+    // Navigator patching: happy-dom's Navigator defaults are Firefox-like
+    // (vendor="", productSub="20100101"). We use beforeContentCallback to
+    // patch navigator.vendor, navigator.productSub, navigator.platform, and
+    // inject navigator.userAgentData so JS-level client hints match the
+    // HTTP-level Sec-CH-UA headers that impit sends.
     return `
 const path = require("path");
 const { Browser, BrowserErrorCaptureEnum } = require("happy-dom");
@@ -183,8 +236,10 @@ const { Impit } = require(path.join(process.env.NODE_PATH, "impit"));
 (async function __fetchPage() {
     let browser;
     try {
-        // Use impit to fetch the page with Chrome's TLS fingerprint and HTTP headers
-        const impit = new Impit({ browser: "chrome", timeout: ${timeoutMs} });
+        // Use impit to fetch the page with Chrome 131's TLS fingerprint and HTTP headers.
+        // The chrome131 profile gives us the right Sec-CH-UA brands; we override
+        // User-Agent and Sec-CH-UA-Platform via instance-level headers to match Windows.
+        const impit = new Impit({ browser: ${profileJson}, timeout: ${timeoutMs}, headers: ${clientHintHeadersJson} });
         const impitResponse = await impit.fetch(${urlJson});
         const httpStatus = impitResponse.status;
         const html = await impitResponse.text();
@@ -192,13 +247,53 @@ const { Impit } = require(path.join(process.env.NODE_PATH, "impit"));
             settings: {
                 errorCapture: BrowserErrorCaptureEnum.processLevel,
                 navigator: { userAgent: ${uaJson} },
+                navigation: {
+                    beforeContentCallback: (win) => {
+                        // Patch Navigator properties that happy-dom gets wrong for Chrome.
+                        // Missing or mismatched values are a common anti-bot detection signal.
+                        //
+                        // navigator.vendor: Chrome returns "Google Inc.", happy-dom defaults to "" (Firefox)
+                        // navigator.productSub: Chrome returns "20030107", happy-dom defaults to "20100101" (Firefox)
+                        // navigator.platform: Should be "Win32" on 64-bit Windows, but happy-dom parses
+                        //   it from the UA string and gets "Windows NT 10.0; Win64; x64" instead.
+                        // navigator.userAgentData: Chrome implements the User-Agent Client Hints JS API
+                        //   (navigator.userAgentData.brands, .mobile, .platform), but happy-dom
+                        //   doesn't implement it at all. We inject a matching stub.
+                        Object.defineProperty(win.Navigator.prototype, 'vendor', { get: () => 'Google Inc.', configurable: true });
+                        Object.defineProperty(win.Navigator.prototype, 'productSub', { get: () => '20030107', configurable: true });
+                        Object.defineProperty(win.Navigator.prototype, 'platform', { get: () => 'Win32', configurable: true });
+                        // Inject navigator.userAgentData to match the Sec-CH-UA headers impit sends.
+                        // Parse the Sec-CH-UA value into brand objects: "Google Chrome";v="131" → {brand:"Google Chrome",version:"131"}
+                        const brands = ${secChUaJson}.split(', ').map(part => {
+                            const m = part.match(/"([^"]+)";v="([^"]+)"/);
+                            return m ? { brand: m[1], version: m[2] } : null;
+                        }).filter(Boolean);
+                        Object.defineProperty(win.Navigator.prototype, 'userAgentData', {
+                            get: () => ({
+                                brands: brands,
+                                mobile: false,
+                                platform: ${platformJson},
+                                getHighEntropyValues: async (hints) => {
+                                    const result = { brands: brands, mobile: false, platform: ${platformJson} };
+                                    if (hints.includes('platformVersion')) result.platformVersion = '15.0.0';
+                                    if (hints.includes('architecture')) result.architecture = 'x86';
+                                    if (hints.includes('model')) result.model = '';
+                                    if (hints.includes('bitness')) result.bitness = '64';
+                                    if (hints.includes('fullVersionList')) result.fullVersionList = brands.map(b => ({ brand: b.brand, version: b.version }));
+                                    return result;
+                                },
+                            }),
+                            configurable: true,
+                        });
+                    },
+                },
                 fetch: {
                     interceptor: {
                         beforeAsyncRequest: async ({ request, window: win }) => {
                             // Route all sub-requests through impit so they also have
                             // Chrome's TLS fingerprint instead of Node's default
                             try {
-                                const subImpit = new Impit({ browser: "chrome", timeout: ${timeoutMs} });
+                                const subImpit = new Impit({ browser: ${profileJson}, timeout: ${timeoutMs}, headers: ${clientHintHeadersJson} });
                                 const subResponse = await subImpit.fetch(request.url, {
                                     method: request.method,
                                     headers: Object.fromEntries(request.headers.entries()),
@@ -329,8 +424,10 @@ async function fetchPageLocally(url: string, timeout: number = 30): Promise<{ co
     const { Impit } = await import(/* @vite-ignore */ "impit");
     let browser: InstanceType<typeof Browser> | undefined;
     try {
-        // Use impit to fetch the page with Chrome's TLS fingerprint and HTTP headers
-        const impit = new Impit({ browser: "chrome", timeout: timeout * 1000 });
+        // Use impit to fetch the page with Chrome 131's TLS fingerprint and HTTP headers.
+        // The chrome131 profile gives us the right Sec-CH-UA brands; we override
+        // User-Agent and Sec-CH-UA-Platform via instance-level headers to match Windows.
+        const impit = new Impit({ browser: IMPIT_BROWSER_PROFILE, timeout: timeout * 1000, headers: CHROME_CLIENT_HINT_HEADERS });
         const impitResponse = await impit.fetch(url);
         const httpStatus = impitResponse.status;
         const html = await impitResponse.text();
@@ -339,13 +436,53 @@ async function fetchPageLocally(url: string, timeout: number = 30): Promise<{ co
             settings: {
                 errorCapture: BrowserErrorCaptureEnum.processLevel,
                 navigator: { userAgent: CHROME_WINDOWS_UA },
+                navigation: {
+                    beforeContentCallback: (win: any) => {
+                        // Patch Navigator properties that happy-dom gets wrong for Chrome.
+                        // Missing or mismatched values are a common anti-bot detection signal.
+                        //
+                        // navigator.vendor: Chrome returns "Google Inc.", happy-dom defaults to "" (Firefox)
+                        // navigator.productSub: Chrome returns "20030107", happy-dom defaults to "20100101" (Firefox)
+                        // navigator.platform: Should be "Win32" on 64-bit Windows, but happy-dom parses
+                        //   it from the UA string and gets "Windows NT 10.0; Win64; x64" instead.
+                        // navigator.userAgentData: Chrome implements the User-Agent Client Hints JS API
+                        //   (navigator.userAgentData.brands, .mobile, .platform), but happy-dom
+                        //   doesn't implement it at all. We inject a matching stub.
+                        Object.defineProperty(win.Navigator.prototype, 'vendor', { get: () => 'Google Inc.', configurable: true });
+                        Object.defineProperty(win.Navigator.prototype, 'productSub', { get: () => '20030107', configurable: true });
+                        Object.defineProperty(win.Navigator.prototype, 'platform', { get: () => 'Win32', configurable: true });
+                        // Inject navigator.userAgentData to match the Sec-CH-UA headers impit sends.
+                        // Parse the Sec-CH-UA value into brand objects.
+                        const brands = CHROME_SEC_CH_UA.split(', ').map((part: string) => {
+                            const m = part.match(/"([^"]+)";v="([^"]+)"/);
+                            return m ? { brand: m[1], version: m[2] } : null;
+                        }).filter(Boolean);
+                        Object.defineProperty(win.Navigator.prototype, 'userAgentData', {
+                            get: () => ({
+                                brands,
+                                mobile: false,
+                                platform: CHROME_PLATFORM,
+                                getHighEntropyValues: async (hints: string[]) => {
+                                    const result: Record<string, unknown> = { brands, mobile: false, platform: CHROME_PLATFORM };
+                                    if (hints.includes('platformVersion')) result.platformVersion = '15.0.0';
+                                    if (hints.includes('architecture')) result.architecture = 'x86';
+                                    if (hints.includes('model')) result.model = '';
+                                    if (hints.includes('bitness')) result.bitness = '64';
+                                    if (hints.includes('fullVersionList')) result.fullVersionList = brands.map((b: any) => ({ brand: b.brand, version: b.version }));
+                                    return result;
+                                },
+                            }),
+                            configurable: true,
+                        });
+                    },
+                },
                 fetch: {
                     interceptor: {
                         beforeAsyncRequest: async ({ request, window: win }) => {
                             // Route all sub-requests through impit so they also have
                             // Chrome's TLS fingerprint instead of Node's default
                             try {
-                                const subImpit = new Impit({ browser: "chrome", timeout: timeout * 1000 });
+                                const subImpit = new Impit({ browser: IMPIT_BROWSER_PROFILE, timeout: timeout * 1000, headers: CHROME_CLIENT_HINT_HEADERS });
                                 const subResponse = await subImpit.fetch(request.url, {
                                     method: request.method as any,
                                     headers: Object.fromEntries(request.headers.entries()),
