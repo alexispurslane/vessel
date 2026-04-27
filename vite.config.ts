@@ -5,6 +5,18 @@ import { fileURLToPath } from "url";
 
 export default defineConfig({
     plugins: [tailwindcss(), sveltekit()],
+    optimizeDeps: {
+        // Prevent Vite's dep optimizer from pre-bundling svelte-streamdown's
+        // sub-path exports (math, mermaid, code). These are .svelte components
+        // that the optimizer can't handle — it strips them into broken JS chunks.
+        // Letting SvelteKit's own transform pipeline handle them works correctly.
+        exclude: ["svelte-streamdown/math", "svelte-streamdown/mermaid", "svelte-streamdown/code"],
+        // Ensure mermaid and katex are pre-bundled. They're peer deps of
+        // svelte-streamdown whose dynamic imports need to be resolved by Vite.
+        // Without this, `import('mermaid')` / `import('katex')` inside the
+        // Streamdown components fail at runtime.
+        include: ["mermaid", "katex"],
+    },
     ssr: {
         // Process pi-mcp-adapter through Vite's transform pipeline so its
         // TypeScript gets compiled properly (avoids the "stripping types unsupported

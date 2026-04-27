@@ -175,10 +175,11 @@ export function createSearchTool(options?: SearchToolOptions): AgentTool<typeof 
         label: "web_search",
         description:
             "Search the web for information using a search API. " +
-            "Returns a list of results with titles, URLs, and text excerpts. " +
-            "Use this when you need to find current information, look up facts, " +
-            "or discover web pages on a topic. For reading the full content of a " +
-            "specific page, use the fetch tool instead.",
+            "Returns a list of results with titles, URLs, and the full text content of each page. " +
+            "The page content included in search results is typically complete and high-quality — " +
+            "it is usually better and more complete than what you'd get by manually fetching the page. " +
+            "Use this tool as your primary way to research topics. Only use the fetch tool as a " +
+            "secondary fallback if a search result's page content is missing or clearly incomplete.",
         parameters: searchSchema,
 
         async execute(
@@ -209,11 +210,16 @@ export function createSearchTool(options?: SearchToolOptions): AgentTool<typeof 
                     numResults: Math.min(numResults ?? 10, 100),
                 };
 
-                // If this looks like an Exa API, request text content via highlights
+                // If this looks like an Exa API, request the full text content of each page.
+                // Exa's `text` mode returns the full page content as clean markdown — this is
+                // typically more complete than what the fetch tool can scrape (which uses
+                // happy-dom + defuddle). The model should prefer search result content over
+                // fetching individual pages.
                 if (baseUrl.includes("exa.ai")) {
                     requestBody.contents = {
-                        highlights: {
-                            maxCharacters: 4000,
+                        text: {
+                            maxCharacters: 8000,
+                            includeHtmlTags: false,
                         },
                     };
                 }

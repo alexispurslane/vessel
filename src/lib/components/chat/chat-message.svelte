@@ -1,5 +1,9 @@
 <script lang="ts">
     import { Streamdown } from "svelte-streamdown";
+    import MathComponent from "svelte-streamdown/math";
+    import MermaidComponent from "svelte-streamdown/mermaid";
+    import StreamdownCode from "$lib/components/chat/streamdown-code.svelte";
+    import { preprocessMathMarkdown } from "$lib/utils/math-preprocess.js";
     import { type DeepPartialTheme } from "$lib/types/theme.js";
     import { Spinner } from "$lib/components/ui/spinner/index.js";
     import Brain from "@lucide/svelte/icons/brain";
@@ -63,8 +67,8 @@
         h5: { base: "mt-2 mb-1 text-sm font-semibold text-primary-foreground" },
         h6: { base: "mt-2 mb-1 text-xs font-semibold text-primary-foreground" },
         paragraph: { base: "text-primary-foreground" },
-        ul: { base: "ml-4 list-inside list-disc whitespace-normal text-primary-foreground" },
-        ol: { base: "ml-4 list-inside whitespace-normal text-primary-foreground" },
+        ul: { base: "pl-6 list-outside list-disc whitespace-normal text-primary-foreground" },
+        ol: { base: "pl-6 list-outside whitespace-normal text-primary-foreground" },
         li: { base: "py-0.5 text-primary-foreground" },
         blockquote: {
             base: "border-primary-foreground/30 text-primary-foreground/80 my-2 border-l-4 pl-4 italic",
@@ -97,8 +101,8 @@
         h5: { base: "mt-2 mb-1 text-sm font-semibold" },
         h6: { base: "mt-2 mb-1 text-xs font-semibold" },
         paragraph: { base: "" },
-        ul: { base: "ml-4 list-inside list-disc whitespace-normal" },
-        ol: { base: "ml-4 list-inside whitespace-normal" },
+        ul: { base: "pl-6 list-outside list-disc whitespace-normal" },
+        ol: { base: "pl-6 list-outside whitespace-normal" },
         li: { base: "py-0.5" },
         blockquote: { base: "my-2 border-l-4 pl-4 italic" },
         table: { base: "overflow-x-auto max-w-full my-2 rounded-lg border border-border" },
@@ -116,8 +120,8 @@
         h3: { base: "mt-1.5 mb-0.5 text-xs font-semibold" },
         h4: { base: "mt-1 mb-0.5 text-xs font-semibold" },
         paragraph: { base: "" },
-        ul: { base: "ml-3 list-inside list-disc whitespace-normal" },
-        ol: { base: "ml-3 list-inside whitespace-normal" },
+        ul: { base: "pl-5 list-outside list-disc whitespace-normal" },
+        ol: { base: "pl-5 list-outside whitespace-normal" },
         li: { base: "py-0" },
         code: {
             base: "my-1 w-full overflow-hidden rounded border border-border flex flex-col max-w-full text-[0.7rem]",
@@ -131,6 +135,10 @@
     let confirmDeleteTimer: ReturnType<typeof setTimeout> | undefined;
     let editing = $state(false);
     let editText = $state("");
+
+    /** Preprocessed content: fixes math formatting for Streamdown */
+    const preprocessedContent = $derived(preprocessMathMarkdown(msg.content));
+    const preprocessedThinking = $derived(preprocessMathMarkdown(msg.thinking || ""));
 
     function scrollToTop() {
         console.log(msgEl, scrollContainer);
@@ -253,19 +261,16 @@
                 class="border-t px-3 py-2 text-xs text-muted-foreground max-h-64 overflow-auto markdown-prose markdown-thinking"
             >
                 <Streamdown
-                    content={msg.thinking || ""}
+                    content={preprocessedThinking}
                     baseTheme="shadcn"
                     theme={thinkingTheme}
                     parseIncompleteMarkdown={msg.thinkingStreaming ?? false}
-                >
-                    {#snippet code({ token })}
-                        <CodeBlock
-                            lang={token.lang}
-                            text={token.text}
-                            codeStreaming={msg.thinkingStreaming ?? false}
-                        />
-                    {/snippet}
-                </Streamdown>
+                    components={{
+                        math: MathComponent,
+                        mermaid: MermaidComponent,
+                        code: StreamdownCode,
+                    }}
+                />
             </div>
         </details>
     {/if}
@@ -297,42 +302,31 @@
                 {:else if msg.role === "user"}
                     <div class="markdown-prose">
                         <Streamdown
-                            content={msg.content}
+                            content={preprocessedContent}
                             baseTheme="shadcn"
                             theme={userMsgTheme}
                             parseIncompleteMarkdown={false}
-                        >
-                            {#snippet code({ token })}
-                                <CodeBlock
-                                    lang={token.lang}
-                                    text={token.text}
-                                    codeStreaming={false}
-                                />
-                            {/snippet}
-                        </Streamdown>
+                            components={{
+                                math: MathComponent,
+                                mermaid: MermaidComponent,
+                                code: StreamdownCode,
+                            }}
+                        />
                     </div>
                 {:else}
                     <div class="markdown-prose">
                         <Streamdown
-                            content={msg.content}
+                            content={preprocessedContent}
                             baseTheme="shadcn"
                             theme={assistantMsgTheme}
                             parseIncompleteMarkdown={msg.streaming ?? false}
-                        >
-                            {#snippet code({ token })}
-                                <CodeBlock
-                                    lang={token.lang}
-                                    text={token.text}
-                                    codeStreaming={msg.streaming ?? false}
-                                />
-                            {/snippet}
-                        </Streamdown>
+                            components={{
+                                math: MathComponent,
+                                mermaid: MermaidComponent,
+                                code: StreamdownCode,
+                            }}
+                        />
                     </div>
-                {/if}
-                {#if msg.streaming}
-                    <span
-                        class="inline-block w-0.5 h-[1.1em] ml-0.5 bg-current animate-pulse rounded-full align-text-bottom"
-                    ></span>
                 {/if}
             </div>
             <!-- Action bar at bottom, visible on hover -->
@@ -367,6 +361,16 @@
                             title="Edit message"
                         >
                             <Pencil class="size-3" />
+                        </button>
+                    {/if}
+                    {#if onedit && msg.role === "user"}
+                        <button
+                            onclick={() => onedit?.(msg.id, msg.role)}
+                            class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
+                            aria-label="Regenerate from here"
+                            title="Regenerate from here"
+                        >
+                            <RotateCcw class="size-3" />
                         </button>
                     {/if}
                     {#if onedit && msg.role === "assistant"}

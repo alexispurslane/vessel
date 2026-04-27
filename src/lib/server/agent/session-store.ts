@@ -34,21 +34,15 @@ const DATA_DIR = resolve(process.cwd(), "data");
 const SESSIONS_DIR = resolve(DATA_DIR, "sessions");
 const AGENT_DIR = resolve(DATA_DIR, "agent");
 const MODELS_JSON_PATH = resolve(DATA_DIR, "models.json");
-const VESSEL_APPEND_PATH = resolve(AGENT_DIR, "VESSEL_APPEND.md");
+import { VESSEL_APPEND_PROMPT } from "./vessel-append-prompt.js";
 
 /**
- * Read the Vessel-specific append system prompt from disk.
- * Returns the trimmed file content, or an empty string if the file doesn't exist.
+ * Return the Vessel-specific append system prompt.
+ * Now loaded from an embedded constant rather than a file on disk,
+ * so it stays version-controlled alongside the source code.
  */
 function loadVesselAppendPrompt(): string {
-    try {
-        if (existsSync(VESSEL_APPEND_PATH)) {
-            return readFileSync(VESSEL_APPEND_PATH, "utf-8").trim();
-        }
-    } catch {
-        // File not found or unreadable — skip
-    }
-    return "";
+    return VESSEL_APPEND_PROMPT;
 }
 
 /** How long to keep a session in memory after all subscribers disconnect.

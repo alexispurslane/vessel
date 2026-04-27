@@ -3,6 +3,8 @@
     import X from "@lucide/svelte/icons/x";
     import Globe from "@lucide/svelte/icons/globe";
     import { Streamdown } from "svelte-streamdown";
+    import MathComponent from "svelte-streamdown/math";
+    import MermaidComponent from "svelte-streamdown/mermaid";
     import { type DeepPartialTheme } from "$lib/types/theme.js";
     import { ScrollArea } from "$lib/components/ui/scroll-area";
 
@@ -32,8 +34,8 @@
         h5: { base: "mt-1.5 mb-1 text-[0.6875rem] font-semibold text-muted-foreground" },
         h6: { base: "mt-1.5 mb-1 text-[0.6875rem] font-semibold text-muted-foreground" },
         paragraph: { base: "text-xs leading-[1.7] mb-2.5" },
-        ul: { base: "ml-4 list-inside list-disc text-xs mb-2.5" },
-        ol: { base: "ml-4 list-inside text-xs mb-2.5" },
+        ul: { base: "pl-6 list-outside list-disc text-xs mb-2.5" },
+        ol: { base: "pl-6 list-outside text-xs mb-2.5" },
         li: { base: "py-0.5" },
         blockquote: {
             base: "my-2 border-l-2 pl-3 italic text-xs text-muted-foreground",
@@ -102,6 +104,7 @@
                 baseTheme="shadcn"
                 theme={pageContentTheme}
                 parseIncompleteMarkdown={false}
+                components={{ math: MathComponent, mermaid: MermaidComponent }}
             >
                 {#snippet code({ token })}
                     <pre

@@ -1,5 +1,9 @@
 <script lang="ts">
     import { Streamdown } from "svelte-streamdown";
+    import MathComponent from "svelte-streamdown/math";
+    import MermaidComponent from "svelte-streamdown/mermaid";
+    import StreamdownCode from "$lib/components/chat/streamdown-code.svelte";
+    import { preprocessMathMarkdown } from "$lib/utils/math-preprocess.js";
     import { type DeepPartialTheme } from "$lib/types/theme.js";
     import { Spinner } from "$lib/components/ui/spinner/index.js";
     import Brain from "@lucide/svelte/icons/brain";
@@ -43,9 +47,9 @@
         h5: { base: "mt-1 mb-0.5 text-[11px] font-semibold" },
         h6: { base: "mt-1 mb-0.5 text-[11px] font-semibold" },
         paragraph: { base: "my-0.5" },
-        ul: { base: "my-0.5" },
-        ol: { base: "my-0.5" },
-        li: { base: "ml-4" },
+        ul: { base: "pl-5 list-outside list-disc my-0.5" },
+        ol: { base: "pl-5 list-outside my-0.5" },
+        li: { base: "" },
         code: {
             base: "my-1 w-full overflow-hidden rounded-lg border border-border flex flex-col max-w-full text-[0.8rem]",
         },
@@ -149,15 +153,16 @@
                 {#if step.type === "thinking" && step.thinking}
                     <div class="markdown-prose markdown-thinking">
                         <Streamdown
-                            content={step.thinking}
+                            content={preprocessMathMarkdown(step.thinking)}
                             baseTheme="shadcn"
                             theme={thinkingTheme}
                             parseIncompleteMarkdown={step.streaming ?? false}
-                        >
-                            {#snippet code({ token })}
-                                <CodeBlock lang={token.lang} text={token.text} />
-                            {/snippet}
-                        </Streamdown>
+                            components={{
+                                math: MathComponent,
+                                mermaid: MermaidComponent,
+                                code: StreamdownCode,
+                            }}
+                        />
                     </div>
                 {:else if step.type === "toolCall" && step.toolCall}
                     <ToolCall toolCall={step.toolCall} compact={true} />

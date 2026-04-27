@@ -150,7 +150,7 @@ function resolveTitleModel(): Model<any> | null {
 const generateTitleTool: Tool = {
     name: "generate_conversation_title",
     description:
-        "Generate a concise title and relevant tags for a chat conversation based on the user's first message.",
+        "REQUIRED: You MUST call this tool to generate a title and tags. Do NOT respond with text — call this tool.",
     parameters: Type.Object({
         title: Type.String({
             description: "A short, descriptive title for the conversation (3-6 words)",
@@ -185,29 +185,50 @@ async function callModelForTitle(model: Model<any>, userMessage: string, existin
         throw new Error(auth.error);
     }
 
-    const systemPrompt = `You generate concise titles and relevant tags for chat conversations. Given the user's first message, call the generate_conversation_title tool with an appropriate title and tags. You MUST call the tool — do not respond with text.${existingTags.length > 0
-        ? `\n\nExisting tags already in use (prefer reusing these when relevant): ${existingTags.join(", ")}`
-        : ""
-        }`;
+    const existingTagsNote =
+        existingTags.length > 0
+            ? `\nExisting tags already in use (prefer reusing these when relevant): ${existingTags.join(", ")}`
+            : "";
+
+    const systemPrompt = `You are a title/tag generator. Your ONLY job is to call the generate_conversation_title tool with a concise title and relevant tags for the given conversation topic. You MUST call the tool. Do NOT answer the user's question. Do NOT respond with any text. Just call the tool.${existingTagsNote}`;
 
     const context: Context = {
         systemPrompt,
         messages: [
             {
                 role: "user",
-                content: `First message in conversation, which you should generate title and tags from, NOT respond to:\n\n${userMessage}`,
+                content: `Generate a title and tags for a conversation that starts with this message:\n\n<user_message>\n${userMessage}\n</user_message>`,
                 timestamp: Date.now(),
             },
         ],
         tools: [generateTitleTool],
     };
 
+    // Force the model to call the tool. The tool_choice value differs by provider API:
+    // - OpenAI completions/responses uses "required"
+    // - Anthropic messages and Bedrock use "any"
+    const forcedToolChoice = model.api === "openai-completions" || model.api === "openai-responses" || model.api === "azure-openai-responses"
+        ? "required"
+        : "any";
+
+    // Disable reasoning/thinking for this call. Title generation is a simple task that
+    // doesn't benefit from reasoning tokens, which just waste tokens and latency.
+    // Provider-specific options are passed via ProviderStreamOptions (Record<string, unknown>).
+    const reasoningDisabled: Record<string, unknown> =
+        model.api === "openai-completions" || model.api === "openai-responses" || model.api === "azure-openai-responses"
+            ? { reasoningEffort: undefined }          // ZAI/Qwen: enable_thinking = !!reasoningEffort = false
+            : model.api === "anthropic-messages"
+                ? { thinkingEnabled: false }            // Anthropic: params.thinking = { type: "disabled" }
+                : { reasoning: undefined };             // Bedrock: !options.reasoning → no thinking fields
+
     const assistantMessage = await complete(model, context, {
-        maxTokens: 200,
-        temperature: 0.3,
+        maxTokens: 1024,
+        temperature: 0.7,
         apiKey: auth.apiKey,
         headers: auth.headers,
         signal: AbortSignal.timeout(30_000),
+        toolChoice: forcedToolChoice,
+        ...reasoningDisabled,
     });
 
     // Extract the tool call from the response

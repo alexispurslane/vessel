@@ -12,7 +12,7 @@ node_modules
 .DS_Store
 Thumbs.db
 
-# Data (SQLite DB + pi session files)
+# Data (SQLite DB, pi session files, etc.)
 /data/
 
 # Env
