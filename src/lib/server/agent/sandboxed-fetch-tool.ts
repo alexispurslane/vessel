@@ -164,25 +164,68 @@ function detectCaptcha(document: any): boolean {
 function buildFetchJs(url: string, timeoutSeconds: number): string {
     const urlJson = JSON.stringify(url);
     const uaJson = JSON.stringify(CHROME_WINDOWS_UA);
+    const timeoutMs = timeoutSeconds * 1000;
     // The promise rejection is handled by the process — unhandled rejections
     // cause a non-zero exit code, which we catch in fetchPageInSandbox.
+    //
+    // Fetch strategy: use impit (with browser: "chrome") for the initial HTTP
+    // request so that the TLS handshake and HTTP/2 frames match a real Chrome
+    // browser. Then inject the fetched HTML into happy-dom via page.content /
+    // page.url setters instead of page.goto(), which would use Node's built-in
+    // fetch (and its generic TLS fingerprint that gets flagged by anti-bot
+    // services). A fetch.interceptor.beforeAsyncRequest hook routes all
+    // sub-requests made by happy-dom (JS, CSS, XHR, etc.) through impit too.
     return `
 const path = require("path");
 const { Browser, BrowserErrorCaptureEnum } = require("happy-dom");
 const { Defuddle } = require(path.join(process.env.NODE_PATH, "defuddle", "dist", "node.js"));
+const { Impit } = require(path.join(process.env.NODE_PATH, "impit"));
 (async function __fetchPage() {
     let browser;
     try {
+        // Use impit to fetch the page with Chrome's TLS fingerprint and HTTP headers
+        const impit = new Impit({ browser: "chrome", timeout: ${timeoutMs} });
+        const impitResponse = await impit.fetch(${urlJson});
+        const httpStatus = impitResponse.status;
+        const html = await impitResponse.text();
         browser = new Browser({
             settings: {
                 errorCapture: BrowserErrorCaptureEnum.processLevel,
                 navigator: { userAgent: ${uaJson} },
+                fetch: {
+                    interceptor: {
+                        beforeAsyncRequest: async ({ request, window: win }) => {
+                            // Route all sub-requests through impit so they also have
+                            // Chrome's TLS fingerprint instead of Node's default
+                            try {
+                                const subImpit = new Impit({ browser: "chrome", timeout: ${timeoutMs} });
+                                const subResponse = await subImpit.fetch(request.url, {
+                                    method: request.method,
+                                    headers: Object.fromEntries(request.headers.entries()),
+                                    body: request.method !== "GET" && request.method !== "HEAD" ? await request.text() : undefined,
+                                });
+                                const body = await subResponse.text();
+                                const headerEntries = [];
+                                subResponse.headers.forEach((value, key) => headerEntries.push([key, value]));
+                                return new win.Response(body, {
+                                    status: subResponse.status,
+                                    statusText: subResponse.statusText,
+                                    headers: headerEntries,
+                                });
+                            } catch {
+                                // Let happy-dom handle the error (return void = no interception)
+                            }
+                        },
+                    },
+                },
             },
         });
         const page = browser.newPage();
-        const response = await page.goto(${urlJson});
+        // Inject the impit-fetched HTML directly instead of using page.goto(),
+        // which would make a separate HTTP request with Node's generic TLS fingerprint
+        page.url = ${urlJson};
+        page.content = html;
         await page.waitUntilComplete();
-        const httpStatus = response ? response.status : 200;
         const document = page.mainFrame.document;
         // --- CAPTCHA detection ---
         let captchaDetected = false;
@@ -283,18 +326,53 @@ function replaceImagesWithAltText(document: any): void {
 async function fetchPageLocally(url: string, timeout: number = 30): Promise<{ content: string; title: string; captchaDetected: boolean; httpStatus: number }> {
     const { Browser, BrowserErrorCaptureEnum } = await import(/* @vite-ignore */ "happy-dom");
     const { Defuddle } = await import(/* @vite-ignore */ "defuddle/node");
+    const { Impit } = await import(/* @vite-ignore */ "impit");
     let browser: InstanceType<typeof Browser> | undefined;
     try {
+        // Use impit to fetch the page with Chrome's TLS fingerprint and HTTP headers
+        const impit = new Impit({ browser: "chrome", timeout: timeout * 1000 });
+        const impitResponse = await impit.fetch(url);
+        const httpStatus = impitResponse.status;
+        const html = await impitResponse.text();
+
         browser = new Browser({
             settings: {
                 errorCapture: BrowserErrorCaptureEnum.processLevel,
                 navigator: { userAgent: CHROME_WINDOWS_UA },
+                fetch: {
+                    interceptor: {
+                        beforeAsyncRequest: async ({ request, window: win }) => {
+                            // Route all sub-requests through impit so they also have
+                            // Chrome's TLS fingerprint instead of Node's default
+                            try {
+                                const subImpit = new Impit({ browser: "chrome", timeout: timeout * 1000 });
+                                const subResponse = await subImpit.fetch(request.url, {
+                                    method: request.method as any,
+                                    headers: Object.fromEntries(request.headers.entries()),
+                                    body: request.method !== "GET" && request.method !== "HEAD" ? await request.text() : undefined,
+                                });
+                                const body = await subResponse.text();
+                                const headerEntries: [string, string][] = [];
+                                subResponse.headers.forEach((value, key) => headerEntries.push([key, value]));
+                                return new win.Response(body, {
+                                    status: subResponse.status,
+                                    statusText: subResponse.statusText,
+                                    headers: headerEntries,
+                                });
+                            } catch {
+                                // Let happy-dom handle the error (return void = no interception)
+                            }
+                        },
+                    },
+                },
             },
         }) as InstanceType<typeof Browser>;
         const page = browser.newPage();
-        const response = await page.goto(url);
+        // Inject the impit-fetched HTML directly instead of using page.goto(),
+        // which would make a separate HTTP request with Node's generic TLS fingerprint
+        page.url = url;
+        page.content = html;
         await page.waitUntilComplete();
-        const httpStatus = response?.status ?? 200;
         const document = page.mainFrame.document;
         // Check for CAPTCHA/anti-bot challenge pages before extracting content
         const captchaDetected = detectCaptcha(document as any);

@@ -69,6 +69,7 @@ const SANDBOX_DEPS_LOCKFILE = resolve(SANDBOX_DEPS_DIR, ".installed-deps.json");
 const SANDBOX_DEPS_PACKAGES: Record<string, string> = {
     "happy-dom": "^20.9.0",
     "defuddle": "^0.18.1",
+    "impit": "^0.13.1",
 };
 
 // --- DB settings keys ---
