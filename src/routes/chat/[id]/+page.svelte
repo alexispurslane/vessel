@@ -27,6 +27,8 @@
         getSessionTree,
         setSessionLeaf,
         updateConversationSettings,
+        uploadFile,
+        deleteWorkspaceFile,
     } from "$lib/api.js";
     import type {
         ChatMessage as ChatMessageType,
@@ -86,6 +88,23 @@
     }
 
     let inputText = $state("");
+    let pendingFiles = $state<{ file: File; id: string }[]>([]);
+    /** Names of files already uploaded to the sandbox (persists across messages) */
+    let sandboxFiles = $state<string[]>([]);
+    /**
+     * Status updates to be invisibly appended to the user's next message.
+     * These are sent to the AI but never shown in the UI bubble.
+     * Flushed and cleared each time a message is sent.
+     */
+    let pendingStatusUpdates = $state<string[]>([]);
+    /** Upload progress state: null when idle, object when uploading */
+    let uploadProgress = $state<{
+        currentFile: string;
+        fileIndex: number;
+        totalFiles: number;
+        /** 0-1 fraction of the current file uploaded */
+        fraction: number;
+    } | null>(null);
     let viewportEl = $state<HTMLElement | null>(null);
     let availableModels = $state<ModelInfo[]>([]);
     let selectedModelId = $state(""); // Just the model ID — provider is resolved automatically
@@ -360,6 +379,8 @@
         // then transition to the live store once connectStream completes.
         hydrated = false;
         if (currentId) {
+            // Initialize sandbox files from SSR data
+            sandboxFiles = $page.data.sandboxFiles ?? [];
             untrack(() => {
                 // Use SSR-provided history if available — avoids a client-side fetch
                 // and renders messages immediately (before SSE connects).
@@ -455,6 +476,8 @@
         const _thinking = lastMsg?.thinking;
         const _streaming = lastMsg?.streaming;
         const _thinkingStreaming = lastMsg?.thinkingStreaming;
+        // Also scroll when upload progress appears/updates
+        const _upload = uploadProgress;
 
         // Cancel any pending scroll — only the latest one matters
         if (scrollRaf !== undefined) cancelAnimationFrame(scrollRaf);
@@ -466,20 +489,111 @@
         });
     });
 
-    function handleSend() {
+    async function handleSend() {
         const text = inputText.trim();
-        if (!text || !chat.connected || chat.generating) return;
-        // Provider is resolved automatically from the model ID on the backend
-        send(text, selectedModelId || undefined);
-        inputText = "";
-        // Clear the draft from sessionStorage since the message has been sent
-        sessionStorage.removeItem(draftKey(id));
-        // Hide the top bar when user sends a message
-        hideTopBar();
+        const filesToSend = [...pendingFiles];
+        if (
+            (!text && filesToSend.length === 0 && pendingStatusUpdates.length === 0) ||
+            !chat.connected ||
+            chat.generating
+        )
+            return;
+
+        // Snapshot and clear any queued status updates.
+        // New updates (e.g. upload notices) will be appended to this list
+        // so all invisible status text flows through one place.
+        const statusUpdates = [...pendingStatusUpdates];
+        pendingStatusUpdates = [];
+
+        // When files are queued, show the message bubble immediately,
+        // upload files with a progress bar, then send to the AI.
+        if (filesToSend.length > 0) {
+            // Move text into a message bubble right away (just the user's text, not status updates)
+            const msgId = chat.addLocalUserMessage(text || "📎 Uploading files...");
+            inputText = "";
+            pendingFiles = [];
+            sessionStorage.removeItem(draftKey(id));
+            hideTopBar();
+
+            try {
+                const uploadedNames: string[] = [];
+                for (let i = 0; i < filesToSend.length; i++) {
+                    const pf = filesToSend[i];
+                    uploadProgress = {
+                        currentFile: pf.file.name,
+                        fileIndex: i,
+                        totalFiles: filesToSend.length,
+                        fraction: 0,
+                    };
+                    await uploadFile(id, pf.file, (loaded, total) => {
+                        uploadProgress = {
+                            currentFile: pf.file.name,
+                            fileIndex: i,
+                            totalFiles: filesToSend.length,
+                            fraction: loaded / total,
+                        };
+                    });
+                    uploadedNames.push(pf.file.name);
+                }
+
+                // Add upload notice to the status list
+                const fileList = uploadedNames.join(", ");
+                statusUpdates.push(`Files with names ${fileList} added to your sandbox`);
+
+                // Add uploaded files to the sandbox files list
+                sandboxFiles = [...sandboxFiles, ...uploadedNames];
+
+                // Build the full content for the API: user text + all invisible status updates
+                const statusText = statusUpdates.join("\n\n");
+                const parts = [text, statusText].filter(Boolean);
+                const apiContent = parts.join("\n\n");
+
+                // Clear progress and send to the AI
+                uploadProgress = null;
+                chat.sendToApi(apiContent, selectedModelId || undefined);
+            } catch (err) {
+                console.error("[chat] File upload failed:", err);
+                chat.setError(err instanceof Error ? err.message : "File upload failed");
+                uploadProgress = null;
+            }
+        } else {
+            // No files to upload
+            if (statusUpdates.length > 0) {
+                // There are invisible status updates — push a local message with just
+                // the user's text, then send the full content (with status appended) to the API
+                chat.addLocalUserMessage(text || "📎 Updated sandbox files");
+                const statusText = statusUpdates.join("\n\n");
+                const parts = [text, statusText].filter(Boolean);
+                const apiContent = parts.join("\n\n");
+                chat.sendToApi(apiContent, selectedModelId || undefined);
+            } else {
+                // Normal send — no invisible status
+                send(text, selectedModelId || undefined);
+            }
+            inputText = "";
+            sessionStorage.removeItem(draftKey(id));
+            hideTopBar();
+        }
     }
 
     function handleAbort() {
         abort();
+    }
+
+    async function handleRemoveSandboxFile(path: string) {
+        if (!id) return;
+        try {
+            await deleteWorkspaceFile(id, path);
+            sandboxFiles = sandboxFiles.filter((f) => f !== path);
+            // Queue an invisible status update so the AI knows the file was removed
+            pendingStatusUpdates = [
+                ...pendingStatusUpdates,
+                `File with name ${path} deleted from your sandbox`,
+            ];
+        } catch (err) {
+            console.error("[chat] Failed to delete sandbox file:", err);
+            chat.setError(err instanceof Error ? err.message : "Failed to delete file");
+        }
     }
 
     // Look up a model's display name from the available models list.
@@ -819,6 +933,29 @@
                                 </div>
                             </div>
                         {/if}
+
+                        <!-- File upload progress -->
+                        {#if uploadProgress}
+                            <div class="flex w-full justify-end">
+                                <div class="w-[min(75%,65ch)] flex flex-col gap-1.5">
+                                    <div
+                                        class="flex items-center gap-2 text-xs text-muted-foreground"
+                                    >
+                                        <span>Uploading {uploadProgress.currentFile}</span>
+                                        <span class="text-muted-foreground/60"
+                                            >({uploadProgress.fileIndex +
+                                                1}/{uploadProgress.totalFiles})</span
+                                        >
+                                    </div>
+                                    <div class="h-1.5 rounded-full bg-muted overflow-hidden">
+                                        <div
+                                            class="h-full rounded-full bg-primary transition-[width] duration-200"
+                                            style="width: {uploadProgress.fraction * 100}%"
+                                        ></div>
+                                    </div>
+                                </div>
+                            </div>
+                        {/if}
                     {/if}
                 </div>
             </ScrollArea>
@@ -827,8 +964,10 @@
             <div class="shrink-0 px-4 py-3 bg-background">
                 <ChatInput
                     bind:value={inputText}
+                    bind:pendingFiles
+                    {sandboxFiles}
                     placeholder={chat.connected ? "Type a message..." : "Connecting..."}
-                    disabled={!chat.connected}
+                    disabled={!chat.connected || uploadProgress !== null}
                     generating={chat.generating}
                     connected={chat.connected}
                     models={availableModels}
@@ -836,6 +975,8 @@
                     defaultModelId={settingsStore.defaultModel}
                     onsend={handleSend}
                     onabort={handleAbort}
+                    onremovesandboxfile={handleRemoveSandboxFile}
+                    hasPendingStatus={pendingStatusUpdates.length > 0}
                 />
                 <!-- Connection status / error -->
                 <div class="flex items-center gap-1.5 mt-1.5 min-h-4">

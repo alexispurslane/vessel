@@ -25,6 +25,7 @@ import { getDb } from "../db/index.js";
 import type { ConversationSettings } from "$lib/types.js";
 import { randomUUID } from "crypto";
 import type { ChatSSEEvent, ConversationListItem, ActiveSession, CustomModelDef } from "./types.js";
+import type { Sandbox } from "zerobox";
 import { inferApiForProvider } from "../inference/api-helpers.js";
 import { generateTitleAndTags } from "./title-generator.js";
 
@@ -1022,6 +1023,18 @@ export async function abortSession(conversationId: string): Promise<void> {
     if (session) {
         await session.agentSession.abort();
     }
+}
+
+/**
+ * Get the zerobox Sandbox instance for a conversation, if one is loaded.
+ * Returns null if the session is not in memory or sandboxing is disabled.
+ *
+ * Used by file upload/delete endpoints to trigger a sandbox snapshot
+ * after out-of-band filesystem changes.
+ */
+export function getSessionSandbox(conversationId: string): Sandbox | null {
+    const session = sessions.get(conversationId);
+    return session?.sandbox ?? null;
 }
 
 /**

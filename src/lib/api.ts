@@ -198,6 +198,87 @@ export async function editAssistantMessage(
     );
 }
 
+// --- File Upload ---
+
+export interface UploadResult {
+    success: boolean;
+    filename: string;
+    path: string;
+}
+
+export interface WorkspaceFilesResult {
+    files: string[];
+}
+
+/**
+ * List files in the agent's sandbox workspace.
+ * Returns an array of file paths relative to the workspace root.
+ */
+export async function listWorkspaceFiles(conversationId: string): Promise<WorkspaceFilesResult> {
+    return apiFetch<WorkspaceFilesResult>(`/api/sessions/${conversationId}/workspace`);
+}
+
+/**
+ * Delete a file from the agent's sandbox workspace.
+ * @param path - File path relative to the workspace root
+ */
+export async function deleteWorkspaceFile(
+    conversationId: string,
+    path: string
+): Promise<{ success: boolean }> {
+    return apiFetch<{ success: boolean }>(`/api/sessions/${conversationId}/workspace`, {
+        method: "DELETE",
+        body: JSON.stringify({ path }),
+    });
+}
+
+/**
+ * Upload a file to the agent's sandbox workspace using streaming (no size limits).
+ * Uses XMLHttpRequest to support upload progress reporting.
+ * No encoding overhead — bytes go straight to disk.
+ */
+export function uploadFile(
+    conversationId: string,
+    file: File,
+    onProgress?: (loaded: number, total: number) => void
+): Promise<UploadResult> {
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", `/api/sessions/${conversationId}/upload`);
+        xhr.setRequestHeader("X-Filename", file.name);
+        xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+
+        xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable && onProgress) {
+                onProgress(e.loaded, e.total);
+            }
+        };
+
+        xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+                try {
+                    resolve(JSON.parse(xhr.responseText));
+                } catch {
+                    reject(new ApiError(xhr.status, "Invalid response"));
+                }
+            } else if (xhr.status === 401) {
+                window.location.href = "/login";
+                reject(new ApiError(401, "Unauthorized"));
+            } else {
+                try {
+                    const body = JSON.parse(xhr.responseText);
+                    reject(new ApiError(xhr.status, body.error || `HTTP ${xhr.status}`));
+                } catch {
+                    reject(new ApiError(xhr.status, `HTTP ${xhr.status}`));
+                }
+            }
+        };
+
+        xhr.onerror = () => reject(new ApiError(0, "Network error"));
+        xhr.send(file);
+    });
+}
+
 // --- Agent Info ---
 
 export interface AgentToolInfo {

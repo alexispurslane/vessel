@@ -148,7 +148,7 @@ export interface ModelInfo {
     provider: string;
     api: string;
     reasoning: boolean;
-    input: ("text" | "image")[];
+    input: ("text" | "image" | "video")[];
     contextWindow: number;
     maxTokens: number;
 }

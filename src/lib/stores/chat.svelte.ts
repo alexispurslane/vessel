@@ -115,6 +115,10 @@ export function getChat() {
         get error() {
             return error;
         },
+        /** Set an error message to display in the chat UI */
+        setError(msg: string | null) {
+            error = msg;
+        },
         get conversationId() {
             return currentConversationId;
         },
@@ -132,6 +136,48 @@ export function getChat() {
         /** Total output tokens across all assistant messages in this conversation */
         get totalOutputTokens() {
             return messages.reduce((sum, m) => sum + (m.usage?.output ?? 0), 0);
+        },
+        /**
+         * Add a user message to the local list only (does NOT send to the API).
+         * Returns the generated message ID. Use sendToApi() after to actually
+         * trigger the AI response.
+         */
+        addLocalUserMessage(content: string): string {
+            const id = `user-${Date.now()}`;
+            messages.push({
+                id,
+                role: "user",
+                content,
+                timestamp: Date.now(),
+            });
+            return id;
+        },
+        /**
+         * Update the content of a local message by ID.
+         * Used to append sandbox file notifications after uploads complete.
+         */
+        updateLocalMessage(id: string, content: string) {
+            const msg = messages.find((m) => m.id === id);
+            if (msg) {
+                msg.content = content;
+            }
+        },
+        /**
+         * Send a message to the API without adding it to the local message list.
+         * The AI response will come through the SSE stream.
+         * Use this after addLocalUserMessage() when you've already pushed the
+         * message locally (e.g. to show it before file uploads finish).
+         */
+        async sendToApi(content: string, modelId?: string): Promise<void> {
+            if (!currentConversationId) return;
+            error = null;
+            generating = true;
+            try {
+                await apiSend(currentConversationId, content, modelId);
+            } catch (e) {
+                error = e instanceof Error ? e.message : "Failed to send message";
+                generating = false;
+            }
         },
     };
 }
