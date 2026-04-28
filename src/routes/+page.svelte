@@ -27,27 +27,12 @@
     let inputValue = $state("");
     let isCreating = $state(false);
 
-    // Sandbox quick-toggle states – restore from localStorage or use defaults
-    let sandboxOn = $state(
-        typeof localStorage !== "undefined"
-            ? localStorage.getItem("home_sandboxOn") !== "false"
-            : true
-    );
-    let netAllDomainsOn = $state(
-        typeof localStorage !== "undefined"
-            ? localStorage.getItem("home_netAllDomainsOn") === "true"
-            : false
-    );
-    let mcpServersOn = $state(
-        typeof localStorage !== "undefined"
-            ? localStorage.getItem("home_mcpServersOn") !== "false"
-            : true
-    );
-    let agentMode: "agent" | "chat" = $state(
-        typeof localStorage !== "undefined" && localStorage.getItem("home_agentMode") === "chat"
-            ? "chat"
-            : "agent"
-    );
+    // Sandbox quick-toggle states – defaults applied here; actual values
+    // restored from localStorage inside onMount (client-only)
+    let sandboxOn = $state(true);
+    let netAllDomainsOn = $state(false);
+    let mcpServersOn = $state(true);
+    let agentMode: "agent" | "chat" = $state("agent");
 
     // Persist toggle states to localStorage whenever they change
     $effect(() => {
