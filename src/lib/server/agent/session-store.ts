@@ -96,6 +96,26 @@ function refreshAuthStorageKeys(): void {
 }
 
 /**
+ * Filter the ModelRegistry's internal model list to only include models
+ * whose provider exists in vessel's DB. This prevents built-in models from
+ * pi-ai's hardcoded list (which have no API keys in vessel) from shadowing
+ * user-configured models with the same ID under a different provider.
+ *
+ * Must be called after ModelRegistry.create() and after refresh(), since
+ * both reload all built-in models from pi-ai's models.generated.js.
+ */
+function filterModelsToVesselProviders(registry: ModelRegistry): void {
+    const db = getDb();
+    const vesselProviders = new Set(
+        (db.prepare("SELECT provider FROM providers").all() as { provider: string }[]).map(r => r.provider)
+    );
+    const models = (registry as any).models as Array<{ provider: string }>;
+    if (models) {
+        (registry as any).models = models.filter(m => vesselProviders.has(m.provider));
+    }
+}
+
+/**
  * Get the singleton ModelRegistry.
  * Creates it on first call; callers should call refreshModelRegistry()
  * after mutations to providers or custom_models.
@@ -104,6 +124,7 @@ export function getModelRegistry(): ModelRegistry {
     if (!_modelRegistry) {
         generateModelsJson();
         _modelRegistry = ModelRegistry.create(getAuthStorage(), MODELS_JSON_PATH);
+        filterModelsToVesselProviders(_modelRegistry);
     }
     return _modelRegistry;
 }
@@ -117,6 +138,7 @@ function refreshModelRegistry(): void {
     refreshAuthStorageKeys();
     if (_modelRegistry) {
         _modelRegistry.refresh();
+        filterModelsToVesselProviders(_modelRegistry);
     }
 }
 
