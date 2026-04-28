@@ -1,8 +1,8 @@
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types.js";
-import { getSessionWorkDir } from "$lib/server/agent/sandbox-factory.js";
-import { getOrCreateSession, getSessionSandbox } from "$lib/server/agent/session-store.js";
-import { mkdirSync, createWriteStream } from "fs";
+import { getSessionWorkDir, createFileManagementSandbox } from "$lib/server/agent/sandbox-factory.js";
+import { getOrCreateSession } from "$lib/server/agent/session-store.js";
+import { mkdirSync, createWriteStream, unlinkSync } from "fs";
 import { resolve, dirname, join } from "path";
 
 /**
@@ -48,13 +48,35 @@ export const POST: RequestHandler = async ({ params, request }) => {
         return json({ error: "Invalid file path" }, { status: 400 });
     }
 
-    // Create parent directories if needed
-    mkdirSync(dir, { recursive: true });
+    const sandbox = createFileManagementSandbox(conversationId);
+
+    // When the sandbox is active, we need to route the file write through
+    // it so zerobox's snapshot records the change. Each sandbox.exec() call
+    // creates its own snapshot session (baseline → command → incremental diff).
+    // If we write directly to disk, the file appears in the baseline of the
+    // next sandboxed tool call — not as a change in any diff.
+    //
+    // We use a dedicated file-management sandbox (not the agent's sandbox)
+    // so that user file operations always succeed regardless of the agent's
+    // read/write restrictions. The file-management sandbox still records
+    // snapshots so the changes appear in the audit trail.
+    //
+    // Strategy: stream to a temp file inside the workspace (excluded from
+    // snapshots via .upload-tmp in snapshotExclude), then mv it into place
+    // through the sandbox. The snapshot will record the file as "Created".
+    //
+    // When the sandbox is not available (sandboxing disabled), we write
+    // directly — snapshots are off anyway in that case.
+    const UPLOAD_TMP_DIR = ".upload-tmp";
+    const tmpSuffix = `${Date.now()}.${Math.random().toString(36).slice(2)}`;
+    const tmpRelPath = join(UPLOAD_TMP_DIR, `${filename}.tmp.${tmpSuffix}`);
+    const tmpAbsPath = resolve(workDir, tmpRelPath);
+    mkdirSync(dirname(tmpAbsPath), { recursive: true });
 
     try {
-        // Write the file by streaming the request body to disk
+        // Stream the request body to the temp file (inside workspace but excluded from snapshots)
         if (request.body) {
-            const fileStream = createWriteStream(filePath);
+            const fileStream = createWriteStream(tmpAbsPath);
             const reader = request.body.getReader();
 
             try {
@@ -72,20 +94,29 @@ export const POST: RequestHandler = async ({ params, request }) => {
             }
         }
 
-        // Trigger a sandbox snapshot by running a no-op command through the sandbox.
-        // The upload bypasses the sandbox (writes directly to the host filesystem),
-        // so zerobox doesn't record the change. Running a trivial command forces
-        // a snapshot diff that captures the externally-written file.
-        const sandbox = getSessionSandbox(conversationId);
         if (sandbox) {
+            // Move the file through the sandbox so the snapshot records it as "Created".
+            // The .upload-tmp directory is excluded from snapshots, so the temp file
+            // won't appear in the baseline — only the final destination will show up
+            // as a new file in the incremental diff.
+            mkdirSync(dir, { recursive: true });
+            const result = await sandbox
+                .exec("mv", [tmpAbsPath, filePath])
+                .output();
+            if (result.code !== 0) {
+                throw new Error(`Sandbox mv failed: ${result.stderr}`);
+            }
+        } else {
+            // No sandbox — move the temp file directly into the workspace
+            mkdirSync(dir, { recursive: true });
             try {
-                await sandbox.exec("true").output();
-            } catch (snapshotErr) {
-                // Snapshot trigger is best-effort — don't fail the upload
-                console.warn(
-                    `[upload] Failed to trigger sandbox snapshot for session ${conversationId}:`,
-                    snapshotErr
-                );
+                const { renameSync } = await import("fs");
+                renameSync(tmpAbsPath, filePath);
+            } catch {
+                // rename can fail across mount points; fall back to copy + delete
+                const { copyFileSync } = await import("fs");
+                copyFileSync(tmpAbsPath, filePath);
+                try { unlinkSync(tmpAbsPath); } catch { }
             }
         }
 

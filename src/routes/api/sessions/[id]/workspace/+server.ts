@@ -1,7 +1,6 @@
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types.js";
-import { getSessionWorkDir } from "$lib/server/agent/sandbox-factory.js";
-import { getSessionSandbox } from "$lib/server/agent/session-store.js";
+import { getSessionWorkDir, createFileManagementSandbox } from "$lib/server/agent/sandbox-factory.js";
 import { existsSync, readdirSync, statSync, unlinkSync, rmdirSync } from "fs";
 import { resolve, relative, dirname } from "path";
 
@@ -75,6 +74,7 @@ export const GET: RequestHandler = async ({ params }) => {
 export const DELETE: RequestHandler = async ({ params, request }) => {
     const conversationId = params.id;
     const workDir = getSessionWorkDir(conversationId);
+    const sandbox = createFileManagementSandbox(conversationId);
 
     const body = await request.json();
     const { path: relativePath } = body;
@@ -96,25 +96,27 @@ export const DELETE: RequestHandler = async ({ params, request }) => {
     }
 
     try {
-        unlinkSync(filePath);
-        // Clean up any empty parent directories left behind
-        removeEmptyParents(filePath, resolvedWorkDir);
-
-        // Trigger a sandbox snapshot by running a no-op command through the sandbox.
-        // The deletion bypasses the sandbox (removes directly from the host filesystem),
-        // so zerobox doesn't record the change. Running a trivial command forces
-        // a snapshot diff that captures the externally-deleted file.
-        const sandbox = getSessionSandbox(conversationId);
         if (sandbox) {
-            try {
-                await sandbox.exec("true").output();
-            } catch (snapshotErr) {
-                // Snapshot trigger is best-effort — don't fail the delete
-                console.warn(
-                    `[workspace] Failed to trigger sandbox snapshot for session ${conversationId}:`,
-                    snapshotErr
-                );
+            // Route the deletion through the sandbox so the snapshot records it.
+            // The baseline captures the file as existing, the incremental sees it
+            // gone after rm — so the diff shows the file as "Deleted".
+            //
+            // We use a dedicated file-management sandbox (not the agent's sandbox)
+            // so user file operations always succeed regardless of the agent's
+            // read/write restrictions.
+            const result = await sandbox
+                .exec("rm", [filePath])
+                .output();
+            if (result.code !== 0) {
+                throw new Error(`Sandbox rm failed: ${result.stderr}`);
             }
+            // Clean up any empty parent directories left behind (done on host since
+            // rmdir on empty dirs doesn't need snapshot tracking)
+            removeEmptyParents(filePath, resolvedWorkDir);
+        } else {
+            // No sandbox — delete directly
+            unlinkSync(filePath);
+            removeEmptyParents(filePath, resolvedWorkDir);
         }
 
         return json({ success: true });

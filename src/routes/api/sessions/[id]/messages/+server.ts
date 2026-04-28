@@ -40,11 +40,16 @@ export const GET: RequestHandler = async ({ params }) => {
 export const POST: RequestHandler = async ({ params, request }) => {
     const conversationId = params.id;
     const body = await request.json();
-    const { content, model_id } = body;
+    const { content, model_id, status_content } = body;
 
     if (!content || typeof content !== "string") {
         return json({ error: "content is required and must be a string" }, { status: 400 });
     }
+
+    // status_content is optional invisible context (e.g., file upload/delete notices)
+    // sent to the AI but not displayed as a user message in the UI.
+    const statusContent =
+        status_content && typeof status_content === "string" ? status_content : undefined;
 
     // If a model is specified, switch to it before sending
     // Provider is resolved automatically from the model ID
@@ -59,7 +64,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 
     // Don't await the full prompt — the events flow through the SSE stream
     // We just kick it off and return immediately
-    sendMessage(conversationId, content).catch((err) => {
+    sendMessage(conversationId, content, statusContent).catch((err) => {
         console.error(`Error in session ${conversationId}:`, err);
     });
 

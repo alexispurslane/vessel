@@ -975,9 +975,47 @@ export function subscribe(
 /**
  * Send a message to an active session.
  */
-export async function sendMessage(conversationId: string, content: string): Promise<void> {
-    const session = await getOrCreateSession(conversationId);
-    await session.prompt(content);
+export async function sendCustomMessage(
+    conversationId: string,
+    customType: string,
+    content: string,
+    options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" }
+): Promise<void> {
+    const agentSession = await getOrCreateSession(conversationId);
+    await agentSession.sendCustomMessage(
+        {
+            customType,
+            content,
+            display: false,
+        },
+        {
+            triggerTurn: options?.triggerTurn ?? false,
+            deliverAs: options?.deliverAs,
+        }
+    );
+}
+
+export async function sendMessage(conversationId: string, content: string, statusContent?: string): Promise<void> {
+    const agentSession = await getOrCreateSession(conversationId);
+
+    // If there's invisible status content (e.g., file upload/delete notices),
+    // send it as a custom message queued for the next turn. This way the AI
+    // sees the status information in context, but it doesn't appear as a
+    // visible user message in the chat UI.
+    if (statusContent) {
+        await agentSession.sendCustomMessage(
+            {
+                customType: "status_update",
+                content: statusContent,
+                display: false,
+            },
+            {
+                deliverAs: "nextTurn",
+            }
+        );
+    }
+
+    await agentSession.prompt(content);
 
     // After the prompt completes, trigger title/tag generation in the background.
     // This runs even if the client isn't connected to the SSE stream yet.
@@ -1758,6 +1796,14 @@ export async function editAssistantMessage(
                 break;
             case "custom":
                 sessionManager.appendCustomEntry(entry.customType, entry.data);
+                break;
+            case "custom_message":
+                sessionManager.appendCustomMessageEntry(
+                    entry.customType,
+                    entry.content,
+                    entry.display,
+                    entry.details
+                );
                 break;
             case "label": {
                 // entry.label is string | undefined on LabelEntry; appendLabelChange

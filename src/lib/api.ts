@@ -151,10 +151,12 @@ export async function updateConversationSettings(
 export async function sendMessage(
     conversationId: string,
     content: string,
-    modelId?: string
+    modelId?: string,
+    statusContent?: string
 ): Promise<{ accepted: boolean }> {
     const body: Record<string, unknown> = { content };
     if (modelId) body.model_id = modelId;
+    if (statusContent) body.status_content = statusContent;
     return apiFetch<{ accepted: boolean }>(`/api/sessions/${conversationId}/messages`, {
         method: "POST",
         body: JSON.stringify(body),

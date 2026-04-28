@@ -349,7 +349,7 @@ export function createSessionSandbox(
         // Snapshot filesystem changes for audit/undo
         snapshot: policy.snapshot,
         snapshotPaths: [sessionWorkDir],
-        snapshotExclude: ["node_modules", ".git"],
+        snapshotExclude: ["node_modules", ".git", ".upload-tmp"],
         // Environment: configured by policy, plus NODE_PATH so require() resolves
         // from the sandbox deps directory inside sandboxed node processes
         allowEnv: policy.allowEnv ?? ["PATH", "HOME", "USER", "SHELL", "TERM", "LANG", "NODE_ENV"],
@@ -361,6 +361,50 @@ export function createSessionSandbox(
     });
 
     return sandbox;
+}
+
+/**
+ * Create a sandbox specifically for user-initiated file management operations
+ * (upload, delete) on a conversation's workspace.
+ *
+ * Unlike the agent's sandbox (which applies the agent's read/write/network
+ * restrictions), this sandbox always has full read and write access to the
+ * session workspace. The user's file operations should never be blocked by
+ * the agent's security policy — only the agent is restricted.
+ *
+ * However, snapshots ARE included (when enabled in settings) so that user
+ * file changes are recorded in the same audit trail as agent operations.
+ * The snapshotExclude list includes .upload-tmp so that temporary upload
+ * staging files don't pollute the snapshot diffs.
+ *
+ * Returns null if sandboxing is disabled in settings.
+ */
+export function createFileManagementSandbox(
+    conversationId: string,
+    conversationSettings?: ConversationSettings | null
+): Sandbox | null {
+    const policy = loadSandboxPolicyFromDb(conversationSettings);
+
+    // If policy is null, sandboxing is disabled
+    if (policy === null) return null;
+
+    const sessionWorkDir = resolve(SESSIONS_DIR, conversationId, "workspace");
+    mkdirSync(sessionWorkDir, { recursive: true });
+
+    return Sandbox.create({
+        cwd: sessionWorkDir,
+        // Full read/write access to the workspace — user file ops are never restricted
+        allowRead: [sessionWorkDir],
+        allowWrite: [sessionWorkDir],
+        // No network needed for file management
+        allowNet: false,
+        // Snapshot filesystem changes for audit/undo (same as agent sandbox)
+        snapshot: policy.snapshot,
+        snapshotPaths: [sessionWorkDir],
+        snapshotExclude: ["node_modules", ".git", ".upload-tmp"],
+        // Minimal env
+        allowEnv: ["PATH", "HOME", "USER", "SHELL", "TERM", "LANG"],
+    });
 }
 
 /**

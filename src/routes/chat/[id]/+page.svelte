@@ -110,13 +110,8 @@
     let selectedModelId = $state(""); // Just the model ID — provider is resolved automatically
     let thinkingOpen = $state<Record<string, boolean>>({}); // item id -> whether thinking is expanded
 
-    // DAG history sidebar state
-    let dagOpen = $state(false);
-
-    // Security panel state
-    let securityOpen = $state(false);
-    // Agent info panel state
-    let agentInfoOpen = $state(false);
+    // Shared side panel state: only one panel can be open at a time
+    let sidePanel = $state<"security" | "history" | "agent" | null>(null);
     // Search results panel state
     let searchResultsOpen = $state(false);
     let searchResultsQuery = $state("");
@@ -543,14 +538,14 @@
                 // Add uploaded files to the sandbox files list
                 sandboxFiles = [...sandboxFiles, ...uploadedNames];
 
-                // Build the full content for the API: user text + all invisible status updates
+                // Build the status content (invisible to the user, sent to the AI as context)
+                // and the user's visible text content separately
                 const statusText = statusUpdates.join("\n\n");
-                const parts = [text, statusText].filter(Boolean);
-                const apiContent = parts.join("\n\n");
 
                 // Clear progress and send to the AI
+                // The user sees just their text; the AI gets status as invisible context
                 uploadProgress = null;
-                chat.sendToApi(apiContent, selectedModelId || undefined);
+                chat.sendToApi(text, selectedModelId || undefined, statusText || undefined);
             } catch (err) {
                 console.error("[chat] File upload failed:", err);
                 chat.setError(err instanceof Error ? err.message : "File upload failed");
@@ -560,12 +555,10 @@
             // No files to upload
             if (statusUpdates.length > 0) {
                 // There are invisible status updates — push a local message with just
-                // the user's text, then send the full content (with status appended) to the API
+                // the user's text, then send with status content separately to the API
                 chat.addLocalUserMessage(text || "📎 Updated sandbox files");
                 const statusText = statusUpdates.join("\n\n");
-                const parts = [text, statusText].filter(Boolean);
-                const apiContent = parts.join("\n\n");
-                chat.sendToApi(apiContent, selectedModelId || undefined);
+                chat.sendToApi(text, selectedModelId || undefined, statusText || undefined);
             } else {
                 // Normal send — no invisible status
                 send(text, selectedModelId || undefined);
@@ -631,8 +624,10 @@
     }
 
     async function toggleDag() {
-        dagOpen = !dagOpen;
-        if (dagOpen) {
+        if (sidePanel === "history") {
+            sidePanel = null;
+        } else {
+            sidePanel = "history";
             await loadDagData();
         }
     }
@@ -666,7 +661,7 @@
 
     // Refresh DAG data when the chat navigation state changes (e.g., after delete/edit/regenerate)
     $effect(() => {
-        if (dagOpen && !chat.navigating) {
+        if (sidePanel === "history" && !chat.navigating) {
             loadDagData();
         }
     });
@@ -759,8 +754,10 @@
                             {#snippet child({ props })}
                                 <button
                                     {...props}
-                                    onclick={() => (securityOpen = !securityOpen)}
-                                    class="inline-flex items-center gap-1 text-[11px] {securityOpen
+                                    onclick={() =>
+                                        (sidePanel = sidePanel === "security" ? null : "security")}
+                                    class="inline-flex items-center gap-1 text-[11px] {sidePanel ===
+                                    'security'
                                         ? 'text-foreground bg-muted'
                                         : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
                                     aria-label="Toggle security panel"
@@ -780,10 +777,11 @@
                                 <button
                                     {...props}
                                     onclick={toggleDag}
-                                    class="inline-flex items-center gap-1 text-[11px] {dagOpen
+                                    class="inline-flex items-center gap-1 text-[11px] {sidePanel ===
+                                    'history'
                                         ? 'text-foreground bg-muted'
                                         : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
-                                    aria-label={dagOpen
+                                    aria-label={sidePanel === "history"
                                         ? "Close history view"
                                         : "Open history view"}
                                 >
@@ -801,8 +799,10 @@
                             {#snippet child({ props })}
                                 <button
                                     {...props}
-                                    onclick={() => (agentInfoOpen = !agentInfoOpen)}
-                                    class="inline-flex items-center gap-1 text-[11px] {agentInfoOpen
+                                    onclick={() =>
+                                        (sidePanel = sidePanel === "agent" ? null : "agent")}
+                                    class="inline-flex items-center gap-1 text-[11px] {sidePanel ===
+                                    'agent'
                                         ? 'text-foreground bg-muted'
                                         : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
                                     aria-label="Toggle agent info panel"
@@ -994,25 +994,21 @@
             </div>
         </div>
 
-        <!-- Right side panels -->
-        {#if securityOpen && id}
+        <!-- Right side panel (only one panel visible at a time) -->
+        {#if sidePanel && id}
             <div class="w-80 border-l bg-background flex flex-col shrink-0">
-                <ConversationSecurityPanel conversationId={id} />
-            </div>
-        {/if}
-        {#if agentInfoOpen && id}
-            <div class="w-96 border-l bg-background flex flex-col shrink-0">
-                <AgentInfoPanel conversationId={id} />
-            </div>
-        {/if}
-        {#if dagOpen}
-            <div class="w-72 border-l bg-background flex flex-col shrink-0">
-                <MessageDag
-                    nodes={dagNodes}
-                    leafId={dagLeafId}
-                    onnavigateto={handleDagNavigate}
-                    navigating={chat.navigating}
-                />
+                {#if sidePanel === "security"}
+                    <ConversationSecurityPanel conversationId={id} />
+                {:else if sidePanel === "history"}
+                    <MessageDag
+                        nodes={dagNodes}
+                        leafId={dagLeafId}
+                        onnavigateto={handleDagNavigate}
+                        navigating={chat.navigating}
+                    />
+                {:else if sidePanel === "agent"}
+                    <AgentInfoPanel conversationId={id} />
+                {/if}
             </div>
         {/if}
         {#if searchResultsOpen}

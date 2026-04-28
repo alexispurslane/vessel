@@ -167,13 +167,14 @@ export function getChat() {
          * The AI response will come through the SSE stream.
          * Use this after addLocalUserMessage() when you've already pushed the
          * message locally (e.g. to show it before file uploads finish).
+         * statusContent is invisible context sent to the AI but not shown in the UI.
          */
-        async sendToApi(content: string, modelId?: string): Promise<void> {
+        async sendToApi(content: string, modelId?: string, statusContent?: string): Promise<void> {
             if (!currentConversationId) return;
             error = null;
             generating = true;
             try {
-                await apiSend(currentConversationId, content, modelId);
+                await apiSend(currentConversationId, content, modelId, statusContent);
             } catch (e) {
                 error = e instanceof Error ? e.message : "Failed to send message";
                 generating = false;
@@ -904,7 +905,7 @@ export function disconnectStream(): void {
  * Send a user message and add it to the local message list.
  * The actual response comes through the SSE stream.
  */
-export async function send(content: string, modelId?: string): Promise<void> {
+export async function send(content: string, modelId?: string, statusContent?: string): Promise<void> {
     if (!currentConversationId) return;
 
     // Add user message to the local list
@@ -919,7 +920,7 @@ export async function send(content: string, modelId?: string): Promise<void> {
     generating = true;
 
     try {
-        await apiSend(currentConversationId, content, modelId);
+        await apiSend(currentConversationId, content, modelId, statusContent);
     } catch (e) {
         error = e instanceof Error ? e.message : "Failed to send message";
         generating = false;
