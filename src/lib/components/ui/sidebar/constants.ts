@@ -4,3 +4,9 @@ export const SIDEBAR_WIDTH = "16rem";
 export const SIDEBAR_WIDTH_MOBILE = "18rem";
 export const SIDEBAR_WIDTH_ICON = "3rem";
 export const SIDEBAR_KEYBOARD_SHORTCUT = "b";
+
+// Resizable sidebar constants (in pixels)
+export const SIDEBAR_WIDTH_DEFAULT_PX = 256;
+export const SIDEBAR_WIDTH_MIN_PX = 180;
+export const SIDEBAR_WIDTH_MAX_PX = 480;
+export const SIDEBAR_WIDTH_STORAGE_KEY = "sidebar:width";

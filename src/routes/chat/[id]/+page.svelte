@@ -66,6 +66,40 @@
     import FetchedPagePanel from "$lib/components/chat/fetched-page-panel.svelte";
     import type { SearchResultItem } from "$lib/types.js";
 
+    // --- Per-conversation persistence helpers ---
+    const PANEL_STATE_PREFIX = "chat-panel-state:";
+
+    type PanelState = {
+        sidePanel: "security" | "history" | "agent" | null;
+    };
+
+    function panelStateKey(conversationId: string) {
+        return `${PANEL_STATE_PREFIX}${conversationId}`;
+    }
+
+    function loadPanelState(conversationId: string): PanelState {
+        try {
+            const raw = localStorage.getItem(panelStateKey(conversationId));
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                return {
+                    sidePanel: parsed.sidePanel ?? null,
+                };
+            }
+        } catch {
+            // localStorage may be unavailable
+        }
+        return { sidePanel: null };
+    }
+
+    function savePanelState(conversationId: string, state: PanelState) {
+        try {
+            localStorage.setItem(panelStateKey(conversationId), JSON.stringify(state));
+        } catch {
+            // localStorage may be unavailable
+        }
+    }
+
     let id = $derived($page.params.id!);
     const chat = getChat();
     const conversations = getConversations();
@@ -116,6 +150,7 @@
     let thinkingOpen = $state<Record<string, boolean>>({}); // item id -> whether thinking is expanded
 
     // Shared side panel state: only one panel can be open at a time
+    // Initialized from localStorage per conversation (see effect below)
     let sidePanel = $state<"security" | "history" | "agent" | null>(null);
     // Search results panel state
     let searchResultsOpen = $state(false);
@@ -671,6 +706,31 @@
         }
     });
 
+    // --- Per-conversation panel state persistence ---
+    // Restore panel state when navigating to a conversation
+    $effect(() => {
+        const currentId = id;
+        if (currentId) {
+            const saved = loadPanelState(currentId);
+            sidePanel = saved.sidePanel;
+            // If restoring the history panel, load DAG data
+            if (saved.sidePanel === "history") {
+                loadDagData();
+            }
+        }
+    });
+
+    // Save panel state whenever sidePanel changes.
+    // Uses untrack(id) so this only fires on panel changes, not on navigation.
+    $effect(() => {
+        const sp = sidePanel;
+        untrack(() => {
+            if (id) {
+                savePanelState(id, { sidePanel: sp });
+            }
+        });
+    });
+
     /** ESC pressed anywhere on the page cancels in-progress AI inference */
     function handleGlobalKeydown(e: KeyboardEvent) {
         if (e.key === "Escape" && chat.generating) {
@@ -826,7 +886,11 @@
 
     <!-- Content area below the top bar -->
     <div class="flex-1 min-w-0 overflow-hidden">
-        <ResizablePaneGroup direction="horizontal" class="h-full">
+        <ResizablePaneGroup
+            direction="horizontal"
+            class="h-full"
+            autoSaveId={id ? `chat-panes-${id}` : undefined}
+        >
             <!-- Main chat area -->
             <ResizablePane defaultSize={sidePanel ? 75 : 100} minSize={50}>
                 <div class="h-full flex flex-col overflow-hidden max-w-[100ch] mx-auto">

@@ -1,6 +1,12 @@
 import { IsMobile } from "$lib/hooks/is-mobile.svelte.js";
 import { getContext, setContext } from "svelte";
-import { SIDEBAR_KEYBOARD_SHORTCUT } from "./constants.js";
+import {
+    SIDEBAR_KEYBOARD_SHORTCUT,
+    SIDEBAR_WIDTH_DEFAULT_PX,
+    SIDEBAR_WIDTH_MIN_PX,
+    SIDEBAR_WIDTH_MAX_PX,
+    SIDEBAR_WIDTH_STORAGE_KEY,
+} from "./constants.js";
 
 type Getter<T> = () => T;
 
@@ -20,6 +26,26 @@ export type SidebarStateProps = {
     setOpen: (open: boolean) => void;
 };
 
+function loadSavedWidth(): number {
+    if (typeof window === "undefined") return SIDEBAR_WIDTH_DEFAULT_PX;
+    try {
+        const saved = localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
+        if (saved) {
+            const parsed = parseInt(saved, 10);
+            if (
+                !isNaN(parsed) &&
+                parsed >= SIDEBAR_WIDTH_MIN_PX &&
+                parsed <= SIDEBAR_WIDTH_MAX_PX
+            ) {
+                return parsed;
+            }
+        }
+    } catch {
+        // localStorage may be unavailable
+    }
+    return SIDEBAR_WIDTH_DEFAULT_PX;
+}
+
 class SidebarState {
     readonly props: SidebarStateProps;
     open = $derived.by(() => this.props.open());
@@ -27,6 +53,31 @@ class SidebarState {
     setOpen: SidebarStateProps["setOpen"];
     #isMobile: IsMobile;
     state = $derived.by(() => (this.open ? "expanded" : "collapsed"));
+
+    // Resizable sidebar width (in pixels)
+    #width = $state<number>(loadSavedWidth());
+    #resizing = $state(false);
+
+    get width(): number {
+        return this.#width;
+    }
+
+    get resizing(): boolean {
+        return this.#resizing;
+    }
+
+    setWidth(value: number) {
+        this.#width = Math.max(SIDEBAR_WIDTH_MIN_PX, Math.min(SIDEBAR_WIDTH_MAX_PX, value));
+        try {
+            localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(this.#width));
+        } catch {
+            // localStorage may be unavailable
+        }
+    }
+
+    setResizing(value: boolean) {
+        this.#resizing = value;
+    }
 
     constructor(props: SidebarStateProps) {
         this.setOpen = props.setOpen;
