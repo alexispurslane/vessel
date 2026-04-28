@@ -101,6 +101,9 @@
         if (title.length <= 50) return title;
         return title.slice(0, 50) + "…";
     }
+
+    // Determine the latest turn so we can dim sources from earlier turns
+    const maxTurn = $derived(Math.max(...sources.map((s) => s.turn ?? 0)));
 </script>
 
 <details class="group rounded-lg border bg-background text-sm w-full overflow-hidden" open>
@@ -119,10 +122,13 @@
     </summary>
     <div class="border-t px-3 py-2 flex flex-col gap-1.5">
         {#each sources as source, i}
+            {@const isPreviousTurn = (source.turn ?? 0) < maxTurn}
             {#if source.type === "page"}
                 {@const og = getOg(i)}
                 <button
-                    class="flex items-center gap-2 text-xs hover:bg-muted/50 rounded-md px-2 py-1.5 transition-colors group/link min-w-0 overflow-hidden w-full text-left cursor-pointer"
+                    class="flex items-center gap-2 text-xs hover:bg-muted/50 rounded-md px-2 py-1.5 transition-colors group/link min-w-0 overflow-hidden w-full text-left cursor-pointer {isPreviousTurn
+                        ? 'opacity-40'
+                        : ''}"
                     onclick={() =>
                         onpageclick?.(source.url, og?.title || source.title, source.content)}
                 >
@@ -147,7 +153,9 @@
                 </button>
             {:else if source.type === "search"}
                 <button
-                    class="flex items-center gap-2 text-xs hover:bg-muted/50 rounded-md px-2 py-1.5 transition-colors group/search min-w-0 overflow-hidden w-full text-left cursor-pointer"
+                    class="flex items-center gap-2 text-xs hover:bg-muted/50 rounded-md px-2 py-1.5 transition-colors group/search min-w-0 overflow-hidden w-full text-left cursor-pointer {isPreviousTurn
+                        ? 'opacity-40'
+                        : ''}"
                     onclick={() => onsearchclick?.(source.query, source.results)}
                 >
                     <Search class="size-4 shrink-0 text-muted-foreground" />

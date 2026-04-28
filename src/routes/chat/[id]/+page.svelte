@@ -882,6 +882,9 @@
                     onclose={() => {
                         searchResultsOpen = false;
                     }}
+                    onresultclick={(url, title, content) => {
+                        handlePageClick(url, title, content);
+                    }}
                 />
             </div>
         {/if}

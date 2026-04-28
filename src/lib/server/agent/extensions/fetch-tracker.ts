@@ -51,6 +51,7 @@ function hasVisibleText(message: TurnEndEvent["message"]): boolean {
 
 export const fetchTracker: ExtensionFactory = (pi) => {
     let sources: FetchedSource[] = [];
+    let currentTurn = 0;
 
     pi.on("tool_result", (event) => {
         if (event.isError) return;
@@ -70,6 +71,7 @@ export const fetchTracker: ExtensionFactory = (pi) => {
                     contentLength: details.contentLength ?? 0,
                     truncated: details.truncated ?? false,
                     content: details.content ?? "",
+                    turn: currentTurn,
                 });
             }
         } else if (event.toolName === "web_search") {
@@ -87,6 +89,7 @@ export const fetchTracker: ExtensionFactory = (pi) => {
                         text: r.text,
                         publishedDate: r.publishedDate,
                     })),
+                    turn: currentTurn,
                 });
             }
         }
@@ -114,6 +117,7 @@ export const fetchTracker: ExtensionFactory = (pi) => {
         console.log("[fetch-tracker] turn_end, hasVisibleText:", visible, "accumulated sources:", sources.length);
         if (!visible) return;
         flush();
+        currentTurn++;
     });
 
     pi.on("agent_end", flush);

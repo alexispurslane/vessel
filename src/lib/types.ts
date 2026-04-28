@@ -165,8 +165,8 @@ export interface SearchResultItem {
 
 /** A source the agent consulted during a turn (fetched page or web search) */
 export type FetchedSource =
-    | { type: "page"; url: string; title: string; contentLength: number; truncated: boolean; content: string }
-    | { type: "search"; query: string; resultCount: number; results: SearchResultItem[] };
+    | { type: "page"; url: string; title: string; contentLength: number; truncated: boolean; content: string; turn: number }
+    | { type: "search"; query: string; resultCount: number; results: SearchResultItem[]; turn: number };
 
 /** A chat message in the UI */
 export interface ChatMessage {

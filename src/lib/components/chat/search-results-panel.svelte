@@ -13,9 +13,10 @@
         query: string;
         results: SearchResultItem[];
         onclose: () => void;
+        onresultclick?: (url: string, title: string, content: string) => void;
     }
 
-    let { query, results, onclose }: Props = $props();
+    let { query, results, onclose, onresultclick }: Props = $props();
 
     /** Theme override for side-panel content — compact "peripheral interface info" style */
     const searchResultTheme: DeepPartialTheme = {
@@ -53,20 +54,6 @@
             base: "my-2 w-full overflow-hidden rounded-lg border border-border flex flex-col max-w-full text-[0.8rem]",
         },
     };
-
-    let expandedResults = $state<number[]>([]);
-
-    function isExpanded(i: number): boolean {
-        return expandedResults.includes(i);
-    }
-
-    function toggleExpand(i: number) {
-        if (isExpanded(i)) {
-            expandedResults = expandedResults.filter((x) => x !== i);
-        } else {
-            expandedResults = [...expandedResults, i];
-        }
-    }
 
     function extractDomain(url: string): string {
         try {
@@ -116,14 +103,13 @@
     <div class="flex-1 overflow-y-auto">
         {#each results as result, i}
             <div class="border-b last:border-b-0">
-                <div class="flex flex-col gap-1 px-3 py-2.5 hover:bg-muted/30 transition-colors">
+                <button
+                    class="flex flex-col gap-1 px-3 py-2.5 hover:bg-muted/30 transition-colors w-full text-left cursor-pointer"
+                    onclick={() =>
+                        onresultclick?.(result.url, result.title || "Untitled", result.text || "")}
+                >
                     <!-- Title row -->
-                    <a
-                        href={result.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="flex items-start gap-1.5 group/result"
-                    >
+                    <div class="flex items-start gap-1.5 group/result">
                         <ExternalLink
                             class="size-3.5 shrink-0 mt-0.5 text-blue-500 dark:text-blue-400 group-hover/result:text-blue-600 dark:group-hover/result:text-blue-300 transition-colors"
                         />
@@ -132,7 +118,7 @@
                         >
                             {result.title || "Untitled"}
                         </span>
-                    </a>
+                    </div>
 
                     <!-- URL -->
                     <span class="text-xs text-muted-foreground truncate">
@@ -149,7 +135,7 @@
 
                     <!-- Text excerpt -->
                     {#if result.text}
-                        <div class="text-muted-foreground {isExpanded(i) ? '' : 'line-clamp-3'}">
+                        <div class="text-muted-foreground line-clamp-3">
                             <Streamdown
                                 content={result.text}
                                 baseTheme="shadcn"
@@ -158,14 +144,13 @@
                                 components={{ math: MathComponent, mermaid: MermaidComponent }}
                             />
                         </div>
-                        <button
-                            class="text-xs text-muted-foreground hover:text-foreground transition-colors self-start cursor-pointer"
-                            onclick={() => toggleExpand(i)}
+                        <span
+                            class="text-xs text-muted-foreground hover:text-foreground transition-colors self-start"
                         >
-                            {isExpanded(i) ? "Show less" : "Show more"}
-                        </button>
+                            See more
+                        </span>
                     {/if}
-                </div>
+                </button>
             </div>
         {/each}
 

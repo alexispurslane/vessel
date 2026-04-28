@@ -1417,12 +1417,31 @@ function buildHistoryFromSession(
     let lastModelProvider: string | null = null;
     let lastModelId: string | null = null;
 
+    // Accumulated fetched sources — once sources enter the LLM context, they
+    // remain there for all subsequent assistant messages, so each one gets the
+    // full cumulative list appended to it.
+    let lastAssistantMsgIndex = -1;
+    let accumulatedSources: FetchedSource[] = [];
+
     for (const entry of branchEntries) {
         // Track model changes
         if (entry.type === "model_change") {
             const modelEntry = entry as unknown as { provider: string; modelId: string };
             lastModelProvider = modelEntry.provider ?? null;
             lastModelId = modelEntry.modelId ?? null;
+            continue;
+        }
+
+        // Accumulate fetched_sources custom entries — they stay in context forever
+        if (entry.type === "custom" && (entry as any).customType === "fetched_sources") {
+            const sources = (entry as any).data as FetchedSource[] | undefined;
+            if (sources && sources.length > 0) {
+                accumulatedSources = [...accumulatedSources, ...sources];
+                // Retroactively attach to the assistant message that just produced them
+                if (lastAssistantMsgIndex >= 0) {
+                    messages[lastAssistantMsgIndex].fetchedSources = [...accumulatedSources];
+                }
+            }
             continue;
         }
 
@@ -1533,6 +1552,16 @@ function buildHistoryFromSession(
             timestamp: (msg.timestamp as number) ?? 0,
         });
 
+        // Track the last assistant message index for attaching fetched_sources.
+        // Also attach any accumulated sources — once sources are in the LLM context,
+        // they remain there for every subsequent assistant message.
+        if (role === "assistant") {
+            lastAssistantMsgIndex = msgIndex;
+            if (accumulatedSources.length > 0) {
+                messages[msgIndex].fetchedSources = [...accumulatedSources];
+            }
+        }
+
         // Register tool calls for later matching with tool result messages
         if (extractedToolCalls.length > 0) {
             extractedToolCalls.forEach((tc, tcIdx) => {
@@ -1553,34 +1582,6 @@ function buildHistoryFromSession(
             : row.model_provider && row.model_id
                 ? { provider: row.model_provider, modelId: row.model_id }
                 : null;
-
-    // Reconstruct fetchedSources from CustomEntry records written by the source-tracker
-    // extension. Each CustomEntry with customType "fetched_sources" holds an array of
-    // FetchedSource objects. We attach the accumulated sources to the last assistant
-    // message, matching the streaming behavior where sources are shown on the
-    // assistant response that produced them.
-    let lastAssistantMsgIndex = -1;
-    for (let i = messages.length - 1; i >= 0; i--) {
-        if (messages[i].role === "assistant") {
-            lastAssistantMsgIndex = i;
-            break;
-        }
-    }
-
-    if (lastAssistantMsgIndex >= 0) {
-        const fetchedSources: FetchedSource[] = [];
-        for (const entry of branchEntries) {
-            if (entry.type === "custom" && (entry as any).customType === "fetched_sources") {
-                const sources = (entry as any).data as FetchedSource[] | undefined;
-                if (sources) {
-                    fetchedSources.push(...sources);
-                }
-            }
-        }
-        if (fetchedSources.length > 0) {
-            (messages[lastAssistantMsgIndex] as any).fetchedSources = fetchedSources;
-        }
-    }
 
     return { messages, model };
 }

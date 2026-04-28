@@ -653,14 +653,26 @@ export async function connectStream(
     });
 
     // When the source tracker extension flushes fetched sources, attach them to
-    // the currently streaming assistant message so the UI can show "Sources".
+    // the assistant message that produced them. The fetched_sources event fires at
+    // turn_end, which may arrive AFTER message_end has already cleared the streaming
+    // message ID — so we fall back to finding the last assistant message in the list.
     es.addEventListener("fetched_sources", (e: MessageEvent) => {
         if (isStale()) return;
         try {
             const data = JSON.parse(e.data);
             const sources = data?.sources as FetchedSource[] | undefined;
             if (!sources || sources.length === 0) return;
-            const msg = getStreamingMsg();
+            // Try the streaming message first (sources flushed before message_end)
+            let msg = getStreamingMsg();
+            if (!msg || msg.role !== "assistant") {
+                // Fallback: find the last assistant message (sources flushed after message_end)
+                for (let i = messages.length - 1; i >= 0; i--) {
+                    if (messages[i].role === "assistant") {
+                        msg = messages[i];
+                        break;
+                    }
+                }
+            }
             if (msg && msg.role === "assistant") {
                 // Accumulate sources across multiple flushes within one turn
                 msg.fetchedSources = [...(msg.fetchedSources ?? []), ...sources];
