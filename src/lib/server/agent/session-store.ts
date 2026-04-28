@@ -1960,6 +1960,37 @@ export async function getSessionTree(conversationId: string): Promise<{
         }
     }
 
+    // Repair parent IDs: since we filtered out non-message nodes, some visible nodes'
+    // parentIds point to hidden entries (model_change, compaction, etc.). Walk up
+    // through the full entry tree to find the closest visible ancestor.
+    const visibleById = new Set(nodes.map((n) => n.id));
+    const fullEntryById = new Map(allEntries.map((e) => [e.id, e]));
+
+    for (let i = 0; i < nodes.length; i++) {
+        const rawParentId = nodes[i].parentId;
+        if (rawParentId === null) continue;
+        // If the parent is visible, no repair needed
+        if (visibleById.has(rawParentId)) continue;
+        // Walk up through hidden entries until we find a visible ancestor (or nothing)
+        let ancestorId: string | null = rawParentId;
+        let repaired: string | null = null;
+        while (ancestorId) {
+            if (visibleById.has(ancestorId)) {
+                repaired = ancestorId;
+                break;
+            }
+            const ancestor = fullEntryById.get(ancestorId);
+            ancestorId = ancestor?.parentId ?? null;
+        }
+        nodes[i].parentId = repaired;
+
+        // Also repair the corresponding relation if it exists
+        const rel = relations.find((r) => r.childId === nodes[i].id);
+        if (rel) {
+            rel.parentId = repaired ?? "";
+        }
+    }
+
     return { nodes, relations, leafId };
 }
 
