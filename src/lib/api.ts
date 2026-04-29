@@ -221,6 +221,23 @@ export async function listWorkspaceFiles(conversationId: string): Promise<Worksp
 }
 
 /**
+ * Download a file from the agent's sandbox workspace.
+ * Triggers a browser download of the file at the given path.
+ * @param conversationId - The conversation/session ID
+ * @param path - File path relative to the workspace root
+ */
+export function downloadWorkspaceFile(conversationId: string, path: string): void {
+    const url = `/api/sessions/${conversationId}/workspace/download?path=${encodeURIComponent(path)}`;
+    // Use an invisible <a> to trigger the download without navigating away
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = ""; // Let the server's Content-Disposition header set the filename
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}
+
+/**
  * Delete a file from the agent's sandbox workspace.
  * @param path - File path relative to the workspace root
  */

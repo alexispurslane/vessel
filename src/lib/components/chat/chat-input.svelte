@@ -62,6 +62,8 @@
         pendingFiles?: PendingFile[];
         /** Names of files already uploaded to the sandbox (read-only display) */
         sandboxFiles?: string[];
+        /** Callback when user clicks a sandbox file to download it */
+        ondownloadsandboxfile?: (path: string) => void;
         /** Callback when user removes an uploaded sandbox file */
         onremovesandboxfile?: (path: string) => void;
         /** Whether there are pending invisible status updates to send (enables send with empty text) */
@@ -83,6 +85,7 @@
         defaultModelId = "",
         pendingFiles = $bindable<PendingFile[]>([]),
         sandboxFiles = [],
+        ondownloadsandboxfile,
         onremovesandboxfile,
         hasPendingStatus = false,
         onsend,
@@ -315,13 +318,26 @@
             <!-- Sandbox files: already uploaded, subdued style -->
             {#each sandboxFiles as filename (filename)}
                 <div
-                    class="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground bg-muted/50 max-w-50"
+                    class="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground bg-muted/50 max-w-50 hover:bg-muted/70 cursor-pointer transition-colors"
+                    role="button"
+                    tabindex="0"
+                    onclick={() => ondownloadsandboxfile?.(filename)}
+                    onkeydown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            ondownloadsandboxfile?.(filename);
+                        }
+                    }}
+                    aria-label="Download {filename} from sandbox"
                 >
                     <Check class="size-3 shrink-0 text-green-600" />
                     <span class="truncate">{filename}</span>
                     <button
                         class="shrink-0 rounded-sm hover:bg-muted-foreground/20 p-0.5"
-                        onclick={() => onremovesandboxfile?.(filename)}
+                        onclick={(e) => {
+                            e.stopPropagation();
+                            onremovesandboxfile?.(filename);
+                        }}
                         aria-label="Remove {filename} from sandbox"
                     >
                         <X class="size-3" />

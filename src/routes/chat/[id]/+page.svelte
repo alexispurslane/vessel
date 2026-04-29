@@ -29,6 +29,8 @@
         updateConversationSettings,
         uploadFile,
         deleteWorkspaceFile,
+        downloadWorkspaceFile,
+        listWorkspaceFiles,
     } from "$lib/api.js";
     import type {
         ChatMessage as ChatMessageType,
@@ -49,7 +51,6 @@
     import FileText from "@lucide/svelte/icons/file-text";
     import { onMount, untrack } from "svelte";
     import { fade } from "svelte/transition";
-    import { goto } from "$app/navigation";
     import { ContextUsageRing } from "$lib/components/ui/context-usage-ring";
     import ArrowUp from "@lucide/svelte/icons/arrow-up";
     import ArrowDown from "@lucide/svelte/icons/arrow-down";
@@ -130,6 +131,23 @@
     let pendingFiles = $state<{ file: File; id: string }[]>([]);
     /** Names of files already uploaded to the sandbox (persists across messages) */
     let sandboxFiles = $state<string[]>([]);
+
+    /** Re-fetch sandbox files after every agent turn completes. */
+    let wasGenerating = $state(false);
+    $effect(() => {
+        const isGenerating = chat.generating;
+        // Only fetch when transitioning from generating → not generating
+        if (wasGenerating && !isGenerating && id) {
+            listWorkspaceFiles(id)
+                .then((result) => {
+                    sandboxFiles = result.files;
+                })
+                .catch(() => {
+                    // Non-critical — the file list just won't update
+                });
+        }
+        wasGenerating = isGenerating;
+    });
     /**
      * Status updates to be invisibly appended to the user's next message.
      * These are sent to the AI but never shown in the UI bubble.
@@ -490,7 +508,11 @@
                         send(initialMessage, modelId);
                         // Clear the draft and the URL params to avoid re-sending on refresh/reconnect
                         sessionStorage.removeItem(draftKey(currentId));
-                        goto(`/chat/${currentId}`, { replaceState: true });
+                        // Use replaceState instead of goto to avoid triggering a SvelteKit
+                        // navigation that would re-run the $effect, clear messages, and
+                        // cause the just-pushed user message to disappear until reloadMessages()
+                        // runs at agent_end.
+                        window.history.replaceState({}, "", `/chat/${currentId}`);
                     }
                 });
             });
@@ -627,6 +649,11 @@
             console.error("[chat] Failed to delete sandbox file:", err);
             chat.setError(err instanceof Error ? err.message : "Failed to delete file");
         }
+    }
+
+    function handleDownloadSandboxFile(path: string) {
+        if (!id) return;
+        downloadWorkspaceFile(id, path);
     }
 
     // Look up a model's display name from the available models list.
@@ -1059,6 +1086,7 @@
                             onsend={handleSend}
                             onabort={handleAbort}
                             onremovesandboxfile={handleRemoveSandboxFile}
+                            ondownloadsandboxfile={handleDownloadSandboxFile}
                             hasPendingStatus={pendingStatusUpdates.length > 0}
                         />
                         <!-- Connection status / error -->
