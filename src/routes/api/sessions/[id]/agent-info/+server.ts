@@ -1,7 +1,7 @@
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types.js";
 import {
-    getOrCreateSession,
+    getOrCreateConversation,
     getSessionAgentInfo,
     updateSessionSystemPrompt,
 } from "$lib/server/agent/session-store.js";
@@ -18,7 +18,7 @@ export const GET: RequestHandler = async ({ params }) => {
 
     try {
         // Ensure the session is loaded in memory so we can read from it
-        await getOrCreateSession(conversationId);
+        await getOrCreateConversation(conversationId);
 
         const info = await getSessionAgentInfo(conversationId);
         if (!info) {
@@ -81,7 +81,7 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
         }
 
         // Ensure session is loaded
-        await getOrCreateSession(conversationId);
+        await getOrCreateConversation(conversationId);
 
         const updated = updateSessionSystemPrompt(conversationId, options);
         if (!updated) {

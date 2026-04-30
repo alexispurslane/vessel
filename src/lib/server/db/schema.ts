@@ -14,14 +14,12 @@ CREATE TABLE IF NOT EXISTS auth (
   password_hash TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS web_sessions (
-  token TEXT PRIMARY KEY,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
 CREATE TABLE IF NOT EXISTS providers (
   provider TEXT PRIMARY KEY,
-  encrypted_key TEXT NOT NULL,
+  -- API keys are stored unencrypted. Security relies on filesystem-level
+  -- protection of the SQLite DB file. This is acceptable for a single-user
+  -- self-hosted application, but the DB file must not be exposed publicly.
+  api_key TEXT NOT NULL,
   base_url TEXT,
   display_name TEXT,
   models_endpoint TEXT
@@ -77,6 +75,13 @@ CREATE TABLE IF NOT EXISTS conversation_settings (
  * Each is wrapped in a try/catch since the column may already exist.
  */
 export function runMigrations(db: DatabaseType): void {
+    // Drop deprecated web_sessions table (auth now uses JWTs, not DB-stored tokens)
+    try {
+        db.exec("DROP TABLE IF EXISTS web_sessions");
+    } catch {
+        // Table doesn't exist — ignore
+    }
+
     // Column additions
     const columnMigrations = [
         "ALTER TABLE providers ADD COLUMN display_name TEXT",
@@ -89,6 +94,14 @@ export function runMigrations(db: DatabaseType): void {
         } catch {
             // Column already exists — ignore
         }
+    }
+
+    // Rename encrypted_key → api_key (the column was misleadingly named;
+    // keys have never been encrypted, just stored as-is).
+    try {
+        db.exec("ALTER TABLE providers RENAME COLUMN encrypted_key TO api_key");
+    } catch {
+        // Column already renamed — ignore
     }
 
     // Migrate custom_models to enforce unique model IDs (id as sole primary key).

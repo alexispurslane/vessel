@@ -1,26 +1,12 @@
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types.js";
-import {
-    deleteSession,
-    clearSessionCookie,
-    validateSession,
-    SESSION_COOKIE_NAME,
-} from "$lib/server/auth/index.js";
-import { parse } from "cookie";
+import { clearSessionCookie } from "$lib/server/auth/index.js";
 
 /**
  * POST /api/auth/logout
- * Clear session cookie and delete session from DB.
+ * Clear session cookie.
  */
-export const POST: RequestHandler = async ({ request }) => {
-    const cookieHeader = request.headers.get("cookie");
-    const cookies = cookieHeader ? parse(cookieHeader) : {};
-    const token = cookies[SESSION_COOKIE_NAME];
-
-    if (token) {
-        deleteSession(token);
-    }
-
+export const POST: RequestHandler = async () => {
     return json(
         { success: true },
         {

@@ -12,11 +12,11 @@ export const GET: RequestHandler = async () => {
     const rows = db
         .prepare("SELECT provider, base_url, display_name, models_endpoint FROM providers")
         .all() as {
-        provider: string;
-        base_url: string | null;
-        display_name: string | null;
-        models_endpoint: string | null;
-    }[];
+            provider: string;
+            base_url: string | null;
+            display_name: string | null;
+            models_endpoint: string | null;
+        }[];
 
     return json(
         rows.map((row) => ({
@@ -49,10 +49,10 @@ export const PUT: RequestHandler = async ({ request }) => {
     }
 
     db.prepare(
-        `INSERT INTO providers (provider, encrypted_key, base_url, display_name, models_endpoint)
+        `INSERT INTO providers (provider, api_key, base_url, display_name, models_endpoint)
      VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(provider) DO UPDATE SET
-       encrypted_key = excluded.encrypted_key,
+       api_key = excluded.api_key,
        base_url = excluded.base_url,
        display_name = excluded.display_name,
        models_endpoint = excluded.models_endpoint`

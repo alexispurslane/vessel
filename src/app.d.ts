@@ -5,6 +5,7 @@ declare global {
         // interface Error {}
         interface Locals {
             authenticated: boolean;
+            username?: string;
         }
         // interface PageData {}
         // interface PageState {}
@@ -12,4 +13,4 @@ declare global {
     }
 }
 
-export {};
+export { };

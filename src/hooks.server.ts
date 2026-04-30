@@ -1,5 +1,5 @@
 import type { Handle } from "@sveltejs/kit";
-import { validateSession, SESSION_COOKIE_NAME, sessionCookie } from "$lib/server/auth/index.js";
+import { validateSessionToken, SESSION_COOKIE_NAME, sessionCookie } from "$lib/server/auth/index.js";
 import { parse } from "cookie";
 
 // Legacy cookie name from before the TalkAI → Vessel rename.
@@ -19,10 +19,16 @@ export const handle: Handle = async ({ event, resolve }) => {
     }
 
     let authenticated = false;
-    if (token && validateSession(token)) {
-        authenticated = true;
+    let username: string | undefined;
+    if (token) {
+        const payload = await validateSessionToken(token);
+        if (payload) {
+            authenticated = true;
+            username = payload.username;
+        }
     }
     event.locals.authenticated = authenticated;
+    event.locals.username = username;
 
     const url = event.url;
 
@@ -69,7 +75,7 @@ export const handle: Handle = async ({ event, resolve }) => {
         response.headers.append("set-cookie", sessionCookie(token));
         response.headers.append(
             "set-cookie",
-            `${LEGACY_SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`
+            `${LEGACY_SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=0`
         );
     }
 

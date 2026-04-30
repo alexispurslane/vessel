@@ -1,4 +1,4 @@
-import { userExists, getUsername } from "$lib/server/auth/index.js";
+import { userExists } from "$lib/server/auth/index.js";
 
 /**
  * Server-side auth check — runs during SSR so the layout can render
@@ -13,7 +13,7 @@ export const load = async ({ locals }: { locals: App.Locals }) => {
         auth: {
             setup: userExists(),
             authenticated: !!locals.authenticated,
-            username: locals.authenticated ? getUsername() : undefined,
+            username: locals.username,
         },
     };
 };

@@ -1,6 +1,7 @@
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types.js";
 import { getSessionWorkDir, createFileManagementSandbox } from "$lib/server/agent/sandbox-factory.js";
+import { sanitizeAndResolvePath } from "$lib/server/fs-security.js";
 import { existsSync, readdirSync, statSync, unlinkSync, rmdirSync } from "fs";
 import { resolve, relative, dirname } from "path";
 
@@ -83,13 +84,15 @@ export const DELETE: RequestHandler = async ({ params, request }) => {
         return json({ error: "path is required and must be a string" }, { status: 400 });
     }
 
-    const resolvedWorkDir = resolve(workDir);
-    const filePath = resolve(workDir, relativePath);
-
-    // Security: ensure the resolved path is within the workspace
-    if (!filePath.startsWith(resolvedWorkDir)) {
+    // Resolve and validate the path stays within the workspace
+    let filePath: string;
+    try {
+        filePath = sanitizeAndResolvePath(workDir, relativePath);
+    } catch {
         return json({ error: "Invalid file path" }, { status: 400 });
     }
+
+    const resolvedWorkDir = resolve(workDir);
 
     if (!existsSync(filePath)) {
         return json({ error: "File not found" }, { status: 404 });

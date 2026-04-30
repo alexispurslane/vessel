@@ -1,9 +1,30 @@
 import bcrypt from "bcrypt";
 import { randomBytes } from "crypto";
+import * as jose from "jose";
 import { getDb } from "../db/index.js";
 
 const SALT_ROUNDS = 12;
-const SESSION_TOKEN_BYTES = 32;
+
+// --- JWT secret management ---
+
+let jwtSecret: Uint8Array | undefined;
+
+function getJwtSecret(): Uint8Array {
+    if (jwtSecret) return jwtSecret;
+    const envSecret = process.env.JWT_SECRET;
+    if (envSecret) {
+        jwtSecret = new TextEncoder().encode(envSecret);
+    } else {
+        // Generate a random secret on first use if not configured.
+        // This means tokens are invalid after a server restart,
+        // which is acceptable for a single-user app.
+        console.warn(
+            "[auth] JWT_SECRET not set — using random secret. Tokens will not survive server restarts."
+        );
+        jwtSecret = randomBytes(32);
+    }
+    return jwtSecret;
+}
 
 // --- User management ---
 
@@ -48,26 +69,31 @@ export function verifyUser(username: string, password: string): boolean {
     return bcrypt.compareSync(password, row.password_hash);
 }
 
-// --- Session token management ---
+// --- JWT session token management ---
 
-export function createSession(): string {
-    const db = getDb();
-    const token = randomBytes(SESSION_TOKEN_BYTES).toString("hex");
-    db.prepare("INSERT INTO web_sessions (token) VALUES (?)").run(token);
-    return token;
+export async function createSessionToken(username: string): Promise<string> {
+    const secret = getJwtSecret();
+    const jwt = await new jose.SignJWT({ username })
+        .setProtectedHeader({ alg: "HS256" })
+        .setSubject(username)
+        .setIssuedAt()
+        .setExpirationTime("30d")
+        .sign(secret);
+    return jwt;
 }
 
-export function validateSession(token: string): boolean {
-    const db = getDb();
-    const row = db.prepare("SELECT token FROM web_sessions WHERE token = ?").get(token) as
-        | { token: string }
-        | undefined;
-    return !!row;
-}
-
-export function deleteSession(token: string): void {
-    const db = getDb();
-    db.prepare("DELETE FROM web_sessions WHERE token = ?").run(token);
+export async function validateSessionToken(token: string): Promise<{ username: string } | null> {
+    try {
+        const secret = getJwtSecret();
+        const { payload } = await jose.jwtVerify(token, secret);
+        if (typeof payload.sub === "string") {
+            return { username: payload.sub };
+        }
+        return null;
+    } catch {
+        // Token is invalid, expired, or malformed
+        return null;
+    }
 }
 
 // --- Cookie helpers ---
@@ -76,9 +102,9 @@ export const SESSION_COOKIE_NAME = "vessel_session";
 const SESSION_COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
 export function sessionCookie(token: string): string {
-    return `${SESSION_COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_COOKIE_MAX_AGE}`;
+    return `${SESSION_COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=${SESSION_COOKIE_MAX_AGE}`;
 }
 
 export function clearSessionCookie(): string {
-    return `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`;
+    return `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=0`;
 }

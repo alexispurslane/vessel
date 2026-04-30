@@ -1,7 +1,7 @@
 import type { RequestHandler } from "./$types.js";
 import {
-    getOrCreateSession,
-    subscribe,
+    getOrCreateConversation,
+    subscribeToConversation,
 } from "$lib/server/agent/session-store.js";
 import type { ChatSSEEvent } from "$lib/server/agent/types.js";
 import { randomUUID } from "crypto";
@@ -16,7 +16,7 @@ export const GET: RequestHandler = async ({ params, request, url }) => {
     const conversationId = params.id;
 
     // Ensure the AgentSession is loaded (hydrates from .jsonl if needed)
-    await getOrCreateSession(conversationId);
+    await getOrCreateConversation(conversationId);
 
     const subscriberId = randomUUID();
 
@@ -51,7 +51,7 @@ export const GET: RequestHandler = async ({ params, request, url }) => {
             console.log(`[stream] Sent 'connected' event to client`);
 
             // Subscribe to agent events (may send stream_recovery if a message is in-flight)
-            const unsubscribe = subscribe(conversationId, subscriberId, send);
+            const unsubscribe = subscribeToConversation(conversationId, subscriberId, send);
             console.log(`[stream] Subscribed ${subscriberId} to ${conversationId}`);
 
             // Clean up on disconnect

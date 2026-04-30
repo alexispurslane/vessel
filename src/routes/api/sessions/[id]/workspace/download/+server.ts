@@ -1,6 +1,7 @@
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types.js";
 import { getSessionWorkDir } from "$lib/server/agent/sandbox-factory.js";
+import { sanitizeAndResolvePath } from "$lib/server/fs-security.js";
 import { existsSync, statSync, createReadStream } from "fs";
 import { resolve, basename, extname } from "path";
 
@@ -61,11 +62,11 @@ export const GET: RequestHandler = async ({ params, url }) => {
         return json({ error: "path query parameter is required" }, { status: 400 });
     }
 
-    const resolvedWorkDir = resolve(workDir);
-    const filePath = resolve(workDir, relativePath);
-
-    // Security: ensure the resolved path is within the workspace
-    if (!filePath.startsWith(resolvedWorkDir)) {
+    // Resolve and validate the path stays within the workspace
+    let filePath: string;
+    try {
+        filePath = sanitizeAndResolvePath(workDir, relativePath);
+    } catch {
         return json({ error: "Invalid file path" }, { status: 400 });
     }
 
@@ -84,6 +85,11 @@ export const GET: RequestHandler = async ({ params, url }) => {
 
     // Stream the file directly from disk
     const fileStream = createReadStream(filePath);
+
+    // Use RFC 5987 to encode the filename, avoiding header injection
+    // from double-quote characters in filenames. The filename* parameter
+    // with UTF-8 encoding is supported by all modern browsers.
+    const encodedFileName = encodeURIComponent(fileName);
 
     return new Response(
         new ReadableStream({
@@ -107,7 +113,7 @@ export const GET: RequestHandler = async ({ params, url }) => {
             status: 200,
             headers: {
                 "Content-Type": mimeType,
-                "Content-Disposition": `attachment; filename="${fileName}"`,
+                "Content-Disposition": `attachment; filename="${encodedFileName}"; filename*=UTF-8''${encodedFileName}`,
             },
         }
     );

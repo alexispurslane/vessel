@@ -1,7 +1,8 @@
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types.js";
 import { getSessionWorkDir, createFileManagementSandbox } from "$lib/server/agent/sandbox-factory.js";
-import { getOrCreateSession } from "$lib/server/agent/session-store.js";
+import { getOrCreateConversation } from "$lib/server/agent/session-store.js";
+import { sanitizeFilename, sanitizeAndResolvePath } from "$lib/server/fs-security.js";
 import { mkdirSync, createWriteStream, unlinkSync } from "fs";
 import { resolve, dirname, join } from "path";
 
@@ -25,7 +26,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 
     // Verify the conversation/session exists
     try {
-        await getOrCreateSession(conversationId);
+        await getOrCreateConversation(conversationId);
     } catch {
         return json({ error: "Conversation not found" }, { status: 404 });
     }
@@ -35,15 +36,30 @@ export const POST: RequestHandler = async ({ params, request }) => {
         return json({ error: "No workspace directory for this conversation" }, { status: 500 });
     }
 
-    const filename = request.headers.get("x-filename");
-    if (!filename) {
+    const rawFilename = request.headers.get("x-filename");
+    if (!rawFilename) {
         return json({ error: "X-Filename header is required" }, { status: 400 });
     }
 
-    const filePath = resolve(workDir, filename);
+    // Sanitize the filename: strip directory components, reject traversal
+    let filename: string;
+    try {
+        filename = sanitizeFilename(rawFilename);
+    } catch {
+        return json({ error: "Invalid filename" }, { status: 400 });
+    }
+
+    // Resolve and validate the full path stays within the workspace
+    let filePath: string;
+    try {
+        filePath = sanitizeAndResolvePath(workDir, filename);
+    } catch {
+        return json({ error: "Invalid file path" }, { status: 400 });
+    }
+
     const dir = dirname(filePath);
 
-    // Security: ensure the resolved path is still within the workspace
+    // Defense-in-depth: re-verify the resolved path is still within the workspace
     if (!filePath.startsWith(resolve(workDir))) {
         return json({ error: "Invalid file path" }, { status: 400 });
     }

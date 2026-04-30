@@ -2,12 +2,10 @@ import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types.js";
 import {
     verifyUser,
-    createSession,
+    createSessionToken,
     sessionCookie,
     userExists,
-    SESSION_COOKIE_NAME,
 } from "$lib/server/auth/index.js";
-import { parse } from "cookie";
 
 /**
  * POST /api/auth/login
@@ -29,7 +27,7 @@ export const POST: RequestHandler = async ({ request }) => {
         return json({ error: "Invalid credentials" }, { status: 401 });
     }
 
-    const token = createSession();
+    const token = await createSessionToken(username);
 
     return json(
         { success: true },

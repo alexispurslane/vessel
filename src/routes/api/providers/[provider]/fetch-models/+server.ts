@@ -16,14 +16,14 @@ export const GET: RequestHandler = async ({ params }) => {
     const db = getDb();
     const row = db
         .prepare(
-            "SELECT encrypted_key, base_url, models_endpoint FROM providers WHERE provider = ?"
+            "SELECT api_key, base_url, models_endpoint FROM providers WHERE provider = ?"
         )
         .get(params.provider) as
         | {
-              encrypted_key: string;
-              base_url: string | null;
-              models_endpoint: string | null;
-          }
+            api_key: string;
+            base_url: string | null;
+            models_endpoint: string | null;
+        }
         | undefined;
 
     if (!row) {
@@ -37,7 +37,7 @@ export const GET: RequestHandler = async ({ params }) => {
     try {
         const res = await fetch(row.models_endpoint, {
             headers: {
-                Authorization: `Bearer ${row.encrypted_key}`,
+                Authorization: `Bearer ${row.api_key}`,
                 "Content-Type": "application/json",
             },
         });

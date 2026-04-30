@@ -18,7 +18,8 @@ import {
     type ToolCall,
 } from "@mariozechner/pi-ai";
 import { getDb, getAllTags, upsertTags } from "../db/index.js";
-import { findModelById, getModelRegistry, getSessionHistory } from "./session-store.js";
+import { findModelById, getModelRegistry } from "./model-registry.js";
+import { getSessionHistory } from "./session-store.js";
 
 // --- Types ---
 

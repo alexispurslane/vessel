@@ -56,6 +56,7 @@
         "defuddle": "^0.18.1",
         "happy-dom": "^20.9.0",
         "impit": "^0.13.1",
+        "jose": "^6.2.3",
         "pi-mcp-adapter": "^2.4.0",
         "svelte-streamdown": "^3.0.1",
         "zerobox": "^0.2.6"
