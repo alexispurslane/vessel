@@ -178,9 +178,11 @@ export function stripThinkingTagsFromText(text: string): string {
  */
 export function populateFromHistory(s: ChatState, history: MessageHistory, conversationId: string): void {
     const chatMessages = messageHistoryToChatMessages(history);
+    console.log(`[chat-lifecycle] populateFromHistory: convId=${conversationId}, incoming=${chatMessages.length}, existing=${s.messages.length}`);
     for (const msg of chatMessages) {
         s.messages.push(msg);
     }
+    console.log(`[chat-lifecycle] populateFromHistory: done, messages.length=${s.messages.length}`);
     // Set the last model used from the history
     if (history.model) {
         s.lastModel = history.model;
@@ -225,6 +227,7 @@ export async function reloadMessages(s: ChatState): Promise<void> {
 
     try {
         const history = await getMessageHistory(s.currentConversationId);
+        console.log(`[chat-lifecycle] reloadMessages: convId=${s.currentConversationId}, serverMsgCount=${history.messages.length}, localMsgCount=${s.messages.length}`);
         // Rebuild messages array from server state
         s.messages = history.messages.map((msg) => ({
             id: msg.id,
@@ -460,6 +463,7 @@ export function handleStreamRecovery(s: ChatState, e: MessageEvent): void {
                 fetchedSources: undefined,
                 streaming: true,
             });
+            console.log(`[chat-lifecycle] handleStreamRecovery: pushed assistant msg id=${id}, messages.length=${s.messages.length}, contentLen=${text.length}, thinkingLen=${thinking?.length ?? 0}`);
         }
     } catch {
         // ignore parse errors
@@ -524,7 +528,7 @@ export function handleMessageStart(s: ChatState, e: MessageEvent): void {
     s.generating = true;
     const id = `assistant-${Date.now()}`;
     setStreamingMessageId(s, id, "message_start assistant");
-    console.log(`[chat] message_start: created streaming message id=${id}`);
+    console.log(`[chat-lifecycle] handleMessageStart: BEFORE push assistant msg id=${id}, messages.length=${s.messages.length}, generating=${s.generating}, connected=${s.connected}, streamingMessageId=${s.streamingMessageId}`);
     s.messages.push({
         id,
         role: "assistant",
@@ -534,6 +538,7 @@ export function handleMessageStart(s: ChatState, e: MessageEvent): void {
         fetchedSources: undefined,
         streaming: true,
     });
+    console.log(`[chat-lifecycle] handleMessageStart: AFTER push assistant msg id=${id}, messages.length=${s.messages.length}, msg.streaming=${s.messages[s.messages.length - 1]?.streaming}`);
 
     // message_start data includes { type: "message_start", message: AgentMessage }
     // The partial message might already have content, thinking, or model info
@@ -573,12 +578,19 @@ export function handleMessageStart(s: ChatState, e: MessageEvent): void {
 export function handleMessageUpdate(s: ChatState, e: MessageEvent): void {
     const msg = getStreamingMsg(s);
     if (!msg) {
-        console.log(`[chat] SSE 'message_update': DROPPED (no streaming message found), lastEventId=${e.lastEventId}`);
+        console.log(`[chat-lifecycle] handleMessageUpdate: DROPPED (no streaming message found), streamingMessageId=${s.streamingMessageId}, messages.length=${s.messages.length}, lastEventId=${e.lastEventId}`);
         return;
     }
 
     try {
         const data = JSON.parse(e.data);
+
+        // Log first content arrival and every 50th delta for streaming diagnostics
+        if (data?.type === "text_delta" && data.delta) {
+            if (!msg.content || msg.content.length < 10) {
+                console.log(`[chat-lifecycle] handleMessageUpdate: first text_delta for msg id=${msg.id}, contentLen=${msg.content.length}, deltaLen=${data.delta.length}`);
+            }
+        }
 
         // pi's AssistantMessageEvent format:
         // { type: "text_delta", delta: "chunk", contentIndex: 0, partial: ... }
@@ -654,7 +666,7 @@ export function handleMessageUpdate(s: ChatState, e: MessageEvent): void {
 
 /** Handle the 'message_end' SSE event. */
 export function handleMessageEnd(s: ChatState, e: MessageEvent): void {
-    console.log(`[chat] SSE 'message_end': lastEventId=${e.lastEventId}`);
+    console.log(`[chat-lifecycle] handleMessageEnd: lastEventId=${e.lastEventId}, streamingMessageId=${s.streamingMessageId}, messages.length=${s.messages.length}`);
     // Recovery is no longer relevant — the message is finalized
     s.recoveryTurnGeneration = null;
 
@@ -724,7 +736,7 @@ export function handleMessageEnd(s: ChatState, e: MessageEvent): void {
 
 /** Handle the 'tool_execution_start' SSE event. */
 export function handleToolExecutionStart(s: ChatState, e: MessageEvent): void {
-    console.log(`[chat] SSE 'tool_execution_start': lastEventId=${e.lastEventId}, streamingMessageId=${s.streamingMessageId}`);
+    console.log(`[chat-lifecycle] handleToolExecutionStart: streamingMessageId=${s.streamingMessageId}, messages.length=${s.messages.length}`);
     // Tool execution can happen outside of a streaming message (e.g., after message_end)
     // Create a new assistant message if we don't have one
     if (!s.streamingMessageId) {
@@ -739,6 +751,7 @@ export function handleToolExecutionStart(s: ChatState, e: MessageEvent): void {
             fetchedSources: undefined,
             streaming: true,
         });
+        console.log(`[chat-lifecycle] handleToolExecutionStart: pushed new assistant msg id=${id}, messages.length=${s.messages.length}`);
     }
 
     const msg = getStreamingMsg(s);

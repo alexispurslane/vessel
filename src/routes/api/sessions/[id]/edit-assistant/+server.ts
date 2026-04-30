@@ -1,6 +1,12 @@
 import { json } from "@sveltejs/kit";
-import type { RequestHandler } from "./$types.js";
+import { z } from "zod";
+import { apiHandler } from "$lib/server/api-errors.js";
 import { editAssistantMessage } from "$lib/server/agent/session-store.js";
+
+const PostBody = z.object({
+    targetEntryId: z.string().min(1),
+    newContent: z.string(),
+});
 
 /**
  * POST /api/sessions/[id]/edit-assistant
@@ -16,25 +22,8 @@ import { editAssistantMessage } from "$lib/server/agent/session-store.js";
  * Response:
  *   { cancelled: boolean }
  */
-export const POST: RequestHandler = async ({ params, request }) => {
-    const conversationId = params.id;
-    const body = await request.json();
-    const { targetEntryId, newContent } = body;
-
-    if (!targetEntryId || typeof targetEntryId !== "string") {
-        return json({ error: "targetEntryId is required and must be a string" }, { status: 400 });
-    }
-
-    if (typeof newContent !== "string") {
-        return json({ error: "newContent is required and must be a string" }, { status: 400 });
-    }
-
-    try {
-        const result = await editAssistantMessage(conversationId, targetEntryId, newContent);
-        return json(result);
-    } catch (e) {
-        console.error(`Failed to edit assistant message in session ${conversationId}:`, e);
-        const message = e instanceof Error ? e.message : "Failed to edit assistant message";
-        return json({ error: message }, { status: 500 });
-    }
-};
+export const POST = apiHandler(PostBody, async ({ body, event }) => {
+    const id = event.params.id!;
+    const result = await editAssistantMessage(id, body.targetEntryId, body.newContent);
+    return json(result);
+});

@@ -246,15 +246,12 @@ export function createSearchTool(options?: SearchToolOptions): AgentTool<typeof 
                         // Ignore body read errors
                     }
                     const errorDetail = errorBody ? `: ${errorBody.slice(0, 500)}` : "";
-                    return {
-                        content: [
-                            {
-                                type: "text",
-                                text: `Search API returned ${response.status} ${statusText}${errorDetail}`,
-                            },
-                        ],
-                        details: { query, resultCount: 0, results: [] },
-                    };
+                    // Throwing causes the agent loop to mark the tool call as isError,
+                    // which is the correct semantic for a semantically failed search
+                    // (mirrors the fetch tool's behavior for HTTP 400+).
+                    throw new Error(
+                        `Search API returned ${response.status} ${statusText}${errorDetail}`
+                    );
                 }
 
                 const data: unknown = await response.json();

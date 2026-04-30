@@ -19,6 +19,7 @@
 import { mkdirSync, rmSync, existsSync } from "fs";
 import { resolve } from "path";
 import { randomUUID } from "crypto";
+import { log } from "$lib/server/logger.js";
 import {
     createAgentSession,
     createEventBus,
@@ -143,7 +144,7 @@ function scheduleDispose(conversationId: string): void {
         s.unsubscribe();
         s.agentSession.dispose();
         sessions.delete(conversationId);
-        console.log(`Disposed session ${conversationId} (idle timeout)`);
+        log.info("session-store", `Disposed session ${conversationId} (idle timeout)`);
     }, SESSION_DISPOSE_TIMEOUT_MS);
 }
 
@@ -153,6 +154,29 @@ function cancelDispose(conversationId: string): void {
         clearTimeout(session.disposeTimer);
         session.disposeTimer = undefined;
     }
+}
+
+/**
+ * Immediately dispose a session if it has no subscribers and is not streaming.
+ * Called from the broadcast function after agent_end events, so sessions
+ * that just finished generating don't leak when the user already navigated away.
+ */
+function disposeIfIdle(conversationId: string): void {
+    const session = sessions.get(conversationId);
+    if (!session) return;
+    if (session.subscribers.size > 0) return;
+    if (session.agentSession.isStreaming) return;
+
+    // Clear any pending disposal timer
+    if (session.disposeTimer) {
+        clearTimeout(session.disposeTimer);
+        session.disposeTimer = undefined;
+    }
+
+    session.unsubscribe();
+    session.agentSession.dispose();
+    sessions.delete(conversationId);
+    log.info("session-store", `Disposed session ${conversationId} (agent_end with no subscribers)`);
 }
 
 // --- Public API (central coordinator functions) ---
@@ -233,9 +257,9 @@ export async function destroyConversation(conversationId: string): Promise<void>
     if (row?.session_file_path && existsSync(row.session_file_path)) {
         try {
             rmSync(row.session_file_path);
-            console.log(`Deleted pi session file: ${row.session_file_path}`);
+            log.info("session-store", `Deleted pi session file: ${row.session_file_path}`);
         } catch (err) {
-            console.error(`Failed to delete pi session file ${row.session_file_path}:`, err);
+            log.error("session-store", `Failed to delete pi session file ${row.session_file_path}`, err);
         }
     }
 
@@ -245,9 +269,9 @@ export async function destroyConversation(conversationId: string): Promise<void>
         if (existsSync(workspaceDir)) {
             try {
                 rmSync(workspaceDir, { recursive: true });
-                console.log(`Deleted workspace directory: ${workspaceDir}`);
+                log.info("session-store", `Deleted workspace directory: ${workspaceDir}`);
             } catch (err) {
-                console.error(`Failed to delete workspace directory ${workspaceDir}:`, err);
+                log.error("session-store", `Failed to delete workspace directory ${workspaceDir}`, err);
             }
         }
 
@@ -256,18 +280,18 @@ export async function destroyConversation(conversationId: string): Promise<void>
         if (existsSync(sessionDir)) {
             try {
                 rmSync(sessionDir, { recursive: true });
-                console.log(`Deleted session directory: ${sessionDir}`);
+                log.info("session-store", `Deleted session directory: ${sessionDir}`);
             } catch (err) {
-                console.error(`Failed to delete session directory ${sessionDir}:`, err);
+                log.error("session-store", `Failed to delete session directory ${sessionDir}`, err);
             }
         }
     } else {
-        console.log(`Keeping workspace for conversation ${conversationId} (deleteWorkspaceWithConversation = false)`);
+        log.info("session-store", `Keeping workspace for conversation ${conversationId} (deleteWorkspaceWithConversation = false)`);
     }
 
     // 4. Delete the DB rows (conversation_settings is ON DELETE CASCADE)
     db.prepare("DELETE FROM conversations WHERE id = ?").run(conversationId);
-    console.log(`Destroyed conversation ${conversationId} (explicit user delete)`);
+    log.info("session-store", `Destroyed conversation ${conversationId} (explicit user delete)`);
 }
 
 /**
@@ -350,7 +374,7 @@ export async function getOrCreateConversation(conversationId: string): Promise<P
     // Create per-session zerobox sandbox for tool execution isolation.
     // Returns null if sandboxing is disabled in settings.
     // Per-conversation settings override global sandbox config.
-    const sandbox = createSessionSandbox(conversationId, conversationSettings);
+    const sandbox = await createSessionSandbox(conversationId, conversationSettings);
 
     // Determine the effective CWD for the agent session.
     // When sandboxing is enabled, the agent operates inside a sandbox workspace,
@@ -554,7 +578,8 @@ export async function getOrCreateConversation(conversationId: string): Promise<P
         if (globalRow?.value) {
             try {
                 rawAppend = JSON.parse(globalRow.value);
-            } catch {
+            } catch (e) {
+                log.debug("session-store", "Failed to parse global append system prompt setting", e);
                 rawAppend = null;
             }
         }
@@ -601,7 +626,7 @@ export async function getOrCreateConversation(conversationId: string): Promise<P
             (sseEvent.data as Record<string, unknown>).turnGeneration = session.turnGeneration;
         }
 
-        broadcast(sessions, scheduleDispose, conversationId, sseEvent);
+        broadcast(sessions, scheduleDispose, disposeIfIdle, conversationId, sseEvent);
     });
 
     // Subscribe to the shared EventBus for extension-originated events that
@@ -610,8 +635,8 @@ export async function getOrCreateConversation(conversationId: string): Promise<P
     // "fetched_sources" via pi.events, and we broadcast it as a custom SSE event.
     const unsubscribeEventBus = eventBus.on("fetched_sources", (data) => {
         const sources = data as FetchedSource[];
-        console.log("[fetch-tracker] EventBus received fetched_sources:", sources.length, "sources for conversation", conversationId);
-        broadcast(sessions, scheduleDispose, conversationId, {
+        log.debug("fetch-tracker", `EventBus received fetched_sources: ${sources.length} sources for conversation ${conversationId}`);
+        broadcast(sessions, scheduleDispose, disposeIfIdle, conversationId, {
             event: "fetched_sources",
             data: { sources },
         });
@@ -781,7 +806,7 @@ export function disposeSession(conversationId: string, options?: { force?: boole
     session.unsubscribe();
     session.agentSession.dispose();
     sessions.delete(conversationId);
-    console.log(`Disposed in-memory session ${conversationId} (idle timeout or browser session end)`);
+    log.info("session-store", `Disposed in-memory session ${conversationId} (idle timeout or browser session end)`);
 }
 
 /**
@@ -809,7 +834,7 @@ export function restartSession(conversationId: string): boolean {
     session.unsubscribe();
     session.agentSession.dispose();
     sessions.delete(conversationId);
-    console.log(`Restarted session ${conversationId} (conversation settings changed)`);
+    log.info("session-store", `Restarted session ${conversationId} (conversation settings changed)`);
     return true;
 }
 
@@ -896,7 +921,7 @@ export function restartAllSessions(): number {
     }
 
     if (restarted > 0) {
-        console.log(`Restarted ${restarted} session(s) — they will be re-created on next access`);
+        log.info("session-store", `Restarted ${restarted} session(s) — they will be re-created on next access`);
     }
     return restarted;
 }

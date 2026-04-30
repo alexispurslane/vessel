@@ -1,6 +1,6 @@
 import { json } from "@sveltejs/kit";
-import type { RequestHandler } from "./$types.js";
 import { getDb } from "$lib/server/db/index.js";
+import { badRequest, notFound, apiError, tryApi } from "$lib/server/api-errors.js";
 
 /**
  * GET /api/providers/[provider]/fetch-models
@@ -12,7 +12,7 @@ import { getDb } from "$lib/server/db/index.js";
  * Expects the provider's models endpoint to return the OpenAI-compatible format:
  * { data: [{ id: "model-name", object: "model", ... }, ...] }
  */
-export const GET: RequestHandler = async ({ params }) => {
+export const GET = tryApi(async ({ params }) => {
     const db = getDb();
     const row = db
         .prepare(
@@ -27,11 +27,11 @@ export const GET: RequestHandler = async ({ params }) => {
         | undefined;
 
     if (!row) {
-        return json({ error: "Provider not found" }, { status: 404 });
+        return notFound("Provider not found");
     }
 
     if (!row.models_endpoint) {
-        return json({ error: "No models endpoint configured for this provider" }, { status: 400 });
+        return badRequest("No models endpoint configured for this provider");
     }
 
     try {
@@ -44,10 +44,7 @@ export const GET: RequestHandler = async ({ params }) => {
 
         if (!res.ok) {
             const text = await res.text().catch(() => "Unknown error");
-            return json(
-                { error: `Models endpoint returned ${res.status}: ${text}` },
-                { status: 502 }
-            );
+            return apiError(`Models endpoint returned ${res.status}: ${text}`, 502);
         }
 
         const data = await res.json();
@@ -75,6 +72,6 @@ export const GET: RequestHandler = async ({ params }) => {
         return json({ models });
     } catch (e) {
         const message = e instanceof Error ? e.message : "Failed to fetch models";
-        return json({ error: message }, { status: 502 });
+        return apiError(message, 502);
     }
-};
+});

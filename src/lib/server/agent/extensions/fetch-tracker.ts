@@ -24,6 +24,7 @@ import type { ExtensionFactory, TurnEndEvent } from "@mariozechner/pi-coding-age
 import type { FetchToolDetails } from "../sandboxed-fetch-tool.js";
 import type { SearchToolDetails } from "../sandboxed-search-tool.js";
 import type { FetchedSource } from "$lib/types.js";
+import { log } from "$lib/server/logger.js";
 
 export type { FetchedSource };
 
@@ -63,7 +64,7 @@ export const fetchTracker: ExtensionFactory = (pi) => {
             if (details?.wasSearchResult) return;
 
             if (details?.url) {
-                console.log("[fetch-tracker] recorded fetch:", details.url);
+                log.debug("fetch-tracker", "Recorded fetch", details.url);
                 sources.push({
                     type: "page",
                     url: details.url,
@@ -78,7 +79,7 @@ export const fetchTracker: ExtensionFactory = (pi) => {
             const details = event.details as SearchToolDetails | undefined;
 
             if (details?.query) {
-                console.log("[fetch-tracker] recorded search:", details.query);
+                log.debug("fetch-tracker", "Recorded search", details.query);
                 sources.push({
                     type: "search",
                     query: details.query,
@@ -98,7 +99,7 @@ export const fetchTracker: ExtensionFactory = (pi) => {
     const flush = () => {
         if (sources.length === 0) return;
 
-        console.log("[fetch-tracker] flushing", sources.length, "sources");
+        log.debug("fetch-tracker", `Flushing ${sources.length} sources`);
 
         // Persist in session file as a CustomEntry — NOT sent to LLM context.
         pi.appendEntry("fetched_sources", sources);
@@ -114,7 +115,7 @@ export const fetchTracker: ExtensionFactory = (pi) => {
         // Intermediate turns (tool call + thinking only) should keep
         // accumulating sources until the final response or agent_end.
         const visible = hasVisibleText(event.message);
-        console.log("[fetch-tracker] turn_end, hasVisibleText:", visible, "accumulated sources:", sources.length);
+        log.debug("fetch-tracker", `turn_end, hasVisibleText: ${visible}, accumulated sources: ${sources.length}`);
         if (!visible) return;
         flush();
         currentTurn++;

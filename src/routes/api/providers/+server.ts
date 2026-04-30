@@ -1,13 +1,26 @@
 import { json } from "@sveltejs/kit";
-import type { RequestHandler } from "./$types.js";
+import { z } from "zod";
 import { getDb } from "$lib/server/db/index.js";
 import { refreshModelsJson } from "$lib/server/agent/session-store.js";
+import { apiHandler, tryApi } from "$lib/server/api-errors.js";
+
+const PutBody = z.object({
+    provider: z.string().min(1),
+    key: z.string().min(1),
+    base_url: z.string().optional(),
+    display_name: z.string().optional(),
+    models_endpoint: z.string().optional(),
+});
+
+const DeleteBody = z.object({
+    provider: z.string().min(1),
+});
 
 /**
  * GET /api/providers
  * List all configured providers (keys are masked).
  */
-export const GET: RequestHandler = async () => {
+export const GET = tryApi(async () => {
     const db = getDb();
     const rows = db
         .prepare("SELECT provider, base_url, display_name, models_endpoint FROM providers")
@@ -27,27 +40,14 @@ export const GET: RequestHandler = async () => {
             hasKey: true,
         }))
     );
-};
+});
 
 /**
  * PUT /api/providers
  * Add or update a provider's API key, optional base URL, display name, and models endpoint.
  */
-export const PUT: RequestHandler = async ({ request }) => {
+export const PUT = apiHandler(PutBody, async ({ body }) => {
     const db = getDb();
-    const body = await request.json();
-    const { provider, key, base_url, display_name, models_endpoint } = body as {
-        provider: string;
-        key: string;
-        base_url?: string;
-        display_name?: string;
-        models_endpoint?: string;
-    };
-
-    if (!provider || !key) {
-        return json({ error: "provider and key are required" }, { status: 400 });
-    }
-
     db.prepare(
         `INSERT INTO providers (provider, api_key, base_url, display_name, models_endpoint)
      VALUES (?, ?, ?, ?, ?)
@@ -56,29 +56,22 @@ export const PUT: RequestHandler = async ({ request }) => {
        base_url = excluded.base_url,
        display_name = excluded.display_name,
        models_endpoint = excluded.models_endpoint`
-    ).run(provider, key, base_url ?? null, display_name ?? null, models_endpoint ?? null);
+    ).run(body.provider, body.key, body.base_url ?? null, body.display_name ?? null, body.models_endpoint ?? null);
 
     // Regenerate models.json so pi picks up base_url changes
     refreshModelsJson();
 
     return json({ success: true });
-};
+});
 
 /**
  * DELETE /api/providers
  * Remove a provider's configuration.
  */
-export const DELETE: RequestHandler = async ({ request }) => {
+export const DELETE = apiHandler(DeleteBody, async ({ body }) => {
     const db = getDb();
-    const body = await request.json();
-    const { provider } = body as { provider: string };
-
-    if (!provider) {
-        return json({ error: "provider is required" }, { status: 400 });
-    }
-
-    db.prepare("DELETE FROM providers WHERE provider = ?").run(provider);
+    db.prepare("DELETE FROM providers WHERE provider = ?").run(body.provider);
     refreshModelsJson();
 
     return json({ success: true });
-};
+});

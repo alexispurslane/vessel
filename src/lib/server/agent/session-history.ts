@@ -8,7 +8,7 @@
 
 import type { AgentSession as PiAgentSession } from "@mariozechner/pi-coding-agent";
 import type { ActiveSession } from "./types.js";
-import type { FetchedSource } from "./extensions/fetch-tracker.js";
+import type { FetchedSource, HistoryMessage, HistoryResult } from "$lib/types.js";
 
 // --- Types ---
 
@@ -52,61 +52,12 @@ export interface SessionTreeRelation {
 export function buildHistoryFromSession(
     activeSession: ActiveSession,
     row: { session_file_path: string; model_provider: string | null; model_id: string | null }
-): {
-    messages: Array<{
-        id: string;
-        role: string;
-        content: string;
-        thinking?: string;
-        model?: string;
-        modelProvider?: string;
-        toolCalls?: Array<{
-            toolName: string;
-            status: string;
-            output?: string;
-            arguments?: Record<string, unknown>;
-        }>;
-        isError?: boolean;
-        usage?: {
-            input: number;
-            output: number;
-            cacheRead: number;
-            cacheWrite: number;
-            totalTokens: number;
-        };
-        timestamp: number;
-        fetchedSources?: FetchedSource[];
-    }>;
-    model: { provider: string; modelId: string } | null;
-} {
+): HistoryResult {
     const sessionManager = activeSession.agentSession.sessionManager;
     // getBranch() returns entries from root to current leaf
     const branchEntries = sessionManager.getBranch();
 
-    const messages: Array<{
-        id: string;
-        role: string;
-        content: string;
-        thinking?: string;
-        model?: string;
-        modelProvider?: string;
-        toolCalls?: Array<{
-            toolName: string;
-            status: string;
-            output?: string;
-            arguments?: Record<string, unknown>;
-        }>;
-        isError?: boolean;
-        usage?: {
-            input: number;
-            output: number;
-            cacheRead: number;
-            cacheWrite: number;
-            totalTokens: number;
-        };
-        timestamp: number;
-        fetchedSources?: FetchedSource[];
-    }> = [];
+    const messages: HistoryMessage[] = [];
 
     // Track tool call IDs to match results from tool-role messages
     const pendingToolCalls: Map<

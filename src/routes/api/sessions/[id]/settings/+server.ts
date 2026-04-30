@@ -1,5 +1,6 @@
 import { json } from "@sveltejs/kit";
-import type { RequestHandler } from "./$types.js";
+import { z } from "zod";
+import { apiHandler, notFound, tryApi } from "$lib/server/api-errors.js";
 import { getDb } from "$lib/server/db/index.js";
 import {
     loadConversationSettingsFromDb,
@@ -8,25 +9,42 @@ import {
 import { restartSession } from "$lib/server/agent/session-store.js";
 import type { ConversationSettings } from "$lib/types.js";
 
+const PutBody = z.object({
+    sandboxEnabled: z.boolean().nullable().optional(),
+    extraReadPaths: z.array(z.string()).nullable().optional(),
+    extraWritePaths: z.array(z.string()).nullable().optional(),
+    allowNet: z.boolean().nullable().optional(),
+    allowAllDomains: z.boolean().nullable().optional(),
+    allowedNetDomains: z.array(z.string()).nullable().optional(),
+    secrets: z.record(z.string(), z.object({ value: z.string(), hosts: z.array(z.string()) })).nullable().optional(),
+    allowEnv: z.array(z.string()).nullable().optional(),
+    deleteWorkspaceWithConversation: z.boolean().optional(),
+    agentMode: z.enum(["agent", "chat"]).nullable().optional(),
+    customSystemPrompt: z.string().nullable().optional(),
+    appendSystemPrompt: z.array(z.string()).nullable().optional(),
+    enabledMcpServers: z.array(z.string()).nullable().optional(),
+});
+
 /**
  * GET /api/sessions/[id]/settings
  * Get per-conversation settings.
  * Returns the effective settings (merged with defaults for null fields).
  */
-export const GET: RequestHandler = async ({ params }) => {
+export const GET = tryApi(async ({ params }) => {
+    const id = params.id!;
     const db = getDb();
 
     // Verify conversation exists
-    const row = db.prepare("SELECT id FROM conversations WHERE id = ?").get(params.id);
+    const row = db.prepare("SELECT id FROM conversations WHERE id = ?").get(id);
     if (!row) {
-        return json({ error: "Conversation not found" }, { status: 404 });
+        return notFound("Conversation not found");
     }
 
-    const settings = loadConversationSettingsFromDb(params.id);
+    const settings = loadConversationSettingsFromDb(id);
     // Return the stored settings (null fields mean "use global default")
     // The client will merge with DEFAULT_CONVERSATION_SETTINGS for display
     return json(settings ?? {});
-};
+});
 
 /**
  * PUT /api/sessions/[id]/settings
@@ -34,45 +52,39 @@ export const GET: RequestHandler = async ({ params }) => {
  * Replaces all settings for this conversation (full replacement, not partial merge).
  * If sandbox-affecting settings changed, restarts the in-memory session.
  */
-export const PUT: RequestHandler = async ({ params, request }) => {
-    const db = getDb();
-
-    // Verify conversation exists
-    const row = db.prepare("SELECT id FROM conversations WHERE id = ?").get(params.id);
-    if (!row) {
-        return json({ error: "Conversation not found" }, { status: 404 });
-    }
-
-    const body = await request.json();
-
-    // Validate: body must be an object
-    if (!body || typeof body !== "object" || Array.isArray(body)) {
-        return json({ error: "Request body must be a JSON object" }, { status: 400 });
-    }
-
-    // Build a clean ConversationSettings object from the input
+export const PUT = apiHandler(PutBody, async ({ body, event }) => {
+    const id = event.params.id!;
+    // Build a clean ConversationSettings object from the validated input
     const settings: ConversationSettings = {};
 
     // Only include fields that were explicitly provided
-    if ("sandboxEnabled" in body) settings.sandboxEnabled = body.sandboxEnabled;
-    if ("extraReadPaths" in body) settings.extraReadPaths = body.extraReadPaths;
-    if ("extraWritePaths" in body) settings.extraWritePaths = body.extraWritePaths;
-    if ("allowNet" in body) settings.allowNet = body.allowNet;
-    if ("allowAllDomains" in body) settings.allowAllDomains = body.allowAllDomains;
-    if ("allowedNetDomains" in body) settings.allowedNetDomains = body.allowedNetDomains;
-    if ("secrets" in body) settings.secrets = body.secrets;
-    if ("allowEnv" in body) settings.allowEnv = body.allowEnv;
-    if ("deleteWorkspaceWithConversation" in body) settings.deleteWorkspaceWithConversation = body.deleteWorkspaceWithConversation;
-    if ("agentMode" in body) settings.agentMode = body.agentMode;
-    if ("customSystemPrompt" in body) settings.customSystemPrompt = body.customSystemPrompt;
-    if ("appendSystemPrompt" in body) settings.appendSystemPrompt = body.appendSystemPrompt;
-    if ("enabledMcpServers" in body) settings.enabledMcpServers = body.enabledMcpServers;
+    if (body.sandboxEnabled !== undefined) settings.sandboxEnabled = body.sandboxEnabled;
+    if (body.extraReadPaths !== undefined) settings.extraReadPaths = body.extraReadPaths;
+    if (body.extraWritePaths !== undefined) settings.extraWritePaths = body.extraWritePaths;
+    if (body.allowNet !== undefined) settings.allowNet = body.allowNet;
+    if (body.allowAllDomains !== undefined) settings.allowAllDomains = body.allowAllDomains;
+    if (body.allowedNetDomains !== undefined) settings.allowedNetDomains = body.allowedNetDomains;
+    if (body.secrets !== undefined) settings.secrets = body.secrets;
+    if (body.allowEnv !== undefined) settings.allowEnv = body.allowEnv;
+    if (body.deleteWorkspaceWithConversation !== undefined) settings.deleteWorkspaceWithConversation = body.deleteWorkspaceWithConversation;
+    if (body.agentMode !== undefined) settings.agentMode = body.agentMode;
+    if (body.customSystemPrompt !== undefined) settings.customSystemPrompt = body.customSystemPrompt;
+    if (body.appendSystemPrompt !== undefined) settings.appendSystemPrompt = body.appendSystemPrompt;
+    if (body.enabledMcpServers !== undefined) settings.enabledMcpServers = body.enabledMcpServers;
+
+    const db = getDb();
+
+    // Verify conversation exists
+    const row = db.prepare("SELECT id FROM conversations WHERE id = ?").get(id);
+    if (!row) {
+        return notFound("Conversation not found");
+    }
 
     // Check what the old settings were to know if restart is needed
-    const oldSettings = loadConversationSettingsFromDb(params.id);
+    const oldSettings = loadConversationSettingsFromDb(id);
 
     // Save to DB
-    saveConversationSettingsToDb(params.id, settings);
+    saveConversationSettingsToDb(id, settings);
 
     // Determine if sandbox-affecting settings changed
     const restartKeys: (keyof ConversationSettings)[] = [
@@ -98,8 +110,8 @@ export const PUT: RequestHandler = async ({ params, request }) => {
     // so it picks up the new settings on next access
     let restarted = false;
     if (settingsChanged) {
-        restarted = restartSession(params.id);
+        restarted = restartSession(id);
     }
 
     return json({ success: true, restarted });
-};
+});

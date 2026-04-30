@@ -6,8 +6,8 @@
  *
  * Returns JSON: { title, siteName, image, favicon, url }
  */
-import type { RequestHandler } from "./$types.js";
 import { json } from "@sveltejs/kit";
+import { badRequest, tryApi } from "$lib/server/api-errors.js";
 
 // Timeout for fetching external pages (ms)
 const FETCH_TIMEOUT = 8000;
@@ -72,10 +72,10 @@ function extractDomain(url: string): string {
     }
 }
 
-export const GET: RequestHandler = async ({ url }) => {
+export const GET = tryApi(async ({ url }) => {
     const targetUrl = url.searchParams.get("url");
     if (!targetUrl) {
-        return json({ error: "Missing url parameter" }, { status: 400 });
+        return badRequest("Missing url parameter");
     }
 
     // Validate URL
@@ -83,10 +83,10 @@ export const GET: RequestHandler = async ({ url }) => {
     try {
         parsedUrl = new URL(targetUrl);
     } catch {
-        return json({ error: "Invalid URL" }, { status: 400 });
+        return badRequest("Invalid URL");
     }
     if (!["http:", "https:"].includes(parsedUrl.protocol)) {
-        return json({ error: "Unsupported protocol" }, { status: 400 });
+        return badRequest("Unsupported protocol");
     }
 
     // Check cache
@@ -158,4 +158,4 @@ export const GET: RequestHandler = async ({ url }) => {
             url: targetUrl,
         });
     }
-};
+});

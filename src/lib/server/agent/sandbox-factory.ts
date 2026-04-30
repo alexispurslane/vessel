@@ -30,9 +30,13 @@
 import { Sandbox, type SecretConfig } from "zerobox";
 import { resolve } from "path";
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from "fs";
-import { execSync } from "child_process";
+import { execFile } from "child_process";
+import { promisify } from "util";
 import { getDb } from "../db/index.js";
 import type { ConversationSettings } from "$lib/types.js";
+import { log } from "$lib/server/logger.js";
+
+const execFileAsync = promisify(execFile);
 
 // --- Constants ---
 
@@ -127,7 +131,7 @@ export interface SandboxPolicy {
  * Called at sandbox creation time so that deps are guaranteed to be
  * available before any sandboxed tool tries to require() them.
  */
-export function ensureSandboxDeps(): void {
+export async function ensureSandboxDeps(): Promise<void> {
     const nodeModulesDir = resolve(SANDBOX_DEPS_DIR, "node_modules");
 
     // Check if we need to install/update deps
@@ -141,25 +145,25 @@ export function ensureSandboxDeps(): void {
             const installedKeys = Object.keys(installed).sort().join(",");
             if (specKeys !== installedKeys) {
                 // Deps list has changed — reinstall
-                installSandboxDeps();
+                await installSandboxDeps();
                 return;
             }
         } catch {
             // Lockfile is corrupted — reinstall
-            installSandboxDeps();
+            await installSandboxDeps();
             return;
         }
         // Deps are up to date
         return;
     }
 
-    installSandboxDeps();
+    await installSandboxDeps();
 }
 
 /**
  * Run npm install for sandbox dependencies and write the lockfile.
  */
-function installSandboxDeps(): void {
+async function installSandboxDeps(): Promise<void> {
     // Ensure the directory exists
     mkdirSync(SANDBOX_DEPS_DIR, { recursive: true });
 
@@ -167,7 +171,7 @@ function installSandboxDeps(): void {
     const packageJson = {
         name: "vessel-sandbox-deps",
         private: true,
-        description: "Dependencies for Vessel's sandboxed tool execution. Managed by ensureSandboxDeps() — do not edit.",
+        description: "Dependencies for Vessel's sandbox tool execution. Managed by ensureSandboxDeps() — do not edit.",
         dependencies: { ...SANDBOX_DEPS_PACKAGES },
     };
     writeFileSync(
@@ -175,10 +179,9 @@ function installSandboxDeps(): void {
         JSON.stringify(packageJson, null, 2)
     );
 
-    // Install deps
-    execSync("npm install --omit=dev --no-audit --no-fund", {
+    // Install deps — async so it doesn't block the event loop
+    await execFileAsync("npm", ["install", "--omit=dev", "--no-audit", "--no-fund"], {
         cwd: SANDBOX_DEPS_DIR,
-        stdio: "pipe",
     });
 
     // Write the lockfile so we can detect stale installs
@@ -187,7 +190,7 @@ function installSandboxDeps(): void {
         JSON.stringify(SANDBOX_DEPS_PACKAGES)
     );
 
-    console.log(`[sandbox] Installed deps to ${SANDBOX_DEPS_DIR}`);
+    log.info("sandbox", `Installed deps to ${SANDBOX_DEPS_DIR}`);
 }
 
 // --- DB helpers ---
@@ -211,7 +214,8 @@ function getJsonSetting<T>(key: string, fallback: T): T {
     if (raw === undefined || raw === "") return fallback;
     try {
         return JSON.parse(raw) as T;
-    } catch {
+    } catch (e) {
+        log.debug("sandbox", "Failed to parse sandbox setting JSON, using fallback", e);
         return fallback;
     }
 }
@@ -322,17 +326,17 @@ export function loadSandboxPolicyFromDb(conversationSettings?: ConversationSetti
  *
  * Returns null if sandboxing is disabled in settings.
  */
-export function createSessionSandbox(
+export async function createSessionSandbox(
     conversationId: string,
     conversationSettings?: ConversationSettings | null
-): Sandbox | null {
+): Promise<Sandbox | null> {
     const policy = loadSandboxPolicyFromDb(conversationSettings);
 
     // If policy is null, sandboxing is disabled
     if (policy === null) return null;
 
     // Ensure sandbox deps are installed before creating the sandbox
-    ensureSandboxDeps();
+    await ensureSandboxDeps();
 
     const sessionWorkDir = resolve(SESSIONS_DIR, conversationId, "workspace");
     mkdirSync(sessionWorkDir, { recursive: true });
@@ -427,7 +431,8 @@ export function loadConversationSettingsFromDb(conversationId: string): Conversa
     if (!row) return null;
     try {
         return JSON.parse(row.settings) as ConversationSettings;
-    } catch {
+    } catch (e) {
+        log.debug("sandbox", "Failed to parse conversation settings JSON", e);
         return null;
     }
 }

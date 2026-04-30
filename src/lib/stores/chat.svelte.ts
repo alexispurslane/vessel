@@ -107,20 +107,20 @@ function requestTitleGeneration(s: ChatState): void {
 
 /** Handle the 'connected' SSE event. */
 function handleConnected(s: ChatState): void {
-    console.log(`[chat] SSE 'connected' event received`);
+    console.log(`[chat-lifecycle] handleConnected: SSE connected, messages.length=${s.messages.length}, generating=${s.generating}`);
     s.connected = true;
     s.error = null;
 }
 
 /** Handle the 'agent_start' SSE event. */
 function handleAgentStart(s: ChatState): void {
-    console.log(`[chat] SSE 'agent_start' event received`);
+    console.log(`[chat-lifecycle] handleAgentStart: messages.length=${s.messages.length}`);
     s.generating = true;
 }
 
 /** Handle the 'agent_end' SSE event. */
 function handleAgentEnd(s: ChatState): void {
-    console.log(`[chat] SSE 'agent_end' event received`);
+    console.log(`[chat-lifecycle] handleAgentEnd: messages.length=${s.messages.length}, streamingMessageId=${s.streamingMessageId}`);
     s.generating = false;
     s.recoveryTurnGeneration = null;
 
@@ -355,6 +355,7 @@ export function getChat() {
                 content,
                 timestamp: Date.now(),
             });
+            console.log(`[chat-lifecycle] addLocalUserMessage: pushed user msg id=${id}, messages.length=${state.messages.length}`);
             return id;
         },
         /**
@@ -401,9 +402,10 @@ export async function connectStream(
     conversationId: string,
     preloadedHistory?: MessageHistory
 ): Promise<void> {
-    console.log(`[chat] connectStream called: conversationId=${conversationId}, hasPreloadedHistory=${!!preloadedHistory}, currentGeneration=${state.connectGeneration}`);
+    console.log(`[chat-lifecycle] connectStream: conversationId=${conversationId}, hasPreloadedHistory=${!!preloadedHistory}, currentGeneration=${state.connectGeneration}`);
 
     const thisGeneration = resetChatState(state, conversationId);
+    console.log(`[chat-lifecycle] connectStream: after resetChatState, messages.length=${state.messages.length}`);
 
     // Load message history — either from preloaded SSR data (synchronous) or from the server (async)
     if (preloadedHistory) {
@@ -429,7 +431,7 @@ export async function connectStream(
 }
 
 export function disconnectStream(): void {
-    console.log(`[chat] disconnectStream: conversationId=${state.currentConversationId}, hadEventSource=${!!state.currentEventSource}`);
+    console.log(`[chat-lifecycle] disconnectStream: conversationId=${state.currentConversationId}, hadEventSource=${!!state.currentEventSource}, messages.length=${state.messages.length}`);
     // Release the in-memory session on the server when switching away.
     // This is best-effort — if it fails, the idle timeout on the server
     // will eventually clean up.
@@ -461,12 +463,14 @@ export async function send(content: string, modelId?: string, statusContent?: st
     if (!state.currentConversationId) return;
 
     // Add user message to the local list
+    const userMsgId = `user-${Date.now()}`;
     state.messages.push({
-        id: `user-${Date.now()}`,
+        id: userMsgId,
         role: "user",
         content,
         timestamp: Date.now(),
     });
+    console.log(`[chat-lifecycle] send: pushed user msg id=${userMsgId}, messages.length=${state.messages.length}, generating=${state.generating}, connected=${state.connected}`);
 
     state.error = null;
     state.generating = true;

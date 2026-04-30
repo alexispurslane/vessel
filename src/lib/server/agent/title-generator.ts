@@ -20,6 +20,7 @@ import {
 import { getDb, getAllTags, upsertTags } from "../db/index.js";
 import { findModelById, getModelRegistry } from "./model-registry.js";
 import { getSessionHistory } from "./session-store.js";
+import { log } from "$lib/server/logger.js";
 
 // --- Types ---
 
@@ -56,7 +57,8 @@ export async function generateTitleAndTags(
     // Skip if already titled (not "New Chat") unless forced
     if (!force && conv.title !== "New Chat") return null;
 
-    console.log(
+    log.info(
+        "title-generator",
         force
             ? "Force-regenerating title for conversation"
             : "Decided should generate title for conversation"
@@ -64,14 +66,15 @@ export async function generateTitleAndTags(
 
     // Get the first user message content
     const userMessage = await extractFirstUserMessage(conversationId);
-    console.log(`Extracted first user message: ${userMessage}`);
+    log.info("title-generator", `Extracted first user message: ${userMessage}`);
     if (!userMessage) return null;
 
     // Resolve the model to use
     const model = resolveTitleModel();
     if (!model) {
-        console.warn(
-            "[title-generator] No secondary or default model configured — skipping title generation"
+        log.warn(
+            "title-generator",
+            "No secondary or default model configured — skipping title generation"
         );
         return null;
     }
@@ -79,7 +82,7 @@ export async function generateTitleAndTags(
     try {
         const existingTags = getAllTags();
         const result = await callModelForTitle(model, userMessage, existingTags);
-        console.log(`Generated title: ${result.title}, tags: ${result.tags.join(", ")}`);
+        log.info("title-generator", `Generated title: ${result.title}, tags: ${result.tags.join(", ")}`);
 
         // Update the conversation in DB
         db.prepare(
@@ -91,7 +94,7 @@ export async function generateTitleAndTags(
 
         return result;
     } catch (err) {
-        console.error("[title-generator] Failed to generate title:", err);
+        log.error("title-generator", "Failed to generate title", err);
         return null;
     }
 }
@@ -108,8 +111,8 @@ async function extractFirstUserMessage(conversationId: string): Promise<string |
         if (firstUserMsg?.content) {
             return firstUserMsg.content.slice(0, 2000); // Truncate to avoid huge prompts
         }
-    } catch {
-        // History retrieval error
+    } catch (e) {
+        log.debug("title-generator", "Failed to retrieve message history for title generation", e);
     }
 
     return null;

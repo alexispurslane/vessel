@@ -1,7 +1,29 @@
 import { json } from "@sveltejs/kit";
-import type { RequestHandler } from "./$types.js";
+import { z } from "zod";
+import { apiHandler } from "$lib/server/api-errors.js";
 import { readdir, stat } from "fs/promises";
 import { resolve, dirname, basename, join } from "path";
+
+const FsCompleteBody = z.object({
+    partial: z.string(),
+    type: z.enum(["file", "directory", "all"]).optional(),
+});
+
+const PATH_BLACKLIST = [
+    "/etc",
+    "/proc",
+    "/sys",
+    "/dev",
+    "/boot",
+    "/root",
+    "/var/log",
+    "/private/etc",     // macOS
+    "/private/var",     // macOS
+];
+
+function isBlacklistedPath(resolvedPath: string): boolean {
+    return PATH_BLACKLIST.some(prefix => resolvedPath === prefix || resolvedPath.startsWith(prefix + "/"));
+}
 
 /**
  * POST /api/fs-complete
@@ -9,13 +31,11 @@ import { resolve, dirname, basename, join } from "path";
  * Body: { partial: string, type?: "file" | "directory" | "all" }
  * Returns: { completions: string[] }
  */
-export const POST: RequestHandler = async ({ request }) => {
-    const { partial, type = "all" } = (await request.json()) as {
-        partial: string;
-        type?: "file" | "directory" | "all";
-    };
+export const POST = apiHandler(FsCompleteBody, async ({ body }) => {
+    const { partial } = body;
+    const type = body.type ?? "all";
 
-    if (!partial || typeof partial !== "string") {
+    if (!partial) {
         return json({ completions: [] });
     }
 
@@ -49,6 +69,11 @@ export const POST: RequestHandler = async ({ request }) => {
 
     // Resolve to absolute path
     const resolvedDir = resolve(dirPath);
+
+    // Block autocompletion of sensitive system paths
+    if (isBlacklistedPath(resolvedDir)) {
+        return json({ completions: [] });
+    }
 
     try {
         const entries = await readdir(resolvedDir, { withFileTypes: true });
@@ -121,4 +146,4 @@ export const POST: RequestHandler = async ({ request }) => {
     } catch {
         return json({ completions: [] });
     }
-};
+});

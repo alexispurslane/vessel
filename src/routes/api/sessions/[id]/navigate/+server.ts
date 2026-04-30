@@ -1,6 +1,11 @@
 import { json } from "@sveltejs/kit";
-import type { RequestHandler } from "./$types.js";
+import { z } from "zod";
+import { apiHandler } from "$lib/server/api-errors.js";
 import { navigateMessage } from "$lib/server/agent/session-store.js";
+
+const PostBody = z.object({
+    targetEntryId: z.string().min(1),
+});
 
 /**
  * POST /api/sessions/[id]/navigate
@@ -16,21 +21,8 @@ import { navigateMessage } from "$lib/server/agent/session-store.js";
  * Response:
  *   { editorText?: string, cancelled: boolean }
  */
-export const POST: RequestHandler = async ({ params, request }) => {
-    const conversationId = params.id;
-    const body = await request.json();
-    const { targetEntryId } = body;
-
-    if (!targetEntryId || typeof targetEntryId !== "string") {
-        return json({ error: "targetEntryId is required and must be a string" }, { status: 400 });
-    }
-
-    try {
-        const result = await navigateMessage(conversationId, targetEntryId);
-        return json(result);
-    } catch (e) {
-        console.error(`Failed to navigate session ${conversationId} to ${targetEntryId}:`, e);
-        const message = e instanceof Error ? e.message : "Failed to navigate session";
-        return json({ error: message }, { status: 500 });
-    }
-};
+export const POST = apiHandler(PostBody, async ({ body, event }) => {
+    const id = event.params.id!;
+    const result = await navigateMessage(id, body.targetEntryId);
+    return json(result);
+});

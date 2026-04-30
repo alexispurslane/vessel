@@ -1,9 +1,8 @@
-import { json } from "@sveltejs/kit";
-import type { RequestHandler } from "./$types.js";
+import { tryApi, badRequest, notFound } from "$lib/server/api-errors.js";
 import { getSessionWorkDir } from "$lib/server/agent/sandbox-factory.js";
 import { sanitizeAndResolvePath } from "$lib/server/fs-security.js";
 import { existsSync, statSync, createReadStream } from "fs";
-import { resolve, basename, extname } from "path";
+import { basename, extname } from "path";
 
 /**
  * Simple MIME type lookup for common file extensions.
@@ -53,13 +52,13 @@ const MIME_TYPES: Record<string, string> = {
  *
  * Security: the resolved path is validated to stay within the workspace.
  */
-export const GET: RequestHandler = async ({ params, url }) => {
-    const conversationId = params.id;
-    const workDir = getSessionWorkDir(conversationId);
+export const GET = tryApi(async ({ params, url }) => {
+    const id = params.id!;
+    const workDir = getSessionWorkDir(id);
     const relativePath = url.searchParams.get("path");
 
     if (!relativePath || typeof relativePath !== "string") {
-        return json({ error: "path query parameter is required" }, { status: 400 });
+        return badRequest("path query parameter is required");
     }
 
     // Resolve and validate the path stays within the workspace
@@ -67,16 +66,16 @@ export const GET: RequestHandler = async ({ params, url }) => {
     try {
         filePath = sanitizeAndResolvePath(workDir, relativePath);
     } catch {
-        return json({ error: "Invalid file path" }, { status: 400 });
+        return badRequest("Invalid file path");
     }
 
     if (!existsSync(filePath)) {
-        return json({ error: "File not found" }, { status: 404 });
+        return notFound("File not found");
     }
 
     const stat = statSync(filePath);
     if (!stat.isFile()) {
-        return json({ error: "Path is not a file" }, { status: 400 });
+        return badRequest("Path is not a file");
     }
 
     const fileName = basename(filePath);
@@ -117,4 +116,4 @@ export const GET: RequestHandler = async ({ params, url }) => {
             },
         }
     );
-};
+});

@@ -1,10 +1,19 @@
 import { json } from "@sveltejs/kit";
-import type { RequestHandler } from "./$types.js";
+import { z } from "zod";
+import { apiHandler, notFound, tryApi } from "$lib/server/api-errors.js";
 import {
     getOrCreateConversation,
     getSessionAgentInfo,
     updateSessionSystemPrompt,
 } from "$lib/server/agent/session-store.js";
+
+const PatchBody = z.object({
+    customSystemPrompt: z.string().nullable().optional(),
+    appendSystemPrompt: z.array(z.string()).nullable().optional(),
+}).refine(
+    (data) => data.customSystemPrompt !== undefined || data.appendSystemPrompt !== undefined,
+    { message: "No valid fields to update" }
+);
 
 /**
  * GET /api/sessions/[id]/agent-info
@@ -13,24 +22,18 @@ import {
  * the conversation's active AgentSession. The session is hydrated
  * on demand if not already in memory.
  */
-export const GET: RequestHandler = async ({ params }) => {
-    const conversationId = params.id;
+export const GET = tryApi(async ({ params }) => {
+    const id = params.id!;
+    // Ensure the session is loaded in memory so we can read from it
+    await getOrCreateConversation(id);
 
-    try {
-        // Ensure the session is loaded in memory so we can read from it
-        await getOrCreateConversation(conversationId);
-
-        const info = await getSessionAgentInfo(conversationId);
-        if (!info) {
-            return json({ error: "Session not active" }, { status: 404 });
-        }
-
-        return json(info);
-    } catch (e) {
-        console.error(`Failed to get agent info for ${conversationId}:`, e);
-        return json({ error: "Failed to get agent info" }, { status: 500 });
+    const info = await getSessionAgentInfo(id);
+    if (!info) {
+        return notFound("Session not active");
     }
-};
+
+    return json(info);
+});
 
 /**
  * PATCH /api/sessions/[id]/agent-info
@@ -40,59 +43,29 @@ export const GET: RequestHandler = async ({ params }) => {
  * (adds to default). Pass null to clear. Changes are applied immediately
  * to the live session and persisted to conversation settings.
  */
-export const PATCH: RequestHandler = async ({ params, request }) => {
-    const conversationId = params.id;
+export const PATCH = apiHandler(PatchBody, async ({ body, event }) => {
+    const id = event.params.id!;
+    const options: {
+        customSystemPrompt?: string | null;
+        appendSystemPrompt?: string[] | null;
+    } = {};
 
-    try {
-        const body = await request.json();
-
-        if (!body || typeof body !== "object") {
-            return json({ error: "Request body must be a JSON object" }, { status: 400 });
-        }
-
-        // Build options — only include fields that were explicitly provided
-        const options: {
-            customSystemPrompt?: string | null;
-            appendSystemPrompt?: string[] | null;
-        } = {};
-
-        if ("customSystemPrompt" in body) {
-            if (body.customSystemPrompt !== null && typeof body.customSystemPrompt !== "string") {
-                return json({ error: "customSystemPrompt must be a string or null" }, { status: 400 });
-            }
-            options.customSystemPrompt = body.customSystemPrompt;
-        }
-        if ("appendSystemPrompt" in body) {
-            if (body.appendSystemPrompt !== null && !Array.isArray(body.appendSystemPrompt)) {
-                return json({ error: "appendSystemPrompt must be an array of strings or null" }, { status: 400 });
-            }
-            if (body.appendSystemPrompt !== null) {
-                for (const item of body.appendSystemPrompt) {
-                    if (typeof item !== "string") {
-                        return json({ error: "appendSystemPrompt must be an array of strings" }, { status: 400 });
-                    }
-                }
-            }
-            options.appendSystemPrompt = body.appendSystemPrompt;
-        }
-
-        if (Object.keys(options).length === 0) {
-            return json({ error: "No valid fields to update" }, { status: 400 });
-        }
-
-        // Ensure session is loaded
-        await getOrCreateConversation(conversationId);
-
-        const updated = updateSessionSystemPrompt(conversationId, options);
-        if (!updated) {
-            return json({ error: "Session not active" }, { status: 404 });
-        }
-
-        // Return the updated agent info so the client can refresh
-        const info = await getSessionAgentInfo(conversationId);
-        return json({ success: true, info });
-    } catch (e) {
-        console.error(`Failed to update system prompt for ${conversationId}:`, e);
-        return json({ error: "Failed to update system prompt" }, { status: 500 });
+    if (body.customSystemPrompt !== undefined) {
+        options.customSystemPrompt = body.customSystemPrompt;
     }
-};
+    if (body.appendSystemPrompt !== undefined) {
+        options.appendSystemPrompt = body.appendSystemPrompt;
+    }
+
+    // Ensure session is loaded
+    await getOrCreateConversation(id);
+
+    const updated = updateSessionSystemPrompt(id, options);
+    if (!updated) {
+        return notFound("Session not active");
+    }
+
+    // Return the updated agent info so the client can refresh
+    const info = await getSessionAgentInfo(id);
+    return json({ success: true, info });
+});

@@ -116,10 +116,20 @@
     // This gives us true SSR — messages in the HTML before JS runs — while
     // seamlessly transitioning to the live SSE-driven store once the client takes over.
     let displayMessages = $derived.by(() => {
-        if (hydrated) return chat.messages;
+        if (hydrated) {
+            const msgs = chat.messages;
+            console.log(
+                `[chat-lifecycle] displayMessages: hydrated=true, chat.messages.length=${msgs.length}, connected=${chat.connected}, generating=${chat.generating}`
+            );
+            return msgs;
+        }
         // SSR path: use pre-converted ChatMessage[] from the server load.
         // Fall back to empty array if no SSR data (shouldn't normally happen).
-        return $page.data.messages ?? [];
+        const ssrMsgs = $page.data.messages ?? [];
+        console.log(
+            `[chat-lifecycle] displayMessages: hydrated=false, SSR messages.length=${ssrMsgs.length}`
+        );
+        return ssrMsgs;
     });
 
     // Session storage key for in-progress message draft, scoped per conversation
@@ -233,16 +243,16 @@
         if (!chat.generating) return false;
         // During generation: show skeleton if no streaming message or streaming message has no visible content
         const streamingMsg = displayMessages.find((m: ChatMessageType) => m.streaming);
-        if (!streamingMsg) return true;
-        if (
-            !streamingMsg.content?.trim() &&
-            !streamingMsg.thinking &&
-            !streamingMsg.thinkingStreaming &&
-            !(streamingMsg.toolCalls && streamingMsg.toolCalls.length > 0)
-        ) {
-            return true;
-        }
-        return false;
+        const result =
+            !streamingMsg ||
+            (!streamingMsg.content?.trim() &&
+                !streamingMsg.thinking &&
+                !streamingMsg.thinkingStreaming &&
+                !(streamingMsg.toolCalls && streamingMsg.toolCalls.length > 0));
+        console.log(
+            `[chat-lifecycle] waitingForResponse: generating=${chat.generating}, foundStreamingMsg=${!!streamingMsg}, result=${result}, displayMessages.length=${displayMessages.length}`
+        );
+        return result;
     });
 
     /** Whether an assistant message is "intermediate" — thinking/tool calls only, no visible text for the user.
@@ -271,6 +281,11 @@
     let renderItems: RenderItem[] = $derived.by(() => {
         const items: RenderItem[] = [];
         let currentGroup: ThinkingGroupType | null = null;
+        const msgCount = displayMessages.length;
+        const streamingCount = displayMessages.filter((m: ChatMessageType) => m.streaming).length;
+        console.log(
+            `[chat-lifecycle] renderItems: displayMessages.length=${msgCount}, streaming=${streamingCount}, generating=${chat.generating}`
+        );
 
         for (const msg of displayMessages) {
             if (isIntermediateAssistant(msg)) {
@@ -426,24 +441,33 @@
     // transitions to chat.messages (live store) once hydrated=true after connectStream completes.
     $effect(() => {
         const currentId = id;
+        console.log(
+            `[chat-lifecycle] $effect: running for id=${currentId}, prev hydrated=${untrack(() => hydrated)}`
+        );
         // Reset the draft-restored flag — the new conversation's draft hasn't been restored yet
         draftRestored = false;
         // Reset hydrated — we want to render from SSR data for the new conversation first,
         // then transition to the live store once connectStream completes.
         hydrated = false;
         if (currentId) {
-            // Initialize sandbox files from SSR data
-            sandboxFiles = $page.data.sandboxFiles ?? [];
             untrack(() => {
+                // Initialize sandbox files from SSR data.
+                // Must be inside untrack() — otherwise $page.data becomes a dependency
+                // of this $effect, causing it to re-run (disconnecting/reconnecting the
+                // SSE stream and clearing messages) whenever $page.data changes.
+                sandboxFiles = $page.data.sandboxFiles ?? [];
                 // Use SSR-provided history if available — avoids a client-side fetch
                 // and renders messages immediately (before SSE connects).
-                const ssrHistory = $page.data.messageHistory;
-                const connectPromise = connectStream(currentId, ssrHistory);
-
-                connectPromise.then(async () => {
+                connectStream(currentId, $page.data.messageHistory).then(async () => {
+                    console.log(
+                        `[chat-lifecycle] $effect: connectStream resolved, chat.messages.length=${chat.messages.length}, connected=${chat.connected}, generating=${chat.generating}`
+                    );
                     // The chat store now has messages from the server — switch rendering
                     // from SSR data ($page.data.messages) to the live store (chat.messages).
                     hydrated = true;
+                    console.log(
+                        `[chat-lifecycle] $effect: hydrated=true, chat.messages.length=${chat.messages.length}`
+                    );
 
                     // After connecting (which loads history), set model selector to last used model
                     if (chat.lastModel) {
@@ -549,6 +573,9 @@
     async function handleSend() {
         const text = inputText.trim();
         const filesToSend = [...pendingFiles];
+        console.log(
+            `[chat-lifecycle] handleSend: text=${!!text}, files=${filesToSend.length}, connected=${chat.connected}, generating=${chat.generating}`
+        );
         if (
             (!text && filesToSend.length === 0 && pendingStatusUpdates.length === 0) ||
             !chat.connected ||
@@ -773,7 +800,12 @@
     <title>Vessel - {conversationTitle}</title>
 </svelte:head>
 
-<div class="h-full w-full flex flex-col overflow-hidden relative" onmousemove={showTopBar}>
+<div
+    class="h-full w-full flex flex-col overflow-hidden relative"
+    role="region"
+    aria-label="Chat"
+    onmousemove={showTopBar}
+>
     <!-- Main content -->
     <!-- Top bar: hidden by default, shows on mouse movement, auto-hides after timeout or on send -->
     {#if topBarVisible}
@@ -1149,7 +1181,7 @@
         {/if}
         {#if fetchedPageOpen}
             <div
-                class="absolute right-0 top-0 bottom-0 w-[42rem] border-l bg-background flex flex-col shrink-0 z-10"
+                class="absolute right-0 top-0 bottom-0 w-2xl border-l bg-background flex flex-col shrink-0 z-10"
             >
                 <FetchedPagePanel
                     url={fetchedPageUrl}

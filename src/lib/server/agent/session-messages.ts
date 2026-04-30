@@ -36,6 +36,7 @@ export type {
 
 import { generateTitleAndTags } from "./title-generator.js";
 import { getDb } from "../db/index.js";
+import { log } from "$lib/server/logger.js";
 
 // --- Message sending ---
 
@@ -75,8 +76,9 @@ export async function sendMessageToSession(
     // After the prompt completes, trigger title/tag generation in the background.
     // This runs even if the client isn't connected to the SSE stream yet.
     generateTitleAndTags(conversationId).catch((err) => {
-        console.error(
-            `[session-messages] Background title generation failed for ${conversationId}:`,
+        log.error(
+            "session-messages",
+            `Background title generation failed for ${conversationId}`,
             err
         );
     });

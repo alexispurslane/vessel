@@ -210,6 +210,49 @@ export interface ToolCallInfo {
     arguments?: Record<string, unknown>;
 }
 
+/** Info about a tool call in history — status is a string since history calls are always completed/error, never "running" */
+export interface HistoryToolCall {
+    toolName: string;
+    status: string;
+    output?: string;
+    /** The arguments the tool was called with, as parsed JSON */
+    arguments?: Record<string, unknown>;
+}
+
+/** A message in the history — role is `string` since history can have role values outside the UI union */
+export interface HistoryMessage {
+    id: string;
+    role: string;
+    content: string;
+    timestamp: number;
+    /** For assistant messages: intermediate state like tool calls */
+    toolCalls?: HistoryToolCall[];
+    /** For assistant messages: thinking/reasoning content from the model */
+    thinking?: string;
+    /** For assistant messages: the model that generated this response */
+    model?: string;
+    /** For assistant messages: the provider of the model */
+    modelProvider?: string;
+    /** Whether this message represents an error from the provider */
+    isError?: boolean;
+    /** Token usage data from the model provider (assistant messages only) */
+    usage?: {
+        input: number;
+        output: number;
+        cacheRead: number;
+        cacheWrite: number;
+        totalTokens: number;
+    };
+    /** Sources consulted by the agent (fetched pages & web searches) since the last assistant message */
+    fetchedSources?: FetchedSource[];
+}
+
+/** Return type of buildHistoryFromSession */
+export interface HistoryResult {
+    messages: HistoryMessage[];
+    model: { provider: string; modelId: string } | null;
+}
+
 /** A single step within a thinking group — either a thinking text chunk or a tool call */
 export interface ThinkingStep {
     /** Unique ID for this step */

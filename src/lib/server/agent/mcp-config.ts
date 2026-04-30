@@ -12,6 +12,7 @@
 import { join, resolve } from "path";
 import { writeFileSync, mkdirSync, existsSync, renameSync } from "fs";
 import { getDb } from "../db/index.js";
+import { log } from "$lib/server/logger.js";
 
 const DATA_DIR = resolve(process.cwd(), "data");
 const AGENT_DIR = resolve(DATA_DIR, "agent");
@@ -66,7 +67,8 @@ export function getMcpServersFromDb(): Record<string, McpServerEntry> {
             return parsed as Record<string, McpServerEntry>;
         }
         return {};
-    } catch {
+    } catch (e) {
+        log.debug("mcp-config", "Failed to parse MCP server config JSON", e);
         return {};
     }
 }

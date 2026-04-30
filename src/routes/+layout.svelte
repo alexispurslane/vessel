@@ -48,8 +48,12 @@
 
     // Initialize auth store from SSR data so client-side code sees
     // the correct state immediately (before checkAuth() completes).
-    if (ssrAuth) {
-        initAuth(ssrAuth);
+    // We read $page.data.auth directly (not through the ssrAuth derived)
+    // to avoid the "state_referenced_locally" warning — this is intentional
+    // one-time initialization, not a reactive dependency.
+    const initialAuth = $page.data.auth;
+    if (initialAuth) {
+        initAuth(initialAuth);
     }
 
     // Load conversations and settings when authenticated

@@ -3,6 +3,7 @@ import type { RequestHandler } from "./$types.js";
 import { getSessionWorkDir, createFileManagementSandbox } from "$lib/server/agent/sandbox-factory.js";
 import { getOrCreateConversation } from "$lib/server/agent/session-store.js";
 import { sanitizeFilename, sanitizeAndResolvePath } from "$lib/server/fs-security.js";
+import { badRequest, notFound, internalError } from "$lib/server/api-errors.js";
 import { mkdirSync, createWriteStream, unlinkSync } from "fs";
 import { resolve, dirname, join } from "path";
 
@@ -28,17 +29,17 @@ export const POST: RequestHandler = async ({ params, request }) => {
     try {
         await getOrCreateConversation(conversationId);
     } catch {
-        return json({ error: "Conversation not found" }, { status: 404 });
+        return notFound("Conversation not found");
     }
 
     const workDir = getSessionWorkDir(conversationId);
     if (!workDir) {
-        return json({ error: "No workspace directory for this conversation" }, { status: 500 });
+        return internalError("No workspace directory for this conversation");
     }
 
     const rawFilename = request.headers.get("x-filename");
     if (!rawFilename) {
-        return json({ error: "X-Filename header is required" }, { status: 400 });
+        return badRequest("X-Filename header is required");
     }
 
     // Sanitize the filename: strip directory components, reject traversal
@@ -46,7 +47,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
     try {
         filename = sanitizeFilename(rawFilename);
     } catch {
-        return json({ error: "Invalid filename" }, { status: 400 });
+        return badRequest("Invalid filename");
     }
 
     // Resolve and validate the full path stays within the workspace
@@ -54,14 +55,14 @@ export const POST: RequestHandler = async ({ params, request }) => {
     try {
         filePath = sanitizeAndResolvePath(workDir, filename);
     } catch {
-        return json({ error: "Invalid file path" }, { status: 400 });
+        return badRequest("Invalid file path");
     }
 
     const dir = dirname(filePath);
 
     // Defense-in-depth: re-verify the resolved path is still within the workspace
     if (!filePath.startsWith(resolve(workDir))) {
-        return json({ error: "Invalid file path" }, { status: 400 });
+        return badRequest("Invalid file path");
     }
 
     const sandbox = createFileManagementSandbox(conversationId);
@@ -143,9 +144,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
         });
     } catch (err) {
         console.error(`[upload] Error uploading file to session ${conversationId}:`, err);
-        return json(
-            { error: err instanceof Error ? err.message : "Upload failed" },
-            { status: 500 }
-        );
+        const message = err instanceof Error ? err.message : "Upload failed";
+        return internalError(message);
     }
 };

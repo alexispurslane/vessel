@@ -1,19 +1,30 @@
 import { json } from "@sveltejs/kit";
-import type { RequestHandler } from "./$types.js";
+import { z } from "zod";
+import { apiHandler, notFound, tryApi } from "$lib/server/api-errors.js";
 import { getDb, upsertTags } from "$lib/server/db/index.js";
 import { destroyConversation, resolveModelProvider } from "$lib/server/agent/session-store.js";
+
+const PatchBody = z.object({
+    title: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+    model_id: z.string().optional(),
+}).refine(
+    (data) => data.title !== undefined || data.tags !== undefined || data.model_id !== undefined,
+    { message: "No fields to update" }
+);
 
 /**
  * GET /api/sessions/[id]
  * Get conversation metadata.
  */
-export const GET: RequestHandler = async ({ params }) => {
+export const GET = tryApi(async ({ params }) => {
+    const id = params.id!;
     const db = getDb();
     const row = db
         .prepare(
             "SELECT id, title, tags, model_provider, model_id, created_at, updated_at FROM conversations WHERE id = ?"
         )
-        .get(params.id) as
+        .get(id) as
         | {
             id: string;
             title: string;
@@ -26,23 +37,22 @@ export const GET: RequestHandler = async ({ params }) => {
         | undefined;
 
     if (!row) {
-        return json({ error: "Conversation not found" }, { status: 404 });
+        return notFound("Conversation not found");
     }
 
     return json({
         ...row,
         tags: JSON.parse(row.tags) as string[],
     });
-};
+});
 
 /**
  * PATCH /api/sessions/[id]
  * Update conversation metadata (title, tags, model).
  * When model_id is provided, the provider is resolved automatically.
  */
-export const PATCH: RequestHandler = async ({ params, request }) => {
-    const db = getDb();
-    const body = await request.json();
+export const PATCH = apiHandler(PatchBody, async ({ body, event }) => {
+    const id = event.params.id!;
     const { title, tags, model_id } = body;
 
     const updates: string[] = [];
@@ -67,17 +77,19 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
         values.push(provider);
     }
 
+    // Safety check — the Zod refine should prevent this, but keep the guard
     if (updates.length === 0) {
         return json({ error: "No fields to update" }, { status: 400 });
     }
 
     updates.push("updated_at = datetime('now')");
-    values.push(params.id);
+    values.push(id);
 
+    const db = getDb();
     db.prepare(`UPDATE conversations SET ${updates.join(", ")} WHERE id = ?`).run(...values);
 
     return json({ success: true });
-};
+});
 
 /**
  * DELETE /api/sessions/[id]
@@ -85,16 +97,17 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
  * workspace directory, and DB row. Only triggered when the user
  * explicitly hits the trash icon on a conversation.
  */
-export const DELETE: RequestHandler = async ({ params }) => {
+export const DELETE = tryApi(async ({ params }) => {
+    const id = params.id!;
     // Check the conversation exists before destroying
     const db = getDb();
-    const row = db.prepare("SELECT id FROM conversations WHERE id = ?").get(params.id);
+    const row = db.prepare("SELECT id FROM conversations WHERE id = ?").get(id);
 
     if (!row) {
-        return json({ error: "Conversation not found" }, { status: 404 });
+        return notFound("Conversation not found");
     }
 
-    await destroyConversation(params.id);
+    await destroyConversation(id);
 
     return json({ success: true });
-};
+});

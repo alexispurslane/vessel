@@ -1,5 +1,5 @@
 import { json } from "@sveltejs/kit";
-import type { RequestHandler } from "./$types.js";
+import { tryApi } from "$lib/server/api-errors.js";
 import { getSessionTree } from "$lib/server/agent/session-store.js";
 
 /**
@@ -9,15 +9,8 @@ import { getSessionTree } from "$lib/server/agent/session-store.js";
  * Includes all entries across all branches, with metadata about which
  * entries are on the current active branch.
  */
-export const GET: RequestHandler = async ({ params }) => {
-    const conversationId = params.id;
-
-    try {
-        const tree = await getSessionTree(conversationId);
-        return json(tree);
-    } catch (e) {
-        console.error(`Failed to get session tree for ${conversationId}:`, e);
-        const message = e instanceof Error ? e.message : "Failed to get session tree";
-        return json({ error: message }, { status: 500 });
-    }
-};
+export const GET = tryApi(async ({ params }) => {
+    const id = params.id!;
+    const tree = await getSessionTree(id);
+    return json(tree);
+});

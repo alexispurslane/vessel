@@ -26,6 +26,7 @@ import type { ChatSSEEvent, ActiveSession } from "./types.js";
 export function broadcast(
     sessions: Map<string, ActiveSession>,
     scheduleDisposeFn: (conversationId: string) => void,
+    disposeIfIdleFn: (conversationId: string) => void,
     conversationId: string,
     event: ChatSSEEvent
 ): void {
@@ -36,12 +37,12 @@ export function broadcast(
         subscriber.send(event);
     }
 
-    // After broadcasting an agent_end event, check if the session should be
-    // disposed. If the generation just finished and the user has already
-    // navigated away (no subscribers), the session was protected from disposal
-    // while streaming — now it's safe to clean up.
+    // After broadcasting an agent_end event, immediately try to dispose
+    // if there are no subscribers (user navigated away while generating).
+    // This prevents memory leaks where a finished session stays in memory
+    // until the 2-minute timer fires.
     if (event.event === "agent_end" && session.subscribers.size === 0) {
-        scheduleDisposeFn(conversationId);
+        disposeIfIdleFn(conversationId);
     }
 }
 

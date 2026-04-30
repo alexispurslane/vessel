@@ -1,33 +1,32 @@
 import { json } from "@sveltejs/kit";
-import type { RequestHandler } from "./$types.js";
+import { z } from "zod";
 import {
     verifyUser,
     createSessionToken,
     sessionCookie,
     userExists,
 } from "$lib/server/auth/index.js";
+import { apiError, apiHandler, unauthorized } from "$lib/server/api-errors.js";
+
+const PostBody = z.object({
+    username: z.string().min(1),
+    password: z.string().min(1),
+});
 
 /**
  * POST /api/auth/login
  * Verify credentials and set session cookie.
  */
-export const POST: RequestHandler = async ({ request }) => {
+export const POST = apiHandler(PostBody, async ({ body }) => {
     if (!userExists()) {
-        return json({ error: "No user exists yet. Run setup first." }, { status: 403 });
+        return apiError("No user exists yet. Run setup first.", 403);
     }
 
-    const body = await request.json();
-    const { username, password } = body;
-
-    if (!username || !password) {
-        return json({ error: "Username and password are required" }, { status: 400 });
+    if (!verifyUser(body.username, body.password)) {
+        return unauthorized("Invalid credentials");
     }
 
-    if (!verifyUser(username, password)) {
-        return json({ error: "Invalid credentials" }, { status: 401 });
-    }
-
-    const token = await createSessionToken(username);
+    const token = await createSessionToken(body.username);
 
     return json(
         { success: true },
@@ -37,4 +36,4 @@ export const POST: RequestHandler = async ({ request }) => {
             },
         }
     );
-};
+});

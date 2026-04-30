@@ -1,6 +1,6 @@
 import { json } from "@sveltejs/kit";
-import type { RequestHandler } from "./$types.js";
 import { listCustomModels } from "$lib/server/agent/session-store.js";
+import { tryApi } from "$lib/server/api-errors.js";
 
 /**
  * GET /api/models
@@ -8,7 +8,7 @@ import { listCustomModels } from "$lib/server/agent/session-store.js";
  * List available models. Only returns models the user has explicitly added
  * (custom_models from our DB) — not pi's built-in defaults.
  */
-export const GET: RequestHandler = async () => {
+export const GET = tryApi(async () => {
     const customModels = listCustomModels();
 
     // Map custom models to the ModelInfo format the frontend expects
@@ -24,4 +24,4 @@ export const GET: RequestHandler = async () => {
     }));
 
     return json(models);
-};
+});

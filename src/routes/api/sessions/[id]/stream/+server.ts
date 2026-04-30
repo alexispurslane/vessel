@@ -5,6 +5,7 @@ import {
 } from "$lib/server/agent/session-store.js";
 import type { ChatSSEEvent } from "$lib/server/agent/types.js";
 import { randomUUID } from "crypto";
+import { log } from "$lib/server/logger.js";
 
 /**
  * GET /api/sessions/[id]/stream
@@ -48,11 +49,11 @@ export const GET: RequestHandler = async ({ params, request, url }) => {
                 event: "connected",
                 data: { conversationId, timestamp: Date.now() },
             });
-            console.log(`[stream] Sent 'connected' event to client`);
+            log.debug("stream", "Sent 'connected' event to client");
 
             // Subscribe to agent events (may send stream_recovery if a message is in-flight)
             const unsubscribe = subscribeToConversation(conversationId, subscriberId, send);
-            console.log(`[stream] Subscribed ${subscriberId} to ${conversationId}`);
+            log.debug("stream", `Subscribed ${subscriberId} to ${conversationId}`);
 
             // Clean up on disconnect
             request.signal.addEventListener("abort", () => {

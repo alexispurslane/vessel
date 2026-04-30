@@ -35,8 +35,9 @@
 
     let { conversationId, open, onOpenChange }: Props = $props();
 
-    // Internal open state synced with prop, so bind:open works inside
-    let internalOpen = $state(open);
+    // Internal open state synced with prop, so bind:open works inside.
+    // Initialized to false; the $effect below syncs the prop value.
+    let internalOpen = $state(false);
 
     // Sync prop -> internal state
     $effect(() => {

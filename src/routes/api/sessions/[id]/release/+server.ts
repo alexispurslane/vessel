@@ -1,5 +1,5 @@
 import { json } from "@sveltejs/kit";
-import type { RequestHandler } from "./$types.js";
+import { tryApi } from "$lib/server/api-errors.js";
 import { disposeSession } from "$lib/server/agent/session-store.js";
 
 /**
@@ -13,7 +13,8 @@ import { disposeSession } from "$lib/server/agent/session-store.js";
  * - The user closes the browser tab / ends the browser session
  * - The frontend wants to eagerly release memory for an inactive conversation
  */
-export const POST: RequestHandler = async ({ params }) => {
-    disposeSession(params.id);
+export const POST = tryApi(async ({ params }) => {
+    const id = params.id!;
+    disposeSession(id);
     return json({ released: true });
-};
+});

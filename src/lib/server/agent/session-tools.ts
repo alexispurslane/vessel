@@ -9,6 +9,7 @@ import type { ActiveSession } from "./types.js";
 import type { ConversationSettings } from "$lib/types.js";
 import { getMcpServersFromDb } from "./mcp-config.js";
 import { getExtensionRunner, getToolRegistry, getToolDefinitions } from "./pi-adapter.js";
+import { log } from "$lib/server/logger.js";
 
 // --- Tool resolution types ---
 
@@ -248,7 +249,8 @@ export function getMcpServerStatus(activeSession: ActiveSession): McpServerStatu
         }
 
         return result;
-    } catch {
+    } catch (e) {
+        log.debug("session-tools", "Failed to get MCP server status", e);
         return [];
     }
 }
