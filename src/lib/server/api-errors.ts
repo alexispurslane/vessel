@@ -1,5 +1,5 @@
 import { json } from "@sveltejs/kit";
-import type { ZodSchema } from "zod";
+import type { ZodType as ZodSchema } from "zod";
 import type { RequestHandler } from "@sveltejs/kit";
 
 type MaybePromise<T> = T | Promise<T>;
@@ -77,8 +77,8 @@ export function apiHandler<T>(
         const result = schema.safeParse(raw);
         if (!result.success) {
             const firstError = result.error.issues[0];
-            const path = firstError?.path.join(".") || "body";
-            return badRequest(`${path}: ${firstError?.message}`);
+            const path = firstError.path.join(".") || "body";
+            return badRequest(`${path}: ${firstError.message}`);
         }
 
         try {

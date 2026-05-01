@@ -91,7 +91,7 @@
     <Tooltip.Root>
         <Tooltip.Trigger>
             {#snippet child({ props })}
-                {@render Button({ props })}
+                {@render Button({ props: props as Record<string, unknown> })}
             {/snippet}
         </Tooltip.Trigger>
         <Tooltip.Content

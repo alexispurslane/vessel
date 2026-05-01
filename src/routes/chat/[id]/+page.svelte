@@ -66,6 +66,9 @@
     import SearchResultsPanel from "$lib/components/chat/search-results-panel.svelte";
     import FetchedPagePanel from "$lib/components/chat/fetched-page-panel.svelte";
     import type { SearchResultItem } from "$lib/types.js";
+    import type { PageData } from "./$types.js";
+
+    const pageData = $derived($page.data as PageData);
 
     // --- Per-conversation persistence helpers ---
     const PANEL_STATE_PREFIX = "chat-panel-state:";
@@ -82,7 +85,7 @@
         try {
             const raw = localStorage.getItem(panelStateKey(conversationId));
             if (raw) {
-                const parsed = JSON.parse(raw);
+                const parsed = JSON.parse(raw) as PanelState;
                 return {
                     sidePanel: parsed.sidePanel ?? null,
                 };
@@ -101,7 +104,7 @@
         }
     }
 
-    let id = $derived($page.params.id!);
+    let id = $derived($page.params.id as string);
     const chat = getChat();
     const conversations = getConversations();
     const auth = getAuth();
@@ -119,15 +122,15 @@
         if (hydrated) {
             const msgs = chat.messages;
             console.log(
-                `[chat-lifecycle] displayMessages: hydrated=true, chat.messages.length=${msgs.length}, connected=${chat.connected}, generating=${chat.generating}`
+                `[chat-lifecycle] displayMessages: hydrated=true, chat.messages.length=${String(msgs.length)}, connected=${String(chat.connected)}, generating=${String(chat.generating)}`
             );
             return msgs;
         }
         // SSR path: use pre-converted ChatMessage[] from the server load.
         // Fall back to empty array if no SSR data (shouldn't normally happen).
-        const ssrMsgs = $page.data.messages ?? [];
+        const ssrMsgs = pageData.messages;
         console.log(
-            `[chat-lifecycle] displayMessages: hydrated=false, SSR messages.length=${ssrMsgs.length}`
+            `[chat-lifecycle] displayMessages: hydrated=false, SSR messages.length=${String(ssrMsgs.length)}`
         );
         return ssrMsgs;
     });
@@ -244,12 +247,12 @@
         const streamingMsg = displayMessages.find((m: ChatMessageType) => m.streaming);
         const result =
             !streamingMsg ||
-            (!streamingMsg.content?.trim() &&
+            (!streamingMsg.content.trim() &&
                 !streamingMsg.thinking &&
                 !streamingMsg.thinkingStreaming &&
                 !(streamingMsg.toolCalls && streamingMsg.toolCalls.length > 0));
         console.log(
-            `[chat-lifecycle] waitingForResponse: generating=${chat.generating}, foundStreamingMsg=${!!streamingMsg}, result=${result}, displayMessages.length=${displayMessages.length}`
+            `[chat-lifecycle] waitingForResponse: generating=${String(chat.generating)}, foundStreamingMsg=${String(!!streamingMsg)}, result=${String(result)}, displayMessages.length=${String(displayMessages.length)}`
         );
         return result;
     });
@@ -283,7 +286,7 @@
         const msgCount = displayMessages.length;
         const streamingCount = displayMessages.filter((m: ChatMessageType) => m.streaming).length;
         console.log(
-            `[chat-lifecycle] renderItems: displayMessages.length=${msgCount}, streaming=${streamingCount}, generating=${chat.generating}`
+            `[chat-lifecycle] renderItems: displayMessages.length=${String(msgCount)}, streaming=${String(streamingCount)}, generating=${String(chat.generating)}`
         );
 
         for (const msg of displayMessages) {
@@ -318,7 +321,7 @@
                     for (let i = 0; i < msg.toolCalls.length; i++) {
                         const tc = msg.toolCalls[i];
                         currentGroup.steps.push({
-                            id: `${msg.id}-tool-${i}`,
+                            id: `${msg.id}-tool-${String(i)}`,
                             messageId: msg.id,
                             type: "toolCall",
                             toolCall: tc,
@@ -354,16 +357,12 @@
         for (const item of renderItems) {
             if (item.type === "thinkingGroup") {
                 // When streaming has stopped and we haven't explicitly set open state, close it
-                if (!item.streaming && thinkingOpen[item.id] === undefined) {
+                if (!item.streaming && !(item.id in thinkingOpen)) {
                     thinkingOpen[item.id] = false;
                 }
             } else {
                 const msg = item.msg;
-                if (
-                    msg.thinkingStreaming === false &&
-                    thinkingOpen[msg.id] === undefined &&
-                    msg.thinking
-                ) {
+                if (msg.thinkingStreaming === false && !(msg.id in thinkingOpen) && msg.thinking) {
                     thinkingOpen[msg.id] = false;
                 }
             }
@@ -403,8 +402,8 @@
         }
         // When SSR provides a lastModel and no model is selected yet, use it
         // (this runs before connectStream, so chat.lastModel is still empty)
-        if (!defaultApplied && $page.data.lastModel) {
-            selectedModelId = $page.data.lastModel.modelId;
+        if (!defaultApplied && pageData.lastModel) {
+            selectedModelId = pageData.lastModel.modelId;
             defaultApplied = true;
         }
     });
@@ -441,7 +440,7 @@
     $effect(() => {
         const currentId = id;
         console.log(
-            `[chat-lifecycle] $effect: running for id=${currentId}, prev hydrated=${untrack(() => hydrated)}`
+            `[chat-lifecycle] $effect: running for id=${currentId}, prev hydrated=${String(untrack(() => hydrated))}`
         );
         // Reset the draft-restored flag — the new conversation's draft hasn't been restored yet
         draftRestored = false;
@@ -454,18 +453,18 @@
                 // Must be inside untrack() — otherwise $page.data becomes a dependency
                 // of this $effect, causing it to re-run (disconnecting/reconnecting the
                 // SSE stream and clearing messages) whenever $page.data changes.
-                sandboxFiles = $page.data.sandboxFiles ?? [];
+                sandboxFiles = pageData.sandboxFiles;
                 // Use SSR-provided history if available — avoids a client-side fetch
                 // and renders messages immediately (before SSE connects).
-                connectStream(currentId, $page.data.messageHistory).then(async () => {
+                void connectStream(currentId, pageData.messageHistory).then(async () => {
                     console.log(
-                        `[chat-lifecycle] $effect: connectStream resolved, chat.messages.length=${chat.messages.length}, connected=${chat.connected}, generating=${chat.generating}`
+                        `[chat-lifecycle] $effect: connectStream resolved, chat.messages.length=${String(chat.messages.length)}, connected=${String(chat.connected)}, generating=${String(chat.generating)}`
                     );
                     // The chat store now has messages from the server — switch rendering
                     // from SSR data ($page.data.messages) to the live store (chat.messages).
                     hydrated = true;
                     console.log(
-                        `[chat-lifecycle] $effect: hydrated=true, chat.messages.length=${chat.messages.length}`
+                        `[chat-lifecycle] $effect: hydrated=true, chat.messages.length=${String(chat.messages.length)}`
                     );
 
                     // After connecting (which loads history), set model selector to last used model
@@ -528,7 +527,7 @@
                             }
                         }
 
-                        send(initialMessage, modelId);
+                        void send(initialMessage, modelId);
                         // Clear the draft and the URL params to avoid re-sending on refresh/reconnect
                         sessionStorage.removeItem(draftKey(currentId));
                         // Use replaceState instead of goto to avoid triggering a SvelteKit
@@ -540,7 +539,9 @@
                 });
             });
         }
-        return () => untrack(() => disconnectStream());
+        return () => {
+            void untrack(() => disconnectStream());
+        };
     });
 
     // Auto-scroll to bottom when messages arrive or streaming content updates.
@@ -552,10 +553,10 @@
         const count = displayMessages.length;
         const lastMsg = displayMessages[count - 1];
         // Track all reactive content so we re-scroll as deltas arrive
-        const _content = lastMsg?.content;
-        const _thinking = lastMsg?.thinking;
-        const _streaming = lastMsg?.streaming;
-        const _thinkingStreaming = lastMsg?.thinkingStreaming;
+        const _content = lastMsg.content;
+        const _thinking = lastMsg.thinking;
+        const _streaming = lastMsg.streaming;
+        const _thinkingStreaming = lastMsg.thinkingStreaming;
         // Also scroll when upload progress appears/updates
         const _upload = uploadProgress;
 
@@ -573,7 +574,7 @@
         const text = inputText.trim();
         const filesToSend = [...pendingFiles];
         console.log(
-            `[chat-lifecycle] handleSend: text=${!!text}, files=${filesToSend.length}, connected=${chat.connected}, generating=${chat.generating}`
+            `[chat-lifecycle] handleSend: text=${String(!!text)}, files=${String(filesToSend.length)}, connected=${String(chat.connected)}, generating=${String(chat.generating)}`
         );
         if (
             (!text && filesToSend.length === 0 && pendingStatusUpdates.length === 0) ||
@@ -633,7 +634,7 @@
                 // Clear progress and send to the AI
                 // The user sees just their text; the AI gets status as invisible context
                 uploadProgress = null;
-                chat.sendToApi(text, selectedModelId || undefined, statusText || undefined);
+                void chat.sendToApi(text, selectedModelId || undefined, statusText || undefined);
             } catch (err) {
                 console.error("[chat] File upload failed:", err);
                 chat.setError(err instanceof Error ? err.message : "File upload failed");
@@ -646,10 +647,10 @@
                 // the user's text, then send with status content separately to the API
                 chat.addLocalUserMessage(text || "📎 Updated sandbox files");
                 const statusText = statusUpdates.join("\n\n");
-                chat.sendToApi(text, selectedModelId || undefined, statusText || undefined);
+                void chat.sendToApi(text, selectedModelId || undefined, statusText || undefined);
             } else {
                 // Normal send — no invisible status
-                send(text, selectedModelId || undefined);
+                void send(text, selectedModelId || undefined);
             }
             inputText = "";
             sessionStorage.removeItem(draftKey(id));
@@ -658,7 +659,7 @@
     }
 
     function handleAbort() {
-        abort();
+        void abort();
     }
 
     async function handleRemoveSandboxFile(path: string) {
@@ -692,15 +693,15 @@
     }
 
     function handleDeleteMessage(messageId: string, role: string) {
-        deleteMessage(messageId, role);
+        void deleteMessage(messageId, role);
     }
 
     function handleEditMessage(messageId: string, role: string, newText?: string) {
-        editMessage(messageId, role, newText);
+        void editMessage(messageId, role, newText);
     }
 
     function handleEditAssistantMessage(messageId: string, newText: string) {
-        editAssistantMessage(messageId, newText);
+        void editAssistantMessage(messageId, newText);
     }
 
     function handleSearchClick(query: string, results: SearchResultItem[]) {
@@ -752,7 +753,7 @@
     // Refresh DAG data when the chat navigation state changes (e.g., after delete/edit/regenerate)
     $effect(() => {
         if (sidePanel === "history" && !chat.navigating) {
-            loadDagData();
+            void loadDagData();
         }
     });
 
@@ -765,7 +766,7 @@
             sidePanel = saved.sidePanel;
             // If restoring the history panel, load DAG data
             if (saved.sidePanel === "history") {
-                loadDagData();
+                void loadDagData();
             }
         }
     });
@@ -785,7 +786,7 @@
     function handleGlobalKeydown(e: KeyboardEvent) {
         if (e.key === "Escape" && chat.generating) {
             e.preventDefault();
-            abort();
+            void abort();
         }
     }
 </script>
@@ -989,9 +990,12 @@
                                                 <div class="min-w-0 flex-1">
                                                     <ThinkingGroup
                                                         group={item}
-                                                        thinkingIsOpen={thinkingOpen[item.id]}
-                                                        onthinkingtoggle={(open) =>
-                                                            (thinkingOpen[item.id] = open)}
+                                                        thinkingIsOpen={thinkingOpen[
+                                                            item.id as string
+                                                        ]}
+                                                        onthinkingtoggle={(open: boolean) =>
+                                                            (thinkingOpen[item.id as string] =
+                                                                open)}
                                                         ondelete={handleDeleteMessage}
                                                         onregenerate={handleEditMessage}
                                                         navigating={chat.navigating}
@@ -1000,10 +1004,10 @@
                                             </div>
                                         </div>
                                     {:else}
-                                        {@const msg = item.msg}
+                                        {@const msg = item.msg as ChatMessageType}
                                         {@const nextItem = renderItems[i + 1]}
                                         {@const isLastConsecutive =
-                                            nextItem?.type !== "message" ||
+                                            nextItem.type !== "message" ||
                                             nextItem.msg.role !== msg.role}
                                         <div
                                             class="flex w-full {msg.role === 'user'
@@ -1034,7 +1038,7 @@
                                                     <ChatMessage
                                                         {msg}
                                                         thinkingIsOpen={thinkingOpen[msg.id]}
-                                                        onthinkingtoggle={(open) =>
+                                                        onthinkingtoggle={(open: boolean) =>
                                                             (thinkingOpen[msg.id] = open)}
                                                         scrollContainer={viewportEl}
                                                         ondelete={handleDeleteMessage}
@@ -1169,7 +1173,7 @@
                     onclose={() => {
                         searchResultsOpen = false;
                     }}
-                    onresultclick={(url, title, content) => {
+                    onresultclick={(url: string, title: string, content: string) => {
                         handlePageClick(url, title, content);
                     }}
                 />

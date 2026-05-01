@@ -69,9 +69,19 @@
             return;
         }
 
-        let config: McpServerEntry;
+        let config: McpServerEntry | undefined;
         try {
-            config = JSON.parse(mcpConfigJson);
+            const parsed = JSON.parse(mcpConfigJson) as unknown;
+            if (
+                typeof parsed === "object" &&
+                parsed !== null &&
+                ("command" in parsed || "url" in parsed)
+            ) {
+                config = parsed as McpServerEntry;
+            } else {
+                mcpError = "Config must have either 'command' (stdio) or 'url' (HTTP)";
+                return;
+            }
         } catch {
             mcpError = "Invalid JSON configuration";
             return;
@@ -121,7 +131,7 @@
     let searchSettingsError = $state<string | null>(null);
 
     // Internal appSettings for loading initial values
-    let appSettings = $state<Record<string, string>>({});
+    let appSettings = $state<Record<string, string | undefined>>({});
 
     function loadSearchSettings() {
         searchSettingsLoading = true;
@@ -159,13 +169,13 @@
     onMount(async () => {
         try {
             appSettings = await getSettings();
-            defaultAgentMode =
-                (appSettings["sandbox.defaultAgentMode"] as "agent" | "chat") || "agent";
+            const mode = appSettings["sandbox.defaultAgentMode"];
+            defaultAgentMode = mode === "chat" || mode === "agent" ? mode : "agent";
         } catch {
             // Use defaults
         }
         loadSearchSettings();
-        loadMcpServers();
+        await loadMcpServers();
     });
 </script>
 
@@ -251,9 +261,12 @@
                                         >
                                             <Switch
                                                 checked={server.config.defaultEnabled !== false}
-                                                onCheckedChange={(checked: boolean) => {
+                                                onCheckedChange={async (checked: boolean) => {
                                                     server.config.defaultEnabled = checked;
-                                                    upsertMcpServer(server.name, server.config);
+                                                    await upsertMcpServer(
+                                                        server.name,
+                                                        server.config
+                                                    );
                                                 }}
                                             />
                                             <span
@@ -267,14 +280,18 @@
                                         <Button
                                             variant="ghost"
                                             size="sm"
-                                            onclick={() => editMcpServer(server)}
+                                            onclick={() => {
+                                                editMcpServer(server);
+                                            }}
                                         >
                                             <Pencil class="h-4 w-4" />
                                         </Button>
                                         <Button
                                             variant="ghost"
                                             size="sm"
-                                            onclick={() => removeMcpServer(server.name)}
+                                            onclick={() => {
+                                                void removeMcpServer(server.name);
+                                            }}
                                         >
                                             <Trash2 class="h-4 w-4" />
                                         </Button>

@@ -99,7 +99,7 @@
 </script>
 
 <div class="flex flex-wrap gap-2">
-    {#each items as item, index (item[labelKey] + "-" + index)}
+    {#each items as item, index (`${String(item[labelKey])}-${String(index)}`)}
         {#if item.editing}
             <div
                 class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm"
@@ -131,8 +131,9 @@
                     size="sm"
                     variant="ghost"
                     class="h-5 w-5 rounded-full p-0"
-                    onclick={() =>
-                        confirmEdit(index, editValues[index] ?? (item[labelKey] as string))}
+                    onclick={() => {
+                        confirmEdit(index, editValues[index] ?? (item[labelKey] as string));
+                    }}
                 >
                     <Check class="h-3 w-3" />
                 </Button>
@@ -146,7 +147,9 @@
                     size="sm"
                     variant="ghost"
                     class="h-5 w-5 rounded-full p-0"
-                    onclick={() => startEdit(index)}
+                    onclick={() => {
+                        startEdit(index);
+                    }}
                 >
                     <Pencil class="h-3 w-3" />
                 </Button>
@@ -154,7 +157,9 @@
                     size="sm"
                     variant="ghost"
                     class="h-5 w-5 rounded-full p-0 text-destructive hover:text-destructive"
-                    onclick={() => deleteItem(index)}
+                    onclick={() => {
+                        deleteItem(index);
+                    }}
                 >
                     <Trash2 class="h-3 w-3" />
                 </Button>

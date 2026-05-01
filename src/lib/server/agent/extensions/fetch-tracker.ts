@@ -41,7 +41,7 @@ function hasVisibleText(message: TurnEndEvent["message"]): boolean {
 
     for (const block of content) {
         if (block.type === "text") {
-            const text = block.text?.trim() ?? "";
+            const text = block.text.trim();
             // Skip turns that are just a bare newline or empty — those are
             // intermediate "call a tool" turns, not substantive responses.
             if (text.length > 0) return true;
@@ -68,10 +68,10 @@ export const fetchTracker: ExtensionFactory = (pi) => {
                 sources.push({
                     type: "page",
                     url: details.url,
-                    title: details.title ?? "",
-                    contentLength: details.contentLength ?? 0,
-                    truncated: details.truncated ?? false,
-                    content: details.content ?? "",
+                    title: details.title,
+                    contentLength: details.contentLength,
+                    truncated: details.truncated,
+                    content: details.content,
                     turn: currentTurn,
                 });
             }
@@ -83,8 +83,8 @@ export const fetchTracker: ExtensionFactory = (pi) => {
                 sources.push({
                     type: "search",
                     query: details.query,
-                    resultCount: details.resultCount ?? 0,
-                    results: (details.results ?? []).map((r) => ({
+                    resultCount: details.resultCount,
+                    results: (details.results).map((r) => ({
                         url: r.url,
                         title: r.title,
                         text: r.text,
@@ -99,7 +99,7 @@ export const fetchTracker: ExtensionFactory = (pi) => {
     const flush = () => {
         if (sources.length === 0) return;
 
-        log.debug("fetch-tracker", `Flushing ${sources.length} sources`);
+        log.debug("fetch-tracker", `Flushing ${String(sources.length)} sources`);
 
         // Persist in session file as a CustomEntry — NOT sent to LLM context.
         pi.appendEntry("fetched_sources", sources);
@@ -115,7 +115,7 @@ export const fetchTracker: ExtensionFactory = (pi) => {
         // Intermediate turns (tool call + thinking only) should keep
         // accumulating sources until the final response or agent_end.
         const visible = hasVisibleText(event.message);
-        log.debug("fetch-tracker", `turn_end, hasVisibleText: ${visible}, accumulated sources: ${sources.length}`);
+        log.debug("fetch-tracker", `turn_end, hasVisibleText: ${String(visible)}, accumulated sources: ${String(sources.length)}`);
         if (!visible) return;
         flush();
         currentTurn++;

@@ -360,10 +360,10 @@
     }
 
     onMount(() => {
-        loadProviders();
-        loadModels();
-        loadCustomModels();
-        loadAppSettings();
+        void loadProviders();
+        void loadModels();
+        void loadCustomModels();
+        void loadAppSettings();
     });
 </script>
 
@@ -538,7 +538,7 @@
                                         {fetchError[prov.provider]}
                                     </p>
                                 {/if}
-                                {#if fetchedModels[prov.provider]?.length > 0}
+                                {#if fetchedModels[prov.provider].length > 0}
                                     <div class="mt-3 border-t pt-3">
                                         <p class="mb-2 text-xs font-medium text-muted-foreground">
                                             Available models ({fetchedModels[prov.provider].length})
@@ -704,7 +704,9 @@
                                         <Button
                                             variant="ghost"
                                             size="sm"
-                                            onclick={() => editCustomModel(cm)}
+                                            onclick={() => {
+                                                editCustomModel(cm);
+                                            }}
                                         >
                                             <Pencil class="h-4 w-4" />
                                         </Button>

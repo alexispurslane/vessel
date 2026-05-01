@@ -1,6 +1,6 @@
 import { json } from "@sveltejs/kit";
 import { z } from "zod";
-import { apiHandler, tryApi } from "$lib/server/api-errors.js";
+import { apiHandler, tryApi, badRequest } from "$lib/server/api-errors.js";
 import {
     sendMessage,
     switchSessionModel,
@@ -20,7 +20,8 @@ const PostBody = z.object({
  * Returns messages with their model info, and the last-used model.
  */
 export const GET = tryApi(async ({ params }) => {
-    const id = params.id!;
+    const id = params.id;
+    if (!id) return badRequest("Missing session id");
     const history = await getSessionHistory(id);
     return json(history);
 });
@@ -39,7 +40,8 @@ export const GET = tryApi(async ({ params }) => {
  * comes through the event stream.
  */
 export const POST = apiHandler(PostBody, async ({ body, event }) => {
-    const id = event.params.id!;
+    const id = event.params.id;
+    if (!id) return badRequest("Missing session id");
     const { content, model_id, status_content } = body;
 
     // If a model is specified, switch to it before sending
@@ -55,7 +57,7 @@ export const POST = apiHandler(PostBody, async ({ body, event }) => {
 
     // Don't await the full prompt — the events flow through the SSE stream
     // We just kick it off and return immediately
-    sendMessage(id, content, status_content).catch((err) => {
+    sendMessage(id, content, status_content).catch((err: unknown) => {
         console.error(`Error in session ${id}:`, err);
     });
 

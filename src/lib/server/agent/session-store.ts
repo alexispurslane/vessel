@@ -20,6 +20,7 @@ import { mkdirSync, rmSync, existsSync } from "fs";
 import { resolve } from "path";
 import { randomUUID } from "crypto";
 import { log } from "$lib/server/logger.js";
+import { safeJsonParse, stringArraySchema, recordSchema, tryJsonParse } from "$lib/utils.js";
 import {
     createAgentSession,
     createEventBus,
@@ -230,7 +231,7 @@ export function listConversations(): ConversationListItem[] {
     return rows.map((row) => ({
         id: row.id,
         title: row.title,
-        tags: JSON.parse(row.tags) as string[],
+        tags: safeJsonParse(row.tags, stringArraySchema) ?? [],
         createdAt: row.created_at,
         updatedAt: row.updated_at,
     }));
@@ -241,7 +242,7 @@ export function listConversations(): ConversationListItem[] {
  * pi session file, delete the workspace directory (if configured), and remove the DB row.
  * Only called when the user explicitly hits the trash icon.
  */
-export async function destroyConversation(conversationId: string): Promise<void> {
+export function destroyConversation(conversationId: string): void {
     // 1. Dispose in-memory session if loaded (force: the user explicitly deleted the conversation)
     disposeSession(conversationId, { force: true });
 
@@ -412,7 +413,7 @@ async function createSessionInfrastructure(
 
     // If MCP servers are configured and we have a per-conversation config path,
     // set the mcp-config flag so pi-mcp-adapter picks it up during session_start.
-    if (hasMcpServers && mcpFlagValues.size > 0 && extensionsResult) {
+    if (hasMcpServers && mcpFlagValues.size > 0) {
         for (const [name, value] of mcpFlagValues) {
             extensionsResult.runtime.flagValues.set(name, value);
         }
@@ -515,7 +516,7 @@ function resolveAppendSystemPrompt(conversationSettings: ConversationSettings | 
         const globalValue = readGlobalSetting("agent.appendSystemPrompt");
         if (globalValue) {
             try {
-                rawAppend = JSON.parse(globalValue);
+                rawAppend = tryJsonParse(globalValue, stringArraySchema);
             } catch (e) {
                 log.debug("session-store", "Failed to parse global append system prompt setting", e);
                 rawAppend = null;
@@ -526,7 +527,7 @@ function resolveAppendSystemPrompt(conversationSettings: ConversationSettings | 
     const userAppend: string[] = rawAppend
         ? Array.isArray(rawAppend)
             ? rawAppend
-            : [rawAppend as string]
+            : [rawAppend]
         : [];
     // Prepend the Vessel-specific append prompt (from VESSEL_APPEND.md)
     const vesselAppend = loadVesselAppendPrompt();
@@ -582,7 +583,7 @@ function setupSessionEventSubscriptions(
 
     const unsubscribeEventBus = eventBus.on("fetched_sources", (data) => {
         const sources = data as FetchedSource[];
-        log.debug("fetch-tracker", `EventBus received fetched_sources: ${sources.length} sources for conversation ${conversationId}`);
+        log.debug("fetch-tracker", `EventBus received fetched_sources: ${String(sources.length)} sources for conversation ${conversationId}`);
         broadcast(sessions, scheduleDispose, disposeIfIdle, conversationId, {
             event: "fetched_sources",
             data: { sources },
@@ -913,7 +914,8 @@ export function restartAllSessions(): number {
     const ids = [...sessions.keys()];
     let restarted = 0;
     for (const id of ids) {
-        const session = sessions.get(id)!;
+        const session = sessions.get(id);
+        if (!session) continue;
 
         // Don't restart mid-generation — skip streaming sessions
         if (session.agentSession.isStreaming) continue;
@@ -931,7 +933,7 @@ export function restartAllSessions(): number {
     }
 
     if (restarted > 0) {
-        log.info("session-store", `Restarted ${restarted} session(s) — they will be re-created on next access`);
+        log.info("session-store", `Restarted ${String(restarted)} session(s) — they will be re-created on next access`);
     }
     return restarted;
 }
@@ -982,8 +984,12 @@ export async function getSessionHistory(conversationId: string): Promise<{
     // Cancel any pending disposal since we're actively using the session
     cancelDispose(conversationId);
 
+    const session = sessions.get(conversationId);
+    if (!session) {
+        return { messages: [], model: null };
+    }
     return getHistoryFromSession(
-        sessions.get(conversationId)!,
+        session,
         row
     );
 }
@@ -993,7 +999,7 @@ export async function getSessionHistory(conversationId: string): Promise<{
  * active AgentSession. The session must be loaded in memory (getOrCreateSession
  * handles this automatically).
  */
-export async function getSessionAgentInfo(conversationId: string): Promise<{
+export function getSessionAgentInfo(conversationId: string): {
     systemPrompt: string;
     customSystemPrompt: string | null;
     appendSystemPrompt: string[] | null;
@@ -1010,7 +1016,7 @@ export async function getSessionAgentInfo(conversationId: string): Promise<{
         scope: string;
         disableModelInvocation: boolean;
     }>;
-} | null> {
+} | null {
     // Ensure the session is loaded
     const activeSession = sessions.get(conversationId);
     if (!activeSession) {
@@ -1137,7 +1143,7 @@ export function listCustomModels(): CustomModelDef[] {
         api: m.api as string,
         baseUrl: m.base_url as string,
         reasoning: !!m.reasoning,
-        inputTypes: JSON.parse((m.input_types as string) || '["text"]'),
+        inputTypes: safeJsonParse((m.input_types as string) || '["text"]', stringArraySchema) ?? ["text"],
         contextWindow: m.context_window as number,
         maxTokens: m.max_tokens as number,
         cost: {
@@ -1146,7 +1152,7 @@ export function listCustomModels(): CustomModelDef[] {
             cacheRead: m.cost_cache_read as number,
             cacheWrite: m.cost_cache_write as number,
         },
-        compat: m.compat ? JSON.parse(m.compat as string) : undefined,
+        compat: m.compat ? safeJsonParse(m.compat as string, recordSchema) ?? undefined : undefined,
     }));
 }
 

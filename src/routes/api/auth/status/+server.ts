@@ -6,10 +6,10 @@ import { userExists } from "$lib/server/auth/index.js";
  * GET /api/auth/status
  * Check if auth is set up and if the user is logged in.
  */
-export const GET: RequestHandler = async ({ locals }) => {
+export const GET: RequestHandler = ({ locals }) => {
     return json({
         setup: userExists(),
-        authenticated: !!locals.authenticated,
+        authenticated: locals.authenticated,
         username: locals.username,
     });
 };

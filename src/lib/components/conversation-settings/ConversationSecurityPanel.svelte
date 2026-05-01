@@ -222,9 +222,9 @@
             if (useCustomSecrets) {
                 const secretsObj: Record<string, { value: string; hosts: string[] }> = {};
                 for (const s of secrets) {
-                    const key = (s["key"] as string) ?? "";
-                    const value = (s["value"] as string) ?? "";
-                    const hosts = (s["hosts"] as string) ?? "";
+                    const key = s["key"] as string;
+                    const value = s["value"] as string;
+                    const hosts = s["hosts"] as string;
                     if (key.trim()) {
                         secretsObj[key.trim()] = {
                             value,
@@ -248,7 +248,7 @@
             //   true  → explicit list of enabled server names
             //   false → [] (off — no MCP servers at all)
             settings.enabledMcpServers =
-                mcpState === null ? null : mcpState === true ? Array.from(enabledMcpServers) : [];
+                mcpState === null ? null : mcpState ? Array.from(enabledMcpServers) : [];
 
             const result = await updateConversationSettings(conversationId, settings);
 
@@ -270,7 +270,7 @@
     // Load settings when the panel's conversation changes
     $effect(() => {
         if (conversationId) {
-            loadSettings();
+            void loadSettings();
         }
     });
 </script>
@@ -502,7 +502,7 @@
                         {#if useCustomReadPaths}
                             <PathAutocompletePillList
                                 items={readPaths}
-                                onChange={(items) => (readPaths = items)}
+                                onChange={(items: typeof readPaths) => (readPaths = items)}
                                 addPlaceholder="/path"
                                 addButtonLabel="Add"
                             />
@@ -523,7 +523,7 @@
                         {#if useCustomWritePaths}
                             <PathAutocompletePillList
                                 items={writePaths}
-                                onChange={(items) => (writePaths = items)}
+                                onChange={(items: typeof writePaths) => (writePaths = items)}
                                 addPlaceholder="/path"
                                 addButtonLabel="Add"
                             />
@@ -640,7 +640,8 @@
                                         <PillList
                                             items={allowedDomains}
                                             labelKey="domain"
-                                            onChange={(items) => (allowedDomains = items)}
+                                            onChange={(items: PillItem[]) =>
+                                                (allowedDomains = items)}
                                             addPlaceholder="example.com"
                                             addButtonLabel="Add"
                                             inputWidth="w-36"
@@ -687,7 +688,7 @@
                                                 showInView: false,
                                             },
                                         ]}
-                                        onChange={(items) => (secrets = items)}
+                                        onChange={(items: KeyValueItem[]) => (secrets = items)}
                                         addButtonLabel="Add Secret"
                                     />
                                 {/if}
@@ -712,7 +713,7 @@
                             <PillList
                                 items={allowedEnvVars}
                                 labelKey="name"
-                                onChange={(items) => (allowedEnvVars = items)}
+                                onChange={(items: PillItem[]) => (allowedEnvVars = items)}
                                 addPlaceholder="VAR_NAME"
                                 addButtonLabel="Add"
                                 inputWidth="w-28"

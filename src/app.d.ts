@@ -7,7 +7,13 @@ declare global {
             authenticated: boolean;
             username?: string;
         }
-        // interface PageData {}
+        interface PageData {
+            auth?: {
+                setup: boolean;
+                authenticated: boolean;
+                username?: string;
+            };
+        }
         // interface PageState {}
         // interface Platform {}
     }

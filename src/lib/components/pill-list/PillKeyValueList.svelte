@@ -62,7 +62,7 @@
         const item = items[index];
         const currentValues: Record<string, string> = {};
         for (const field of fields) {
-            currentValues[field.key] = (item[field.key] as string) ?? "";
+            currentValues[field.key] = item[field.key] as string;
         }
         editValues[index] = currentValues;
         onChange(items.map((item, i) => ({ ...item, editing: i === index })));
@@ -70,15 +70,13 @@
 
     function confirmEdit(index: number) {
         const vals = editValues[index];
-        if (vals) {
-            const updated = { ...items[index] };
-            for (const field of fields) {
-                updated[field.key] = vals[field.key] ?? (items[index][field.key] as string);
-            }
-            updated.editing = false;
-            onChange(items.map((item, i) => (i === index ? updated : { ...item, editing: false })));
+        const updated = { ...items[index] };
+        for (const field of fields) {
+            updated[field.key] = vals[field.key];
         }
-        delete editValues[index];
+        updated.editing = false;
+        onChange(items.map((item, i) => (i === index ? updated : { ...item, editing: false })));
+        Reflect.deleteProperty(editValues, index);
     }
 
     function cancelEdit(index: number) {
@@ -87,11 +85,11 @@
                 i === index ? { ...item, editing: false } : { ...item, editing: false }
             )
         );
-        delete editValues[index];
+        Reflect.deleteProperty(editValues, index);
     }
 
     function deleteItem(index: number) {
-        delete editValues[index];
+        Reflect.deleteProperty(editValues, index);
         onChange(items.filter((_, i) => i !== index));
     }
 
@@ -99,7 +97,7 @@
         const newItem: KeyValueItem = { editing: false };
         let hasRequired = true;
         for (const field of fields) {
-            const val = newValues[field.key]?.trim() ?? "";
+            const val = newValues[field.key].trim();
             // First field and second field are required (key + value)
             if ((field === fields[0] || field === fields[1]) && !val) {
                 hasRequired = false;
@@ -119,7 +117,7 @@
 </script>
 
 <div class="flex flex-wrap gap-2">
-    {#each items as item, index (item[fields[0].key] + "-" + index)}
+    {#each items as item, index (`${String(item[fields[0].key])}-${String(index)}`)}
         {#if item.editing}
             <div
                 class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm"
@@ -133,12 +131,12 @@
                             ? 'font-mono'
                             : ''} focus:ring-1 focus:ring-ring"
                         placeholder={field.placeholder}
-                        value={editValues[index]?.[field.key] ?? (item[field.key] as string)}
+                        value={editValues[index][field.key] ?? item[field.key]}
                         oninput={(e) => {
-                            if (!editValues[index]) {
+                            if (!(index in editValues)) {
                                 const vals: Record<string, string> = {};
                                 for (const f of fields) {
-                                    vals[f.key] = (item[f.key] as string) ?? "";
+                                    vals[f.key] = item[f.key] as string;
                                 }
                                 editValues[index] = vals;
                             }
@@ -158,7 +156,9 @@
                     variant="ghost"
                     size="icon"
                     class="h-5 w-5"
-                    onclick={() => confirmEdit(index)}
+                    onclick={() => {
+                        confirmEdit(index);
+                    }}
                 >
                     <Check class="h-3 w-3" />
                 </Button>
@@ -196,7 +196,9 @@
                     variant="ghost"
                     size="icon"
                     class="h-5 w-5"
-                    onclick={() => startEdit(index)}
+                    onclick={() => {
+                        startEdit(index);
+                    }}
                 >
                     <Pencil class="h-3 w-3" />
                 </Button>
@@ -204,7 +206,9 @@
                     variant="ghost"
                     size="icon"
                     class="h-5 w-5"
-                    onclick={() => deleteItem(index)}
+                    onclick={() => {
+                        deleteItem(index);
+                    }}
                 >
                     <Trash2 class="h-3 w-3" />
                 </Button>
@@ -224,7 +228,7 @@
                         ? 'font-mono'
                         : ''} focus:ring-1 focus:ring-ring"
                     placeholder={field.placeholder}
-                    value={newValues[field.key] ?? ""}
+                    value={newValues[field.key]}
                     oninput={(e) => {
                         newValues[field.key] = e.currentTarget.value;
                     }}

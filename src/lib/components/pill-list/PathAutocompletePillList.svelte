@@ -91,10 +91,10 @@
     }
 
     function cleanupEdit(index: number) {
-        delete editValues[index];
-        delete editCompletions[index];
-        delete editShowCompletions[index];
-        delete editSelectedIndex[index];
+        Reflect.deleteProperty(editValues, index);
+        Reflect.deleteProperty(editCompletions, index);
+        Reflect.deleteProperty(editShowCompletions, index);
+        Reflect.deleteProperty(editSelectedIndex, index);
     }
 
     function deleteItem(index: number) {
@@ -206,7 +206,7 @@
 </script>
 
 <div class="flex flex-wrap gap-2">
-    {#each items as item, index (item.path + "-" + index)}
+    {#each items as item, index (`${item.path}-${String(index)}`)}
         {#if item.editing}
             <div
                 class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm relative"
@@ -217,7 +217,9 @@
                     placeholder={addPlaceholder}
                     class="w-48 rounded border-0 bg-muted px-2 py-1 text-xs font-mono focus:ring-1 focus:ring-ring"
                     oninput={(e) => handleEditInput(index, e.currentTarget.value)}
-                    onkeydown={(e) => handleEditKeydown(index, e)}
+                    onkeydown={(e) => {
+                        handleEditKeydown(index, e);
+                    }}
                 />
                 {#if (editShowCompletions[index] ?? false) && (editCompletions[index] ?? []).length > 0}
                     <div
@@ -246,7 +248,9 @@
                     size="sm"
                     variant="ghost"
                     class="h-5 w-5 rounded-full p-0"
-                    onclick={() => confirmEdit(index)}
+                    onclick={() => {
+                        confirmEdit(index);
+                    }}
                 >
                     <Check class="h-3 w-3" />
                 </Button>
@@ -260,7 +264,9 @@
                     size="sm"
                     variant="ghost"
                     class="h-5 w-5 rounded-full p-0"
-                    onclick={() => startEdit(index)}
+                    onclick={() => {
+                        startEdit(index);
+                    }}
                 >
                     <Pencil class="h-3 w-3" />
                 </Button>
@@ -268,7 +274,9 @@
                     size="sm"
                     variant="ghost"
                     class="h-5 w-5 rounded-full p-0 text-destructive hover:text-destructive"
-                    onclick={() => deleteItem(index)}
+                    onclick={() => {
+                        deleteItem(index);
+                    }}
                 >
                     <Trash2 class="h-3 w-3" />
                 </Button>

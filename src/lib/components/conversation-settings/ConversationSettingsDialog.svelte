@@ -188,9 +188,9 @@
             if (useCustomSecrets) {
                 const secretsObj: Record<string, { value: string; hosts: string[] }> = {};
                 for (const s of secrets) {
-                    const key = (s["key"] as string) ?? "";
-                    const value = (s["value"] as string) ?? "";
-                    const hosts = (s["hosts"] as string) ?? "";
+                    const key = s["key"] as string;
+                    const value = s["value"] as string;
+                    const hosts = s["hosts"] as string;
                     if (key.trim()) {
                         secretsObj[key.trim()] = {
                             value,
@@ -229,7 +229,7 @@
     // Load settings when dialog opens
     $effect(() => {
         if (open && conversationId) {
-            loadSettings();
+            void loadSettings();
         }
     });
 </script>
@@ -361,7 +361,7 @@
                         {#if useCustomReadPaths}
                             <PathAutocompletePillList
                                 items={readPaths}
-                                onChange={(items) => (readPaths = items)}
+                                onChange={(items: typeof readPaths) => (readPaths = items)}
                                 addPlaceholder="/path/to/directory"
                                 addButtonLabel="Add Path"
                             />
@@ -384,7 +384,7 @@
                         {#if useCustomWritePaths}
                             <PathAutocompletePillList
                                 items={writePaths}
-                                onChange={(items) => (writePaths = items)}
+                                onChange={(items: typeof writePaths) => (writePaths = items)}
                                 addPlaceholder="/path/to/directory"
                                 addButtonLabel="Add Path"
                             />
@@ -499,7 +499,8 @@
                                         <PillList
                                             items={allowedDomains}
                                             labelKey="domain"
-                                            onChange={(items) => (allowedDomains = items)}
+                                            onChange={(items: PillItem[]) =>
+                                                (allowedDomains = items)}
                                             addPlaceholder="example.com"
                                             addButtonLabel="Add Domain"
                                             inputWidth="w-36"
@@ -546,7 +547,7 @@
                                                 showInView: false,
                                             },
                                         ]}
-                                        onChange={(items) => (secrets = items)}
+                                        onChange={(items: KeyValueItem[]) => (secrets = items)}
                                         addButtonLabel="Add Secret"
                                     />
                                 {/if}
@@ -575,7 +576,7 @@
                             <PillList
                                 items={allowedEnvVars}
                                 labelKey="name"
-                                onChange={(items) => (allowedEnvVars = items)}
+                                onChange={(items: PillItem[]) => (allowedEnvVars = items)}
                                 addPlaceholder="VAR_NAME"
                                 addButtonLabel="Add Variable"
                                 inputWidth="w-28"
@@ -601,7 +602,12 @@
         {/if}
 
         <DialogFooter>
-            <Button variant="outline" onclick={() => handleOpenChange(false)}>Cancel</Button>
+            <Button
+                variant="outline"
+                onclick={() => {
+                    handleOpenChange(false);
+                }}>Cancel</Button
+            >
             <Button onclick={saveSettings} disabled={saving}>
                 {#if saving}
                     <Spinner class="mr-1.5 h-4 w-4" />

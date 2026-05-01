@@ -11,8 +11,10 @@
 
 import { resolve } from "path";
 import { writeFileSync, mkdirSync, existsSync, renameSync } from "fs";
+import { z } from "zod";
 import { getDb } from "../db/index.js";
 import { log } from "$lib/server/logger.js";
+import { tryJsonParse } from "$lib/utils.js";
 
 const DATA_DIR = resolve(process.cwd(), "data");
 const AGENT_DIR = resolve(DATA_DIR, "agent");
@@ -23,25 +25,30 @@ export const MCP_CONFIG_PATH = resolve(AGENT_DIR, "mcp.json");
 /** The settings key used to store the MCP servers config blob */
 export const MCP_SETTINGS_KEY = "mcp.servers";
 
+/** Zod schema for a single MCP server entry */
+export const mcpServerEntrySchema = z.object({
+    command: z.string().optional(),
+    args: z.array(z.string()).optional(),
+    env: z.record(z.string(), z.string()).optional(),
+    cwd: z.string().optional(),
+    url: z.string().optional(),
+    headers: z.record(z.string(), z.string()).optional(),
+    auth: z.union([z.literal("oauth"), z.literal("bearer"), z.literal(false)]).optional(),
+    bearerToken: z.string().optional(),
+    lifecycle: z.enum(["keep-alive", "lazy", "eager"]).optional(),
+    idleTimeout: z.number().optional(),
+    exposeResources: z.boolean().optional(),
+    directTools: z.union([z.boolean(), z.array(z.string())]).optional(),
+    excludeTools: z.array(z.string()).optional(),
+    debug: z.boolean().optional(),
+    defaultEnabled: z.boolean().optional(),
+});
+
+/** Zod schema for the full MCP servers config */
+const mcpServersSchema = z.record(z.string(), mcpServerEntrySchema);
+
 /** A simplified MCP server entry matching Claude-like JSON config syntax */
-export interface McpServerEntry {
-    command?: string;
-    args?: string[];
-    env?: Record<string, string>;
-    cwd?: string;
-    url?: string;
-    headers?: Record<string, string>;
-    auth?: "oauth" | "bearer" | false;
-    bearerToken?: string;
-    lifecycle?: "keep-alive" | "lazy" | "eager";
-    idleTimeout?: number;
-    exposeResources?: boolean;
-    directTools?: boolean | string[];
-    excludeTools?: string[];
-    debug?: boolean;
-    /** Whether this server is enabled by default in new conversations (default: true) */
-    defaultEnabled?: boolean;
-}
+export type McpServerEntry = z.infer<typeof mcpServerEntrySchema>;
 
 /** MCP server info returned to the frontend (sensitive fields masked) */
 export interface McpServerInfo {
@@ -62,13 +69,8 @@ export function getMcpServersFromDb(): Record<string, McpServerEntry> {
     if (!row?.value) return {};
 
     try {
-        const parsed = JSON.parse(row.value);
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-            return parsed as Record<string, McpServerEntry>;
-        }
-        return {};
-    } catch (e) {
-        log.debug("mcp-config", "Failed to parse MCP server config JSON", e);
+        return tryJsonParse(row.value, mcpServersSchema);
+    } catch {
         return {};
     }
 }
@@ -110,7 +112,7 @@ export function upsertMcpServer(name: string, config: McpServerEntry): void {
 export function deleteMcpServer(name: string): boolean {
     const servers = getMcpServersFromDb();
     if (!(name in servers)) return false;
-    delete servers[name];
+    Reflect.deleteProperty(servers, name);
     setMcpServersToDb(servers);
     writeMcpConfigFile(servers);
     return true;
@@ -146,7 +148,7 @@ export function writeMcpConfigFile(servers?: Record<string, McpServerEntry>): vo
     mkdirSync(AGENT_DIR, { recursive: true });
 
     // Atomic write: write to temp file then rename
-    const tmpPath = `${MCP_CONFIG_PATH}.${process.pid}.tmp`;
+    const tmpPath = `${MCP_CONFIG_PATH}.${String(process.pid)}.tmp`;
     writeFileSync(tmpPath, JSON.stringify(mcpJson, null, 2) + "\n", "utf-8");
     renameSync(tmpPath, MCP_CONFIG_PATH);
 }
@@ -217,7 +219,7 @@ export function writeConversationMcpConfig(
     mkdirSync(convDir, { recursive: true });
 
     const configPath = resolve(convDir, "mcp.json");
-    const tmpPath = `${configPath}.${process.pid}.tmp`;
+    const tmpPath = `${configPath}.${String(process.pid)}.tmp`;
     writeFileSync(tmpPath, JSON.stringify(mcpJson, null, 2) + "\n", "utf-8");
     renameSync(tmpPath, configPath);
 

@@ -64,10 +64,9 @@
     // Auto-scroll thinking block to bottom as streaming tokens arrive
     $effect(() => {
         if (group.streaming && thinkingEl) {
+            const el = thinkingEl;
             requestAnimationFrame(() => {
-                if (thinkingEl) {
-                    thinkingEl.scrollTop = thinkingEl.scrollHeight;
-                }
+                el.scrollTop = el.scrollHeight;
             });
         }
     });
@@ -175,7 +174,9 @@
         <div class="flex justify-end gap-1 opacity-0 group-hover/tg:opacity-100 transition-opacity">
             {#if onregenerate}
                 <button
-                    onclick={() => handleRegenerate()}
+                    onclick={() => {
+                        handleRegenerate();
+                    }}
                     class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
                     aria-label="Regenerate response"
                     title="Regenerate response"
@@ -185,7 +186,9 @@
             {/if}
             {#if ondelete}
                 <button
-                    onclick={() => handleDelete()}
+                    onclick={() => {
+                        handleDelete();
+                    }}
                     class="inline-flex items-center gap-1 text-[11px] transition-colors cursor-pointer px-1.5 py-0.5 rounded {confirmDelete
                         ? 'text-destructive bg-destructive/10'
                         : 'text-muted-foreground hover:text-foreground hover:bg-muted'}"

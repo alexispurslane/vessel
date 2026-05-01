@@ -153,7 +153,7 @@
     // Load on mount or when conversation changes
     $effect(() => {
         if (conversationId) {
-            loadAgentInfo();
+            void loadAgentInfo();
         }
     });
 </script>

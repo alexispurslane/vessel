@@ -68,7 +68,7 @@
         setActiveConversation(null);
         clearMessages();
         disconnectStream();
-        goto(resolve("/"));
+        void goto(resolve("/"));
     }
 
     async function handleDeleteConversation(id: string, e: MouseEvent) {
@@ -78,14 +78,14 @@
         if (id === convs.activeId) {
             clearMessages();
             disconnectStream();
-            goto(resolve("/"));
+            void goto(resolve("/"));
         }
     }
 
-    async function handleSelectConversation(id: string) {
+    function handleSelectConversation(id: string) {
         if (id === convs.activeId) return;
         switchConversation(id);
-        goto(resolve(`/chat/${id}`));
+        void goto(resolve(`/chat/${id}`));
     }
 
     async function handleLogout() {
@@ -229,7 +229,7 @@
             <SidebarMenuItem>
                 <SidebarMenuButton
                     isActive={currentPath === "/settings"}
-                    onclick={() => goto(resolve("/settings"))}
+                    onclick={() => void goto(resolve("/settings"))}
                 >
                     <Settings />
                     Settings
@@ -264,8 +264,8 @@
         <Input
             bind:value={renameValue}
             placeholder="Conversation title"
-            onkeydown={(e) => {
-                if (e.key === "Enter") commitRename();
+            onkeydown={(e: KeyboardEvent) => {
+                if (e.key === "Enter") void commitRename();
             }}
         />
         <DialogFooter>
@@ -276,7 +276,7 @@
                     renameValue = "";
                 }}>Cancel</Button
             >
-            <Button onclick={commitRename}>Save</Button>
+            <Button onclick={() => void commitRename()}>Save</Button>
         </DialogFooter>
     </DialogContent>
 </Dialog>
@@ -298,8 +298,8 @@
         <Input
             bind:value={tagValue}
             placeholder="tag1, tag2, tag3"
-            onkeydown={(e) => {
-                if (e.key === "Enter") commitTag();
+            onkeydown={(e: KeyboardEvent) => {
+                if (e.key === "Enter") void commitTag();
             }}
         />
         <DialogFooter>
@@ -310,7 +310,7 @@
                     tagValue = "";
                 }}>Cancel</Button
             >
-            <Button onclick={commitTag}>Save</Button>
+            <Button onclick={() => void commitTag()}>Save</Button>
         </DialogFooter>
     </DialogContent>
 </Dialog>

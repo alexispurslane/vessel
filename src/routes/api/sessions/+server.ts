@@ -12,7 +12,7 @@ const PostBody = z.object({
  * GET /api/sessions
  * List all conversations (for sidebar).
  */
-export const GET = tryApi(async () => {
+export const GET = tryApi(() => {
     return json(listConversations());
 });
 
@@ -21,8 +21,8 @@ export const GET = tryApi(async () => {
  * Create a new conversation.
  * Only requires model_id — provider is resolved automatically.
  */
-export const POST = apiHandler(PostBody, async ({ body }) => {
+export const POST = apiHandler(PostBody, ({ body }) => {
     const { title, model_id } = body;
-    const id = await createConversation(title, model_id);
+    const id = createConversation(title, model_id);
     return json({ id }, { status: 201 });
 });

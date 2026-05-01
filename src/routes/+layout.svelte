@@ -22,7 +22,6 @@
     import { resolve } from "$app/paths";
     import AppSidebar from "$lib/components/sidebar/index.svelte";
     import type { AuthStatus } from "$lib/types.js";
-
     const auth = getAuth();
     const convs = getConversations();
 
@@ -49,9 +48,6 @@
 
     // Initialize auth store from SSR data so client-side code sees
     // the correct state immediately (before checkAuth() completes).
-    // We read $page.data.auth directly (not through the ssrAuth derived)
-    // to avoid the "state_referenced_locally" warning — this is intentional
-    // one-time initialization, not a reactive dependency.
     const initialAuth = $page.data.auth;
     if (initialAuth) {
         initAuth(initialAuth);
@@ -60,8 +56,8 @@
     // Load conversations and settings when authenticated
     $effect(() => {
         if (isAuthenticated) {
-            loadConversations();
-            loadSettings();
+            void loadConversations();
+            void loadSettings();
         }
     });
 
@@ -79,7 +75,7 @@
         // Revalidate auth on the client — this catches session expiry
         // that the server might not know about yet. The SSR data already
         // initialized the store, so the user sees content immediately.
-        checkAuth();
+        void checkAuth();
 
         // When the user closes the tab or navigates away, release the
         // in-memory session on the server. We use sendBeacon because
@@ -105,7 +101,7 @@
         };
     });
 
-    let { children } = $props();
+    let { children } = $props<{ children: import("svelte").Snippet }>();
 </script>
 
 <svelte:head>
@@ -134,7 +130,7 @@
                     <span class="text-sm text-muted-foreground truncate">
                         {convs.activeConversation?.title ?? "Vessel"}
                     </span>
-                    {#if convs.activeConversation?.tags?.length}
+                    {#if convs.activeConversation?.tags.length}
                         <div class="flex items-center gap-1 shrink-0">
                             {#each convs.activeConversation.tags as tag (tag)}
                                 <a

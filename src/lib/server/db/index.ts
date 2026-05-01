@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import { join } from "path";
 import { SCHEMA, runMigrations } from "./schema.js";
+import { safeJsonParse, tryJsonParse, stringArraySchema } from "$lib/utils.js";
 import type { Database as DatabaseType } from "better-sqlite3";
 
 const DB_PATH = join(process.cwd(), "data", "vessel.db");
@@ -85,7 +86,7 @@ export function getConversationsByTag(tag: string): import("$lib/types.js").Conv
     return rows
         .filter((row) => {
             try {
-                const parsed = JSON.parse(row.tags) as string[];
+                const parsed = tryJsonParse(row.tags, stringArraySchema);
                 return parsed.some((t) => t.toLowerCase() === normalizedTag);
             } catch {
                 return false;
@@ -94,7 +95,7 @@ export function getConversationsByTag(tag: string): import("$lib/types.js").Conv
         .map((row) => ({
             id: row.id,
             title: row.title,
-            tags: JSON.parse(row.tags) as string[],
+            tags: safeJsonParse(row.tags, stringArraySchema) ?? [],
             createdAt: row.created_at,
             updatedAt: row.updated_at,
         }));

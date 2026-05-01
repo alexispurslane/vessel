@@ -45,15 +45,7 @@
             copied = true;
             setTimeout(() => (copied = false), 2000);
         } catch {
-            // Fallback
-            const textarea = document.createElement("textarea");
-            textarea.value = text;
-            document.body.appendChild(textarea);
-            textarea.select();
-            document.execCommand("copy");
-            document.body.removeChild(textarea);
-            copied = true;
-            setTimeout(() => (copied = false), 2000);
+            // Clipboard API not available (e.g. non-HTTPS context)
         }
     }
 
@@ -71,7 +63,7 @@
         codeEl.className = mapped ? `shj-lang-${mapped}` : "shj-lang-plain";
         codeEl.textContent = text;
         if (!codeStreaming) {
-            highlightElement(codeEl);
+            void highlightElement(codeEl);
         }
     });
     /* eslint-enable svelte/no-dom-manipulating */

@@ -4,12 +4,19 @@ import svelte from "eslint-plugin-svelte";
 import svelteParser from "svelte-eslint-parser";
 
 export default ts.config(
+    {
+        files: ["**/*.js", "**/*.cjs"],
+        ...ts.configs.disableTypeChecked,
+    },
     js.configs.recommended,
-    ...ts.configs.recommended,
+    ...ts.configs.strictTypeChecked,
     ...svelte.configs["flat/recommended"],
     {
         languageOptions: {
             parserOptions: {
+                projectService: {
+                    allowDefaultProject: ['eslint.config.js'],
+                },
                 parser: ts.parser,
                 extraFileExtensions: [".svelte"],
             },
@@ -75,7 +82,7 @@ export default ts.config(
             "max-lines": [
                 "warn",
                 {
-                    max: 500,
+                    max: 1000,
                     skipBlankLines: true,
                     skipComments: true,
                 },

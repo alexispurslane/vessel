@@ -77,14 +77,13 @@ function normalizeResults(data: unknown): SearchResult[] {
     const rawResults = (data as { results: Array<Record<string, unknown>> }).results;
 
     return rawResults.map((r) => ({
-        url: String(r.url ?? ""),
-        title: String(r.title ?? ""),
+        url: typeof r.url === "string" ? r.url : String(r.url),
+        title: typeof r.title === "string" ? r.title : String(r.title),
         // Exa returns text in `text` or `highlights`; Synthetic returns it in `text`
-        text: r.text ? String(r.text) : r.highlights ? (r.highlights as string[]).join("\n") : undefined,
-        publishedDate: r.publishedDate
-            ? String(r.publishedDate)
+        text: typeof r.text === "string" ? r.text : r.highlights ? (r.highlights as string[]).join("\n") : undefined,
+        publishedDate: typeof r.publishedDate === "string" ? r.publishedDate
             : r.published
-                ? String(r.published)
+                ? typeof r.published === "string" ? r.published : undefined
                 : undefined,
     }));
 }
@@ -100,7 +99,7 @@ function formatResults(results: SearchResult[], query: string): string {
 
     for (let i = 0; i < results.length; i++) {
         const r = results[i];
-        lines.push(`## ${i + 1}. ${r.title || "Untitled"}`);
+        lines.push(`## ${String(i + 1)}. ${r.title || "Untitled"}`);
         lines.push(`URL: ${r.url}`);
         if (r.publishedDate) {
             lines.push(`Published: ${r.publishedDate}`);
@@ -224,7 +223,7 @@ export function createSearchTool(options?: SearchToolOptions): AgentTool<typeof 
                     // which is the correct semantic for a semantically failed search
                     // (mirrors the fetch tool's behavior for HTTP 400+).
                     throw new Error(
-                        `Search API returned ${response.status} ${statusText}${errorDetail}`
+                        `Search API returned ${String(response.status)} ${statusText}${errorDetail}`
                     );
                 }
 

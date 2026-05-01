@@ -143,35 +143,35 @@
             const laidLinks: LaidLink[] = [];
 
             for (const dagNode of dag.nodes()) {
-                const data = dagNode.data as unknown as DagNodeData;
+                const data = dagNode.data;
                 laidNodes.push({
                     id: data.id,
-                    x: dagNode.x ?? 0,
-                    y: dagNode.y ?? 0,
+                    x: dagNode.x,
+                    y: dagNode.y,
                     node: data.node,
                 });
             }
 
             for (const dagLink of dag.links()) {
-                const sourceData = dagLink.source.data as unknown as DagNodeData;
-                const targetData = dagLink.target.data as unknown as DagNodeData;
+                const sourceData = dagLink.source.data;
+                const targetData = dagLink.target.data;
                 laidLinks.push({
                     source: {
                         id: sourceData.id,
-                        x: dagLink.source.x ?? 0,
-                        y: dagLink.source.y ?? 0,
+                        x: dagLink.source.x,
+                        y: dagLink.source.y,
                     },
                     target: {
                         id: targetData.id,
-                        x: dagLink.target.x ?? 0,
-                        y: dagLink.target.y ?? 0,
+                        x: dagLink.target.x,
+                        y: dagLink.target.y,
                     },
                     onActiveBranch:
                         activeBranchIds.has(sourceData.id) && activeBranchIds.has(targetData.id),
                 });
             }
 
-            return { nodes: laidNodes, links: laidLinks, width: width ?? 0, height: height ?? 0 };
+            return { nodes: laidNodes, links: laidLinks, width, height };
         } catch (e) {
             console.error("d3-dag layout failed:", e);
             return { nodes: [] as LaidNode[], links: [] as LaidLink[], width: 0, height: 0 };
@@ -185,7 +185,7 @@
         const tx = link.target.x;
         const ty = link.target.y;
         const midY = (sy + ty) / 2;
-        return `M${sx},${sy} C${sx},${midY} ${tx},${midY} ${tx},${ty}`;
+        return `M${String(sx)},${String(sy)} C${String(sx)},${String(midY)} ${String(tx)},${String(midY)} ${String(tx)},${String(ty)}`;
     }
 
     // Generate arrowhead polygon points at the target point
@@ -208,7 +208,7 @@
         const nx = -uy;
         const ny = ux;
 
-        return `${tx},${ty} ${bx + nx * hw},${by + ny * hw} ${bx - nx * hw},${by - ny * hw}`;
+        return `${String(tx)},${String(ty)} ${String(bx + nx * hw)},${String(by + ny * hw)} ${String(bx - nx * hw)},${String(by - ny * hw)}`;
     }
 
     // Truncate preview text for SVG display

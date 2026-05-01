@@ -1,6 +1,6 @@
 import { json } from "@sveltejs/kit";
 import { z } from "zod";
-import { apiHandler } from "$lib/server/api-errors.js";
+import { apiHandler, badRequest } from "$lib/server/api-errors.js";
 import { setSessionLeaf } from "$lib/server/agent/session-store.js";
 
 const PostBody = z.object({
@@ -20,7 +20,8 @@ const PostBody = z.object({
  *   { success: boolean }
  */
 export const POST = apiHandler(PostBody, async ({ body, event }) => {
-    const id = event.params.id!;
+    const id = event.params.id;
+    if (!id) return badRequest("Missing session id");
     await setSessionLeaf(id, body.targetEntryId);
     return json({ success: true });
 });

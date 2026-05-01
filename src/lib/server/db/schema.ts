@@ -6,6 +6,7 @@
  */
 
 import type { Database as DatabaseType } from "better-sqlite3";
+import { tryJsonParse, stringArraySchema } from "$lib/utils.js";
 
 export const SCHEMA = `
 CREATE TABLE IF NOT EXISTS auth (
@@ -185,12 +186,10 @@ export function runMigrations(db: DatabaseType): void {
             const allTags: string[] = [];
             for (const row of rows) {
                 try {
-                    const parsed = JSON.parse(row.tags) as string[];
-                    if (Array.isArray(parsed)) {
-                        for (const tag of parsed) {
-                            if (typeof tag === "string" && tag.trim()) {
-                                allTags.push(tag.trim().toLowerCase());
-                            }
+                    const parsed = tryJsonParse(row.tags, stringArraySchema);
+                    for (const tag of parsed) {
+                        if (tag.trim()) {
+                            allTags.push(tag.trim().toLowerCase());
                         }
                     }
                 } catch {

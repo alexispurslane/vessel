@@ -1,8 +1,9 @@
 import { json } from "@sveltejs/kit";
 import { z } from "zod";
-import { apiHandler } from "$lib/server/api-errors.js";
+import { apiHandler, badRequest } from "$lib/server/api-errors.js";
 import { generateTitleAndTags } from "$lib/server/agent/title-generator.js";
 import { getDb } from "$lib/server/db/index.js";
+import { safeJsonParse, stringArraySchema } from "$lib/utils.js";
 
 const PostBody = z.object({
     force: z.boolean().optional(),
@@ -18,7 +19,8 @@ const PostBody = z.object({
  * - force: boolean — if true, regenerate even if a title is already set
  */
 export const POST = apiHandler(PostBody, async ({ body, event }) => {
-    const id = event.params.id!;
+    const id = event.params.id;
+    if (!id) return badRequest("Missing session id");
     const force = body.force ?? false;
 
     const result = await generateTitleAndTags(id, force);
@@ -36,7 +38,7 @@ export const POST = apiHandler(PostBody, async ({ body, event }) => {
         return json({
             generated: false,
             title: row.title,
-            tags: JSON.parse(row.tags) as string[],
+            tags: safeJsonParse(row.tags, stringArraySchema) ?? [],
         });
     }
 

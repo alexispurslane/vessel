@@ -48,7 +48,7 @@
     let selectedModelId = $state(""); // Just the model ID
 
     onMount(async () => {
-        loadConversations();
+        void loadConversations();
         try {
             availableModels = await listModels();
         } catch {
@@ -101,19 +101,19 @@
                 url += `&initialModel=${encodeURIComponent(selectedModelId)}`;
             }
             // Sandbox quick-toggle query params (always send state so conversation gets explicit settings)
-            url += `&sandboxOn=${sandboxOn}`;
-            url += `&netAllDomainsOn=${netAllDomainsOn}`;
-            url += `&mcpServersOn=${mcpServersOn}`;
+            url += `&sandboxOn=${String(sandboxOn)}`;
+            url += `&netAllDomainsOn=${String(netAllDomainsOn)}`;
+            url += `&mcpServersOn=${String(mcpServersOn)}`;
             url += `&agentMode=${agentMode}`;
             // @ts-expect-error -- dynamic URL with query params can't satisfy SvelteKit typed routes
-            goto(resolve(url));
+            void goto(resolve(url));
         } else {
             isCreating = false;
         }
     }
 
     function selectConversation(id: string) {
-        goto(resolve(`/chat/${id}`));
+        void goto(resolve(`/chat/${id}`));
     }
 </script>
 
@@ -247,7 +247,9 @@
                         <Button
                             variant="ghost"
                             class="w-full justify-start gap-3 px-3 py-2 h-auto text-left"
-                            onclick={() => selectConversation(conv.id)}
+                            onclick={() => {
+                                selectConversation(conv.id);
+                            }}
                         >
                             <MessageSquare class="h-4 w-4 shrink-0 text-muted-foreground" />
                             <span class="truncate">{conv.title}</span>

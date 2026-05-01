@@ -152,10 +152,9 @@
     // Auto-scroll thinking block to bottom as streaming tokens arrive
     $effect(() => {
         if (msg.thinkingStreaming && thinkingEl) {
+            const el = thinkingEl;
             requestAnimationFrame(() => {
-                if (thinkingEl) {
-                    thinkingEl.scrollTop = thinkingEl.scrollHeight;
-                }
+                el.scrollTop = el.scrollHeight;
             });
         }
     });
@@ -164,12 +163,7 @@
         try {
             await navigator.clipboard.writeText(msg.content);
         } catch {
-            const textarea = document.createElement("textarea");
-            textarea.value = msg.content;
-            document.body.appendChild(textarea);
-            textarea.select();
-            document.execCommand("copy");
-            document.body.removeChild(textarea);
+            // Clipboard API not available (e.g. non-HTTPS context)
         }
         copied = true;
         setTimeout(() => (copied = false), 2000);
@@ -332,7 +326,9 @@
             {#if editing}
                 <div class="flex justify-end gap-1.5 mt-1">
                     <button
-                        onclick={() => handleEditCancel()}
+                        onclick={() => {
+                            handleEditCancel();
+                        }}
                         class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
                         aria-label="Cancel editing"
                     >
@@ -340,7 +336,9 @@
                         Cancel
                     </button>
                     <button
-                        onclick={() => handleEditSubmit()}
+                        onclick={() => {
+                            handleEditSubmit();
+                        }}
                         class="inline-flex items-center gap-1 text-[11px] text-primary-foreground bg-primary hover:bg-primary/90 transition-colors cursor-pointer px-2 py-1 rounded"
                         aria-label="Submit edit"
                     >
@@ -354,7 +352,9 @@
                 >
                     {#if oneditassistant || (onedit && msg.role === "user")}
                         <button
-                            onclick={() => handleEdit()}
+                            onclick={() => {
+                                handleEdit();
+                            }}
                             class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
                             aria-label="Edit message"
                             title="Edit message"
@@ -364,7 +364,9 @@
                     {/if}
                     {#if onedit && msg.role === "user"}
                         <button
-                            onclick={() => onedit?.(msg.id, msg.role)}
+                            onclick={() => {
+                                onedit(msg.id, msg.role);
+                            }}
                             class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
                             aria-label="Regenerate from here"
                             title="Regenerate from here"
@@ -374,7 +376,9 @@
                     {/if}
                     {#if onedit && msg.role === "assistant"}
                         <button
-                            onclick={() => onedit?.(msg.id, msg.role)}
+                            onclick={() => {
+                                onedit(msg.id, msg.role);
+                            }}
                             class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
                             aria-label="Regenerate response"
                             title="Regenerate response"
@@ -384,7 +388,9 @@
                     {/if}
                     {#if ondelete}
                         <button
-                            onclick={() => handleDelete()}
+                            onclick={() => {
+                                handleDelete();
+                            }}
                             class="inline-flex items-center gap-1 text-[11px] transition-colors cursor-pointer px-1.5 py-0.5 rounded {confirmDelete
                                 ? 'text-destructive bg-destructive/10'
                                 : 'text-muted-foreground hover:text-foreground hover:bg-muted'}"
@@ -400,7 +406,9 @@
                         </button>
                     {/if}
                     <button
-                        onclick={() => handleCopyMessage()}
+                        onclick={() => {
+                            void handleCopyMessage();
+                        }}
                         class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
                         aria-label="Copy message"
                     >
@@ -411,7 +419,9 @@
                         {/if}
                     </button>
                     <button
-                        onclick={() => scrollToTop()}
+                        onclick={() => {
+                            scrollToTop();
+                        }}
                         class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
                         aria-label="Scroll to top of message"
                     >
@@ -439,7 +449,7 @@
     <!-- Tool calls -->
     {#if msg.toolCalls && msg.toolCalls.length > 0}
         <div class="flex flex-col gap-1">
-            {#each msg.toolCalls as tool, i (msg.id + "-tool-" + i)}
+            {#each msg.toolCalls as tool, i (`${msg.id}-tool-${String(i)}`)}
                 <ToolCall toolCall={tool} />
             {/each}
         </div>

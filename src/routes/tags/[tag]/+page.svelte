@@ -9,12 +9,19 @@
     import MessageSquare from "@lucide/svelte/icons/message-square";
     import { hashHue } from "$lib/utils.js";
     import PageLayout from "$lib/components/page-layout/index.svelte";
+    import type { PageData } from "./$types.js";
 
-    const tag = $derived($page.params.tag!);
+    const tag = $derived($page.params.tag as string);
+
+    const pageData = $derived($page.data as PageData);
 
     // Start with SSR data — conversations are in the HTML before JS loads.
     // Then refresh client-side when the tag changes.
-    let conversations = $state<ConversationListItem[]>($page.data.conversations ?? []);
+    // We read $page.data directly (not through pageData) for the initial value
+    // to avoid the "state_referenced_locally" warning — this is intentional one-time initialization.
+    let conversations = $state<ConversationListItem[]>(
+        (($page.data as PageData).conversations ?? []) as ConversationListItem[]
+    );
     let refreshing = $state(false);
     let error = $state<string | null>(null);
 
@@ -34,12 +41,12 @@
     // Refresh when navigating to a different tag (client-side nav)
     $effect(() => {
         if (tag) {
-            refreshConversations();
+            void refreshConversations();
         }
     });
 
     function openConversation(id: string) {
-        goto(resolve(`/chat/${id}`));
+        void goto(resolve(`/chat/${id}`));
     }
 
     function formatDate(dateStr: string): string {
@@ -55,7 +62,11 @@
     }
 </script>
 
-<PageLayout onback={() => window.history.back()}>
+<PageLayout
+    onback={() => {
+        window.history.back();
+    }}
+>
     {#snippet heading()}
         <h1 class="text-2xl font-bold">
             <span
@@ -81,7 +92,9 @@
                 <Button
                     variant="ghost"
                     class="w-full justify-start gap-3 px-3 py-2 h-auto text-left"
-                    onclick={() => openConversation(conv.id)}
+                    onclick={() => {
+                        openConversation(conv.id);
+                    }}
                 >
                     <MessageSquare class="h-4 w-4 shrink-0 text-muted-foreground" />
                     <div class="flex-1 min-w-0">

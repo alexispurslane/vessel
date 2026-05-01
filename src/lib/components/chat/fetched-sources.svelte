@@ -38,7 +38,7 @@
 
     async function fetchOgMetadata(url: string, index: number) {
         if (ogCache.has(url)) {
-            ogData[index] = ogCache.get(url)!;
+            ogData[index] = ogCache.get(url) as OgMetadata;
             return;
         }
         if (loadingUrls.has(url)) return;
@@ -47,7 +47,7 @@
         try {
             const resp = await fetch(`/api/og-metadata?url=${encodeURIComponent(url)}`);
             if (resp.ok) {
-                const data: OgMetadata = await resp.json();
+                const data = (await resp.json()) as OgMetadata;
                 ogCache.set(url, data);
                 ogData[index] = data;
             } else {
@@ -86,16 +86,16 @@
         for (const i of pageIndices) {
             const source = sources[i];
             if (source.type !== "page") continue;
-            if (!ogData[i] && !ogCache.has(source.url)) {
-                fetchOgMetadata(source.url, i);
-            } else if (ogCache.has(source.url) && !ogData[i]) {
-                ogData[i] = ogCache.get(source.url)!;
+            if (!(i in ogData) && !ogCache.has(source.url)) {
+                void fetchOgMetadata(source.url, i);
+            } else if (ogCache.has(source.url) && !(i in ogData)) {
+                ogData[i] = ogCache.get(source.url) as OgMetadata;
             }
         }
     });
 
     function getOg(index: number): OgMetadata | undefined {
-        return ogData[index] ?? ogCache.get((sources[index] as { url: string })?.url);
+        return ogData[index] ?? ogCache.get((sources[index] as { url: string }).url);
     }
 
     function truncateTitle(title: string): string {
@@ -104,7 +104,7 @@
     }
 
     // Determine the latest turn so we can dim sources from earlier turns
-    const maxTurn = $derived(Math.max(...sources.map((s) => s.turn ?? 0)));
+    const maxTurn = $derived(Math.max(...sources.map((s) => s.turn)));
 </script>
 
 <details class="group rounded-lg border bg-background text-sm w-full overflow-hidden" open>
@@ -123,7 +123,7 @@
     </summary>
     <div class="border-t px-3 py-2 flex flex-col gap-1.5">
         {#each sources as source, i (i)}
-            {@const isPreviousTurn = (source.turn ?? 0) < maxTurn}
+            {@const isPreviousTurn = source.turn < maxTurn}
             {#if source.type === "page"}
                 {@const og = getOg(i)}
                 <button

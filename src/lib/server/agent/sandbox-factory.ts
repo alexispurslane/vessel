@@ -33,7 +33,8 @@ import { mkdirSync, existsSync, readFileSync, writeFileSync } from "fs";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { getDb } from "../db/index.js";
-import type { ConversationSettings } from "$lib/types.js";
+import { tryJsonParse } from "$lib/utils.js";
+import { type ConversationSettings, conversationSettingsSchema } from "$lib/types.js";
 import { log } from "$lib/server/logger.js";
 
 const execFileAsync = promisify(execFile);
@@ -272,7 +273,7 @@ export function loadSandboxPolicyFromDb(conversationSettings?: ConversationSetti
     let allowNet: boolean | string[];
     if (conversationSettings?.allowNet !== null && conversationSettings?.allowNet !== undefined) {
         // Per-conversation override is set
-        if (conversationSettings.allowNet === false) {
+        if (!conversationSettings.allowNet) {
             allowNet = false;
         } else {
             // allowNet is true-ish
@@ -430,9 +431,8 @@ export function loadConversationSettingsFromDb(conversationId: string): Conversa
         .get(conversationId) as { settings: string } | undefined;
     if (!row) return null;
     try {
-        return JSON.parse(row.settings) as ConversationSettings;
-    } catch (e) {
-        log.debug("sandbox", "Failed to parse conversation settings JSON", e);
+        return tryJsonParse(row.settings, conversationSettingsSchema);
+    } catch {
         return null;
     }
 }
@@ -459,8 +459,8 @@ export function isNetworkAllowed(conversationSettings?: ConversationSettings | n
  * conversation agentMode means "inherit global".
  */
 export function getEffectiveAgentMode(conversationSettings?: ConversationSettings | null): "agent" | "chat" {
-    const globalMode = getSetting("sandbox.defaultAgentMode") || "agent";
-    return conversationSettings?.agentMode ?? (globalMode as "agent" | "chat") ?? "agent";
+    const globalMode = getSetting("sandbox.defaultAgentMode") ?? "agent";
+    return conversationSettings?.agentMode ?? (globalMode as "agent" | "chat");
 }
 
 /**

@@ -37,8 +37,17 @@ import type { Sandbox, CommandOutput } from "zerobox";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
+import { z } from "zod";
+import { tryJsonParse } from "$lib/utils.js";
 
 const execFileAsync = promisify(execFile);
+
+const fetchOutputSchema = z.object({
+    content: z.string().optional(),
+    title: z.string().optional(),
+    captchaDetected: z.boolean().optional(),
+    httpStatus: z.number().optional(),
+});
 
 // --- Chrome 131 on Windows Spoof ---
 
@@ -155,11 +164,12 @@ function parseFetchOutput(stdout: string, url: string): { content: string; title
         throw new Error("Failed to fetch " + url + ": empty response");
     }
     try {
-        const parsed = JSON.parse(stdout.trim());
-        return { content: parsed.content, title: parsed.title ?? "", captchaDetected: !!parsed.captchaDetected, httpStatus: parsed.httpStatus ?? 200 };
+        const parsed = tryJsonParse(stdout.trim(), fetchOutputSchema);
+        return { content: parsed.content ?? stdout, title: parsed.title ?? "", captchaDetected: !!parsed.captchaDetected, httpStatus: parsed.httpStatus ?? 200 };
     } catch {
-        return { content: stdout, title: "", captchaDetected: false, httpStatus: 200 };
+        // Fall through to raw stdout output
     }
+    return { content: stdout, title: "", captchaDetected: false, httpStatus: 200 };
 }
 
 // --- Sandboxed fetch function (injected as inline JS string) ---
@@ -224,7 +234,7 @@ const { Impit } = require(path.join(process.env.NODE_PATH, "impit"));
         // Use impit to fetch the page with Chrome 131's TLS fingerprint and HTTP headers.
         // The chrome131 profile gives us the right Sec-CH-UA brands; we override
         // User-Agent and Sec-CH-UA-Platform via instance-level headers to match Windows.
-        const impit = new Impit({ browser: ${profileJson}, timeout: ${timeoutMs}, headers: ${clientHintHeadersJson} });
+        const impit = new Impit({ browser: ${profileJson}, timeout: ${String(timeoutMs)}, headers: ${clientHintHeadersJson} });
         const impitResponse = await impit.fetch(${urlJson});
         const httpStatus = impitResponse.status;
         const html = await impitResponse.text();
@@ -286,7 +296,7 @@ const { Impit } = require(path.join(process.env.NODE_PATH, "impit"));
                             // Route all sub-requests through impit so they also have
                             // Chrome's TLS fingerprint instead of Node's default
                             try {
-                                const subImpit = new Impit({ browser: ${profileJson}, timeout: ${timeoutMs}, headers: ${clientHintHeadersJson} });
+                                const subImpit = new Impit({ browser: ${profileJson}, timeout: ${String(timeoutMs)}, headers: ${clientHintHeadersJson} });
                                 const subResponse = await subImpit.fetch(request.url, {
                                     method: request.method,
                                     headers: Object.fromEntries(request.headers.entries()),
@@ -426,15 +436,15 @@ async function fetchPageInSandbox(sandbox: Sandbox, url: string, timeout: number
 
     // Always include stderr in errors — happy-dom/defuddle logs diagnostics there
     // (navigation errors, network failures, script errors, etc.).
-    const stderrSummary = result.stderr?.trim()
+    const stderrSummary = result.stderr.trim()
         ? " (" + result.stderr.trim().split("\n").slice(-3).join("; ") + ")"
         : "";
 
     if (result.code !== 0) {
-        throw new Error("Failed to fetch " + url + ": exit code " + result.code + stderrSummary);
+        throw new Error("Failed to fetch " + url + ": exit code " + String(result.code) + stderrSummary);
     }
 
-    return parseFetchOutput(result.stdout ?? "", url);
+    return parseFetchOutput(result.stdout, url);
 }
 
 // --- Truncation ---
@@ -461,7 +471,7 @@ function truncateContent(content: string, maxChars: number = DEFAULT_MAX_CONTENT
         cutPoint = maxChars;
     }
 
-    const notice = "\n\n[Output truncated: showing " + cutPoint + " of " + content.length + " characters]";
+    const notice = "\n\n[Output truncated: showing " + String(cutPoint) + " of " + String(content.length) + " characters]";
     return { content: content.slice(0, cutPoint) + notice, truncated: true };
 }
 
@@ -569,7 +579,7 @@ export function createFetchTool(options?: FetchToolOptions): AgentTool<typeof fe
             // which is the correct semantic for a semantically failed fetch.
             if (httpStatus >= 400) {
                 throw new Error(
-                    "The page returned HTTP " + httpStatus + ". " +
+                    "The page returned HTTP " + String(httpStatus) + ". " +
                     "The site may be blocking automated access or the page may not exist."
                 );
             }

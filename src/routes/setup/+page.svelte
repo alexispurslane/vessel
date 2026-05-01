@@ -34,7 +34,7 @@
 
     onMount(() => {
         if (!auth.needsSetup) {
-            goto(resolve("/login"));
+            void goto(resolve("/login"));
         }
     });
 
@@ -46,7 +46,7 @@
         try {
             const success = await setup(username, password);
             if (success) {
-                goto(resolve("/"));
+                void goto(resolve("/"));
             }
         } finally {
             submitting = false;
@@ -65,7 +65,7 @@
             <form
                 onsubmit={(e) => {
                     e.preventDefault();
-                    handleSubmit();
+                    void handleSubmit();
                 }}
                 class="space-y-4"
             >

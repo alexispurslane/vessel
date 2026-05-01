@@ -28,7 +28,7 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
         ...options,
         headers: {
             "Content-Type": "application/json",
-            ...options?.headers,
+            ...(options?.headers as Record<string, string>),
         },
     });
 
@@ -37,11 +37,11 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
             window.location.href = "/login";
             throw new ApiError(401, "Unauthorized");
         }
-        const body = await res.json().catch(() => ({ error: "Unknown error" }));
-        throw new ApiError(res.status, body.error || `HTTP ${res.status}`);
+        const body: { error: string } = await res.json().catch((): { error: string } => ({ error: "Unknown error" }));
+        throw new ApiError(res.status, body.error || `HTTP ${String(res.status)}`);
     }
 
-    return res.json();
+    return res.json() as Promise<T>;
 }
 
 // --- Auth ---
@@ -276,7 +276,7 @@ export function uploadFile(
         xhr.onload = () => {
             if (xhr.status >= 200 && xhr.status < 300) {
                 try {
-                    resolve(JSON.parse(xhr.responseText));
+                    resolve(JSON.parse(xhr.responseText) as UploadResult);
                 } catch {
                     reject(new ApiError(xhr.status, "Invalid response"));
                 }
@@ -285,15 +285,15 @@ export function uploadFile(
                 reject(new ApiError(401, "Unauthorized"));
             } else {
                 try {
-                    const body = JSON.parse(xhr.responseText);
-                    reject(new ApiError(xhr.status, body.error || `HTTP ${xhr.status}`));
+                    const body = JSON.parse(xhr.responseText) as { error?: string };
+                    reject(new ApiError(xhr.status, body.error || `HTTP ${String(xhr.status)}`));
                 } catch {
-                    reject(new ApiError(xhr.status, `HTTP ${xhr.status}`));
+                    reject(new ApiError(xhr.status, `HTTP ${String(xhr.status)}`));
                 }
             }
         };
 
-        xhr.onerror = () => reject(new ApiError(0, "Network error"));
+        xhr.onerror = () => { reject(new ApiError(0, "Network error")); };
         xhr.send(file);
     });
 }

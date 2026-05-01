@@ -19,9 +19,9 @@
         const convs = getConversations();
         const activeId = convs.activeId;
         if (activeId) {
-            goto(resolve(`/chat/${activeId}`));
+            void goto(resolve(`/chat/${activeId}`));
         } else {
-            goto(resolve("/"));
+            void goto(resolve("/"));
         }
     }
 </script>

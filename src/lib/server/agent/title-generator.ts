@@ -22,6 +22,13 @@ import { getDb, getAllTags, upsertTags } from "../db/index.js";
 import { findModelById, getModelRegistry } from "./model-registry.js";
 import { getSessionHistory } from "./session-store.js";
 import { log } from "$lib/server/logger.js";
+import { tryJsonParse, stringArraySchema } from "$lib/utils.js";
+import { z } from "zod";
+
+const titleResultSchema = z.object({
+    title: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+});
 
 // --- Types ---
 
@@ -67,8 +74,8 @@ export async function generateTitleAndTags(
 
     // Get the first user message content
     const userMessage = await extractFirstUserMessage(conversationId);
-    log.info("title-generator", `Extracted first user message: ${userMessage}`);
     if (!userMessage) return null;
+    log.info("title-generator", `Extracted first user message: ${userMessage}`);
 
     // Resolve the model to use
     const model = resolveTitleModel();
@@ -282,7 +289,7 @@ function parseModelResponse(content: string): GenerateResult {
     }
 
     try {
-        const parsed = JSON.parse(jsonMatch[0]) as { title?: string; tags?: string[] };
+        const parsed = tryJsonParse(jsonMatch[0], titleResultSchema);
         const title =
             typeof parsed.title === "string" ? parsed.title.trim().slice(0, 80) : "New Chat";
         const tags = Array.isArray(parsed.tags)
@@ -293,6 +300,7 @@ function parseModelResponse(content: string): GenerateResult {
             : [];
         return { title, tags };
     } catch {
-        return { title: content.trim().slice(0, 80), tags: [] };
+        // Fall through to raw text title
     }
+    return { title: content.trim().slice(0, 80), tags: [] };
 }

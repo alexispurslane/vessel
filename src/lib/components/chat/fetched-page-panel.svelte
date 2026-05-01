@@ -110,7 +110,7 @@
                 {#snippet code({ token })}
                     <pre
                         class="my-1 overflow-x-auto rounded-md border border-border bg-muted/50 p-2 text-xs">
-                        <code>{token.text}</code>
+                        <code>{(token as { text: string }).text}</code>
                     </pre>
                 {/snippet}
             </Streamdown>

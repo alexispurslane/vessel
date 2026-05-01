@@ -29,13 +29,13 @@
             onOpenChange(value);
 
             // This sets the cookie to keep the sidebar state.
-            document.cookie = `${SIDEBAR_COOKIE_NAME}=${open}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`;
+            document.cookie = `${SIDEBAR_COOKIE_NAME}=${String(open)}; path=/; max-age=${String(SIDEBAR_COOKIE_MAX_AGE)}`;
         },
     });
 
     // Reactive style string that includes the dynamic sidebar width
     let computedStyle = $derived(
-        `--sidebar-width: ${sidebar.width}px; --sidebar-width-icon: ${SIDEBAR_WIDTH_ICON}; ${style ?? ""}`
+        `--sidebar-width: ${String(sidebar.width)}px; --sidebar-width-icon: ${String(SIDEBAR_WIDTH_ICON)}; ${style ?? ""}`
     );
 </script>
 

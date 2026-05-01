@@ -46,7 +46,7 @@ export function getAuth() {
 export function initAuth(authStatus: AuthStatus): void {
     // Only initialize if the store hasn't been populated yet.
     // This prevents overwriting a fresh checkAuth() result.
-    if (status.authenticated === undefined || (!status.authenticated && !loading)) {
+    if (!status.setup || (!status.authenticated && !loading)) {
         status = authStatus;
     }
 }
@@ -87,7 +87,7 @@ export async function doLogin(username: string, password: string): Promise<boole
     try {
         await apiLogin(username, password);
         status = { setup: true, authenticated: true };
-        goto(resolve("/"));
+        void goto(resolve("/"));
         return true;
     } catch (e) {
         error = e instanceof Error ? e.message : "Login failed";
@@ -102,7 +102,7 @@ export async function doLogout(): Promise<void> {
     try {
         await apiLogout();
         status = { setup: true, authenticated: false };
-        goto(resolve("/login"));
+        void goto(resolve("/login"));
     } catch (e) {
         error = e instanceof Error ? e.message : "Logout failed";
     } finally {

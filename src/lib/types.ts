@@ -6,6 +6,8 @@
  * $lib/server/agent/types.ts and import from here.
  */
 
+import { z } from "zod";
+
 // --- Auth ---
 
 /** Auth status returned by GET /api/auth/status */
@@ -17,35 +19,25 @@ export interface AuthStatus {
 
 // --- Conversation Settings ---
 
+/** Zod schema for per-conversation settings stored as JSON in the conversation_settings table. */
+export const conversationSettingsSchema = z.object({
+    sandboxEnabled: z.boolean().nullable().optional(),
+    extraReadPaths: z.array(z.string()).nullable().optional(),
+    extraWritePaths: z.array(z.string()).nullable().optional(),
+    allowNet: z.boolean().nullable().optional(),
+    allowAllDomains: z.boolean().nullable().optional(),
+    allowedNetDomains: z.array(z.string()).nullable().optional(),
+    secrets: z.record(z.string(), z.object({ value: z.string(), hosts: z.array(z.string()) })).nullable().optional(),
+    allowEnv: z.array(z.string()).nullable().optional(),
+    deleteWorkspaceWithConversation: z.boolean().optional(),
+    agentMode: z.enum(["agent", "chat"]).nullable().optional(),
+    customSystemPrompt: z.string().nullable().optional(),
+    appendSystemPrompt: z.array(z.string()).nullable().optional(),
+    enabledMcpServers: z.array(z.string()).nullable().optional(),
+});
+
 /** Per-conversation settings stored as JSON in the conversation_settings table. */
-export interface ConversationSettings {
-    /** Whether the sandbox is enabled for this conversation (null = use global default) */
-    sandboxEnabled?: boolean | null;
-    /** Extra readable paths for the sandbox (null = use global default) */
-    extraReadPaths?: string[] | null;
-    /** Extra writable paths for the sandbox (null = use global default) */
-    extraWritePaths?: string[] | null;
-    /** Whether network access is allowed (null = use global default) */
-    allowNet?: boolean | null;
-    /** Whether all domains are allowed when network is on (null = use global default, true = all domains, false = specific domains only) */
-    allowAllDomains?: boolean | null;
-    /** Allowed network domains when allowNet is truthy and allowAllDomains is false (null = use global default) */
-    allowedNetDomains?: string[] | null;
-    /** Secrets to inject into the sandbox (null = use global default) */
-    secrets?: Record<string, { value: string; hosts: string[] }> | null;
-    /** Environment variable names to allow in the sandbox (null = use global default) */
-    allowEnv?: string[] | null;
-    /** Whether to delete the workspace when the conversation is trashed */
-    deleteWorkspaceWithConversation?: boolean;
-    /** Conversation mode: "agent" = all tools enabled, "chat" = no tools (plain chat). null = inherit global default. */
-    agentMode?: "agent" | "chat" | null;
-    /** Custom system prompt that replaces the default (null = use default). Use with caution — overrides tool descriptions and guidelines. */
-    customSystemPrompt?: string | null;
-    /** List of instruction strings appended to the default system prompt (null = nothing appended). Each item is a separate instruction. */
-    appendSystemPrompt?: string[] | null;
-    /** MCP server names to enable for this conversation (null = use per-server defaultEnabled, empty = none) */
-    enabledMcpServers?: string[] | null;
-}
+export type ConversationSettings = z.infer<typeof conversationSettingsSchema>;
 
 /** Default values for per-conversation settings. Null fields inherit from global settings. */
 export const DEFAULT_CONVERSATION_SETTINGS: ConversationSettings = {

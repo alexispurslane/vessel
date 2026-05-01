@@ -26,9 +26,9 @@
 
     onMount(() => {
         if (auth.needsSetup) {
-            goto(resolve("/setup"));
+            void goto(resolve("/setup"));
         } else if (auth.isAuthenticated) {
-            goto(resolve("/"));
+            void goto(resolve("/"));
         }
     });
 
@@ -56,7 +56,7 @@
             <form
                 onsubmit={(e) => {
                     e.preventDefault();
-                    handleSubmit();
+                    void handleSubmit();
                 }}
                 class="space-y-4"
             >

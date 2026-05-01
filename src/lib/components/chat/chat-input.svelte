@@ -43,7 +43,7 @@
 
     interface Props {
         /** The text value of the input (two-way bindable) */
-        value: string;
+        value?: string;
         /** Placeholder text when input is empty */
         placeholder?: string;
         /** Whether the input is disabled */
@@ -121,7 +121,7 @@
         const sel = window.getSelection();
         if (sel?.toString()) {
             await navigator.clipboard.writeText(sel.toString());
-            document.execCommand("cut");
+            sel.deleteFromDocument();
         }
     }
 
@@ -136,7 +136,7 @@
         try {
             const text = await navigator.clipboard.readText();
             if (text) {
-                document.execCommand("insertText", false, text);
+                document.execCommand("insertText", false, text); // eslint-disable-line ts/no-deprecated
             }
         } catch {
             // Clipboard read failed (e.g. permissions denied)
@@ -163,7 +163,7 @@
                 ...pendingFiles,
                 {
                     file,
-                    id: `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                    id: `${file.name}-${String(Date.now())}-${Math.random().toString(36).slice(2, 8)}`,
                 },
             ];
         }
@@ -189,14 +189,12 @@
         // Reset to auto to get the correct scrollHeight
         textareaRef.style.height = "auto";
         // Set to scrollHeight (capped at max-height via CSS)
-        textareaRef.style.height = `${textareaRef.scrollHeight}px`;
+        textareaRef.style.height = `${String(textareaRef.scrollHeight)}px`;
     }
 
     // Watch value changes to adjust height
     $effect(() => {
-        if (value !== undefined) {
-            adjustTextareaHeight();
-        }
+        adjustTextareaHeight();
     });
 
     // Look up a model's display name from the available models list.
@@ -211,7 +209,7 @@
     let modelsByProvider = $derived(() => {
         const groups: Record<string, ModelInfo[]> = {};
         for (const model of models) {
-            if (!groups[model.provider]) {
+            if (!(model.provider in groups)) {
                 groups[model.provider] = [];
             }
             groups[model.provider].push(model);
@@ -356,7 +354,9 @@
                     >
                     <button
                         class="shrink-0 rounded-sm hover:bg-muted-foreground/20 p-0.5"
-                        onclick={() => removeFile(pf.id)}
+                        onclick={() => {
+                            removeFile(pf.id);
+                        }}
                         aria-label="Remove {pf.file.name}"
                     >
                         <X class="size-3" />

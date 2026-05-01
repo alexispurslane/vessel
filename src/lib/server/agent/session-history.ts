@@ -55,10 +55,9 @@ interface HistoryBuilderState {
 }
 
 /** Track model changes from `model_change` entries. */
-function handleModelChange(state: HistoryBuilderState, entry: unknown): void {
-    const modelEntry = entry as unknown as { provider: string; modelId: string };
-    state.lastModelProvider = modelEntry.provider ?? null;
-    state.lastModelId = modelEntry.modelId ?? null;
+function handleModelChange(state: HistoryBuilderState, entry: { provider: string; modelId: string }): void {
+    state.lastModelProvider = entry.provider;
+    state.lastModelId = entry.modelId;
 }
 
 /** Accumulate fetched_sources custom entries and retroactively attach them. */
@@ -82,9 +81,10 @@ function handleToolResult(
 ): void {
     const toolCallId = (msg.toolCallId ?? msg.tool_call_id) as string | undefined;
     if (toolCallId && state.pendingToolCalls.has(toolCallId)) {
-        const pending = state.pendingToolCalls.get(toolCallId)!;
+        const pending = state.pendingToolCalls.get(toolCallId);
+        if (!pending) return;
         const targetMsg = state.messages[pending.msgIndex];
-        if (targetMsg?.toolCalls?.[pending.toolCallIndex]) {
+        if (targetMsg.toolCalls && targetMsg.toolCalls[pending.toolCallIndex]) {
             const tc = targetMsg.toolCalls[pending.toolCallIndex];
             tc.status = msg.isError ? "error" : "completed";
             if (Array.isArray(msg.content)) {
@@ -130,7 +130,7 @@ function extractMessageContent(msg: Record<string, unknown>): ExtractedContent {
                 thinkingContent = (thinkingContent ?? "") + block.thinking;
             } else if (block.type === "toolCall") {
                 toolCalls.push({
-                    toolName: (block.name as string) ?? "unknown",
+                    toolName: (block.name as string),
                     status: "completed",
                     toolCallId: block.id as string,
                     arguments: block.arguments as Record<string, unknown> | undefined,
@@ -155,11 +155,11 @@ function extractUsage(msg: Record<string, unknown>): HistoryMessage["usage"] {
     if (!msg.usage) return undefined;
     const u = msg.usage as Record<string, unknown>;
     return {
-        input: (u.input as number) ?? 0,
-        output: (u.output as number) ?? 0,
-        cacheRead: (u.cacheRead as number) ?? 0,
-        cacheWrite: (u.cacheWrite as number) ?? 0,
-        totalTokens: (u.totalTokens as number) ?? 0,
+        input: u.input as number,
+        output: u.output as number,
+        cacheRead: u.cacheRead as number,
+        cacheWrite: u.cacheWrite as number,
+        totalTokens: u.totalTokens as number,
     };
 }
 
@@ -234,7 +234,7 @@ function handleMessage(
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
         isError,
         usage,
-        timestamp: (msg.timestamp as number) ?? 0,
+        timestamp: msg.timestamp as number,
     });
 
     if (role === "assistant") {
@@ -465,7 +465,7 @@ export async function navigateMessage(
     // For user messages: navigateTree handles this correctly — sets leaf to parent and returns text
     // For non-user messages (assistant, etc.): we need to navigate to the parent to effectively delete this message
     let navigateTargetId = targetEntryId;
-    if (entry.type === "message" && entry.message && entry.message.role !== "user") {
+    if (entry.type === "message" && entry.message.role !== "user") {
         // For assistant messages, navigate to the parent entry to delete this response
         // The parent is typically the user message or tool result that preceded this response
         const parentId = entry.parentId;
@@ -582,7 +582,7 @@ export async function editAssistantMessage(
                 // accepts string | undefined per the .d.ts, but TS narrowing through
                 // the SessionEntry union doesn't cooperate. Force-cast to satisfy TS.
                 const labelEntry = entry as { targetId: string; label: string | undefined };
-                sessionManager.appendLabelChange(labelEntry.targetId, labelEntry.label as string);
+                sessionManager.appendLabelChange(labelEntry.targetId, labelEntry.label);
                 break;
             }
             case "session_info":

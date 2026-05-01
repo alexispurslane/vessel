@@ -1,6 +1,6 @@
 import { json } from "@sveltejs/kit";
 import { z } from "zod";
-import { apiHandler, notFound, tryApi } from "$lib/server/api-errors.js";
+import { apiHandler, tryApi, badRequest, notFound } from "$lib/server/api-errors.js";
 import { getSessionWorkDir, createFileManagementSandbox } from "$lib/server/agent/sandbox-factory.js";
 import { sanitizeAndResolvePath } from "$lib/server/fs-security.js";
 import { existsSync, readdirSync, statSync, unlinkSync, rmdirSync } from "fs";
@@ -56,8 +56,9 @@ const DeleteBody = z.object({
  * List files in the agent's sandbox workspace.
  * Returns an array of file paths relative to the workspace root.
  */
-export const GET = tryApi(async ({ params }) => {
-    const id = params.id!;
+export const GET = tryApi(({ params }) => {
+    const id = params.id;
+    if (!id) return badRequest("Missing session id");
     const workDir = getSessionWorkDir(id);
     if (!existsSync(workDir)) {
         return json({ files: [] });
@@ -77,7 +78,8 @@ export const GET = tryApi(async ({ params }) => {
  * Security: the resolved path is validated to stay within the workspace.
  */
 export const DELETE = apiHandler(DeleteBody, async ({ body, event }) => {
-    const id = event.params.id!;
+    const id = event.params.id;
+    if (!id) return badRequest("Missing session id");
     const workDir = getSessionWorkDir(id);
     const sandbox = createFileManagementSandbox(id);
 

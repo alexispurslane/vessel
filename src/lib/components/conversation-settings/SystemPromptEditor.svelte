@@ -70,7 +70,6 @@
 
     function getInstructions(): string[] {
         const raw = instructions;
-        if (!raw) return [];
         return Array.isArray(raw) ? raw : [raw];
     }
 
@@ -105,7 +104,7 @@
     }
 
     function startEditReplace() {
-        editReplaceText = customSystemPrompt ?? "";
+        editReplaceText = customSystemPrompt;
         editingReplace = true;
     }
 
@@ -166,7 +165,9 @@
                                         Cancel
                                     </button>
                                     <button
-                                        onclick={() => saveEditInstruction(i)}
+                                        onclick={() => {
+                                            saveEditInstruction(i);
+                                        }}
                                         class="inline-flex items-center gap-1 text-[10px] text-primary hover:text-primary/80 transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-primary/10"
                                         disabled={saving}
                                     >
@@ -189,14 +190,18 @@
                                 class="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
                             >
                                 <button
-                                    onclick={() => startEditInstruction(i)}
+                                    onclick={() => {
+                                        startEditInstruction(i);
+                                    }}
                                     class="inline-flex items-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer p-0.5 rounded hover:bg-muted"
                                     title="Edit instruction"
                                 >
                                     <Pencil class="size-3" />
                                 </button>
                                 <button
-                                    onclick={() => removeInstruction(i)}
+                                    onclick={() => {
+                                        removeInstruction(i);
+                                    }}
                                     class="inline-flex items-center text-muted-foreground hover:text-destructive transition-colors cursor-pointer p-0.5 rounded hover:bg-muted"
                                     title="Remove instruction"
                                     disabled={saving}
@@ -345,7 +350,7 @@
     <div class="flex items-center justify-between px-3 py-1.5 border-b bg-muted/30">
         <span class="text-[11px] font-medium text-muted-foreground">
             Effective System Prompt
-            {#if instructions?.length > 0 || customSystemPrompt}
+            {#if instructions.length > 0 || customSystemPrompt}
                 <span class="text-amber-600 dark:text-amber-400 ml-1">(modified)</span>
             {/if}
         </span>

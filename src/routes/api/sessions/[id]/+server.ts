@@ -3,6 +3,7 @@ import { z } from "zod";
 import { apiHandler, notFound, tryApi } from "$lib/server/api-errors.js";
 import { getDb, upsertTags } from "$lib/server/db/index.js";
 import { destroyConversation, resolveModelProvider } from "$lib/server/agent/session-store.js";
+import { safeJsonParse, stringArraySchema } from "$lib/utils.js";
 
 const PatchBody = z.object({
     title: z.string().optional(),
@@ -42,7 +43,7 @@ export const GET = tryApi(async ({ params }) => {
 
     return json({
         ...row,
-        tags: JSON.parse(row.tags) as string[],
+        tags: safeJsonParse(row.tags, stringArraySchema) ?? [],
     });
 });
 

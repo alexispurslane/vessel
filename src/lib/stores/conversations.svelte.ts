@@ -34,7 +34,7 @@ function isoNow(): string {
     const d = doy - Math.floor((153 * mp + 2) / 5) + 1;
     const m = mp < 10 ? mp + 3 : mp - 9;
     const y = m <= 2 ? y0 + 1 : y0;
-    return `${y}-${p(m)}-${p(d)}T${p(hour)}:${p(min)}:${p(sec)}.000Z`;
+    return `${String(y)}-${p(m)}-${p(d)}T${p(hour)}:${p(min)}:${p(sec)}.000Z`;
 }
 
 let conversations = $state<ConversationListItem[]>([]);
