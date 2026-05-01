@@ -286,7 +286,7 @@ export function buildHistoryFromSession(
 
         if (entry.type !== "message") continue;
 
-        const msg = (entry as unknown as { message: Record<string, unknown> }).message;
+        const msg = (entry as unknown as { message: Record<string, unknown> | null | undefined }).message;
         if (!msg || typeof msg !== "object") continue;
 
         const role = msg.role as string;
@@ -341,7 +341,9 @@ export function getSessionTreeFromAgent(
         // Only include message entries — skip model_change, compaction, branch_summary, etc.
         if (entry.type !== "message") continue;
 
-        const msg = (entry as unknown as { message: Record<string, unknown> }).message;
+        const msg = (entry as unknown as { message: Record<string, unknown> | null | undefined }).message;
+        if (!msg || typeof msg !== "object") continue;
+
         const role = msg.role as string | undefined;
 
         // Only include user and assistant messages — skip toolResult, etc.

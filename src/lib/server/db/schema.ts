@@ -198,7 +198,7 @@ export function runMigrations(db: DatabaseType): void {
             }
             if (allTags.length > 0) {
                 insertMany([...new Set(allTags)]);
-                console.log(`[migration] Backfilled ${allTags.length} unique tags into tags table`);
+                console.log(`[migration] Backfilled ${String(allTags.length)} unique tags into tags table`);
             }
         }
     } catch (e) {

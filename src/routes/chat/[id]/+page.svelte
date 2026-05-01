@@ -540,7 +540,9 @@
             });
         }
         return () => {
-            void untrack(() => disconnectStream());
+            untrack(() => {
+                disconnectStream();
+            });
         };
     });
 
@@ -990,12 +992,9 @@
                                                 <div class="min-w-0 flex-1">
                                                     <ThinkingGroup
                                                         group={item}
-                                                        thinkingIsOpen={thinkingOpen[
-                                                            item.id as string
-                                                        ]}
+                                                        thinkingIsOpen={thinkingOpen[item.id]}
                                                         onthinkingtoggle={(open: boolean) =>
-                                                            (thinkingOpen[item.id as string] =
-                                                                open)}
+                                                            (thinkingOpen[item.id] = open)}
                                                         ondelete={handleDeleteMessage}
                                                         onregenerate={handleEditMessage}
                                                         navigating={chat.navigating}

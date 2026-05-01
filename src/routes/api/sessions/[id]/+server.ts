@@ -18,8 +18,9 @@ const PatchBody = z.object({
  * GET /api/sessions/[id]
  * Get conversation metadata.
  */
-export const GET = tryApi(async ({ params }) => {
-    const id = params.id!;
+export const GET = tryApi(({ params }) => {
+    const id = params.id;
+    if (!id) return notFound("Conversation not found");
     const db = getDb();
     const row = db
         .prepare(
@@ -52,8 +53,9 @@ export const GET = tryApi(async ({ params }) => {
  * Update conversation metadata (title, tags, model).
  * When model_id is provided, the provider is resolved automatically.
  */
-export const PATCH = apiHandler(PatchBody, async ({ body, event }) => {
-    const id = event.params.id!;
+export const PATCH = apiHandler(PatchBody, ({ body, event }) => {
+    const id = event.params.id;
+    if (!id) return notFound("Conversation not found");
     const { title, tags, model_id } = body;
 
     const updates: string[] = [];
@@ -98,8 +100,9 @@ export const PATCH = apiHandler(PatchBody, async ({ body, event }) => {
  * workspace directory, and DB row. Only triggered when the user
  * explicitly hits the trash icon on a conversation.
  */
-export const DELETE = tryApi(async ({ params }) => {
-    const id = params.id!;
+export const DELETE = tryApi(({ params }) => {
+    const id = params.id;
+    if (!id) return notFound("Conversation not found");
     // Check the conversation exists before destroying
     const db = getDb();
     const row = db.prepare("SELECT id FROM conversations WHERE id = ?").get(id);
@@ -108,7 +111,7 @@ export const DELETE = tryApi(async ({ params }) => {
         return notFound("Conversation not found");
     }
 
-    await destroyConversation(id);
+    destroyConversation(id);
 
     return json({ success: true });
 });

@@ -97,10 +97,11 @@ export const POST: RequestHandler = async ({ params, request }) => {
             const reader = request.body.getReader();
 
             try {
-                // eslint-disable-next-line no-constant-condition
+                /* eslint-disable @typescript-eslint/no-unnecessary-condition -- while(true) is the idiomatic stream reading pattern */
                 while (true) {
                     const { done, value } = await reader.read();
                     if (done) break;
+                    /* eslint-enable @typescript-eslint/no-unnecessary-condition */
                     if (!fileStream.write(value)) {
                         // Handle backpressure
                         await new Promise<void>((resolve) => fileStream.once("drain", resolve));

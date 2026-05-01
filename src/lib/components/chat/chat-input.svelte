@@ -136,7 +136,12 @@
         try {
             const text = await navigator.clipboard.readText();
             if (text) {
-                document.execCommand("insertText", false, text); // eslint-disable-line ts/no-deprecated
+                // document.execCommand('insertText') is deprecated but remains the
+                // only reliable way to insert text at the cursor in a contentEditable.
+                // The modern Input API (InputEvent.getTargetRanges() + execCommand)
+                // doesn't provide a direct replacement for insertText.
+                // eslint-disable-next-line @typescript-eslint/no-deprecated
+                document.execCommand("insertText", false, text);
             }
         } catch {
             // Clipboard read failed (e.g. permissions denied)
@@ -177,7 +182,7 @@
     }
 
     function formatFileSize(bytes: number): string {
-        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024) return `${String(bytes)} B`;
         if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
         if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
         return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;

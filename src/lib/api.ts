@@ -37,7 +37,9 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
             window.location.href = "/login";
             throw new ApiError(401, "Unauthorized");
         }
+        /* eslint-disable @typescript-eslint/no-unsafe-assignment */
         const body: { error: string } = await res.json().catch((): { error: string } => ({ error: "Unknown error" }));
+        /* eslint-enable @typescript-eslint/no-unsafe-assignment */
         throw new ApiError(res.status, body.error || `HTTP ${String(res.status)}`);
     }
 

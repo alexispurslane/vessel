@@ -22,7 +22,7 @@ import { getDb, getAllTags, upsertTags } from "../db/index.js";
 import { findModelById, getModelRegistry } from "./model-registry.js";
 import { getSessionHistory } from "./session-store.js";
 import { log } from "$lib/server/logger.js";
-import { tryJsonParse, stringArraySchema } from "$lib/utils.js";
+import { tryJsonParse } from "$lib/utils.js";
 import { z } from "zod";
 
 const titleResultSchema = z.object({

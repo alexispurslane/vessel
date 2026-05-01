@@ -13,7 +13,6 @@ import { resolve } from "path";
 import { writeFileSync, mkdirSync, existsSync, renameSync } from "fs";
 import { z } from "zod";
 import { getDb } from "../db/index.js";
-import { log } from "$lib/server/logger.js";
 import { tryJsonParse } from "$lib/utils.js";
 
 const DATA_DIR = resolve(process.cwd(), "data");

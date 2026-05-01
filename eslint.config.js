@@ -3,6 +3,7 @@ import ts from "typescript-eslint";
 import svelte from "eslint-plugin-svelte";
 import svelteParser from "svelte-eslint-parser";
 
+// eslint-disable-next-line @typescript-eslint/no-deprecated
 export default ts.config(
     {
         files: ["**/*.js", "**/*.cjs"],
@@ -15,7 +16,7 @@ export default ts.config(
         languageOptions: {
             parserOptions: {
                 projectService: {
-                    allowDefaultProject: ['eslint.config.js'],
+                    allowDefaultProject: ['eslint.config.js', 'svelte.config.js'],
                 },
                 parser: ts.parser,
                 extraFileExtensions: [".svelte"],
@@ -35,6 +36,11 @@ export default ts.config(
             // and Svelte files have many browser/DOM globals that are annoying
             // to enumerate. no-undef is redundant here.
             "no-undef": "off",
+            // Svelte 5's @render tag is the idiomatic way to invoke snippets,
+            // but these rules flag it as a "void expression". Disable them since
+            // @render is a statement, not an expression.
+            "@typescript-eslint/no-void-expression": "off",
+            "@typescript-eslint/no-confusing-void-expression": "off",
         },
     },
     {

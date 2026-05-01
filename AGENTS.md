@@ -11,4 +11,4 @@
 3. Prefer putting model inference calls of all sorts (whether direct or agentic) on the backend, and then sending results and/or SSE events to the front end. This way, we don't lose AI inferencing results if the user reloads the page
 4. Always prefer shadcn-provided tooltips over built-in HTML tooltips
 5. This is a standard SvelteKit project using file-based routing. You should expect everything to be in the obvious place, pretty much.
-6. Always run `svelte-check` and fix all new problems after any change.
+6. Always use the diagnostics tool after writing something to check for errors and code quality lints, and `svelte-check` to check for bad Svelte code.
