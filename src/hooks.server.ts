@@ -39,7 +39,7 @@ function checkRateLimit(
 
     entry.count++;
 
-    if (entry.count > maxRequests) {
+    if (entry.count > maxRequests && !import.meta.env.DEV) {
         return { allowed: false, retryAfterMs: entry.resetAt - now };
     }
 
