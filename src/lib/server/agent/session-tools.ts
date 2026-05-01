@@ -206,7 +206,7 @@ export function getMcpServerStatus(activeSession: ActiveSession): McpServerStatu
         // The state is stored in a closure, but the toolMetadata map is accessible
         // through the pi extension API. Let's try reading the MCP tool's description
         // which includes server names + tool counts in its dynamically generated description.
-        const toolRegistry = getToolRegistry(activeSession.agentSession);
+        const _toolRegistry = getToolRegistry(activeSession.agentSession);
         const toolDefMap = getToolDefinitions(activeSession.agentSession);
 
         // The MCP proxy tool's description is dynamically built and includes server names + tool counts.

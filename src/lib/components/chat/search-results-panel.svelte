@@ -101,7 +101,7 @@
 
     <!-- Results list -->
     <div class="flex-1 overflow-y-auto">
-        {#each results as result, i}
+        {#each results as result, _i (result.url)}
             <div class="border-b last:border-b-0">
                 <button
                     class="flex flex-col gap-1 px-3 py-2.5 hover:bg-muted/30 transition-colors w-full text-left cursor-pointer"

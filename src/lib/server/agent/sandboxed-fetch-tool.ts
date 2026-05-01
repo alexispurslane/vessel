@@ -401,11 +401,12 @@ async function fetchPageLocally(url: string, timeout: number = 30): Promise<{ co
             maxBuffer: 50 * 1024 * 1024, // 50MB for large pages
         });
         stdout = result.stdout;
-    } catch (err: any) {
+    } catch (err: unknown) {
         // execFile throws on non-zero exit code — include stderr for diagnostics
-        const stderr = (err.stderr || "").trim();
-        const stderrSummary = stderr ? " (" + stderr.split("\n").slice(-3).join("; ") + ")" : "";
-        throw new Error("Failed to fetch " + url + ": " + (err.message || String(err)) + stderrSummary);
+        const stderrVal = err instanceof Error && 'stderr' in err && typeof err.stderr === 'string' ? err.stderr.trim() : "";
+        const message = err instanceof Error ? err.message : String(err);
+        const stderrSummary = stderrVal ? " (" + stderrVal.split("\n").slice(-3).join("; ") + ")" : "";
+        throw new Error("Failed to fetch " + url + ": " + message + stderrSummary, { cause: err });
     }
 
     return parseFetchOutput(stdout, url);

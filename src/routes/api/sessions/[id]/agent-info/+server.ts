@@ -2,7 +2,7 @@ import { json } from "@sveltejs/kit";
 import { z } from "zod";
 import { apiHandler, notFound, tryApi } from "$lib/server/api-errors.js";
 import {
-    getOrCreateConversation,
+    getOrHydrateSession,
     getSessionAgentInfo,
     updateSessionSystemPrompt,
 } from "$lib/server/agent/session-store.js";
@@ -25,7 +25,7 @@ const PatchBody = z.object({
 export const GET = tryApi(async ({ params }) => {
     const id = params.id!;
     // Ensure the session is loaded in memory so we can read from it
-    await getOrCreateConversation(id);
+    await getOrHydrateSession(id);
 
     const info = await getSessionAgentInfo(id);
     if (!info) {
@@ -58,7 +58,7 @@ export const PATCH = apiHandler(PatchBody, async ({ body, event }) => {
     }
 
     // Ensure session is loaded
-    await getOrCreateConversation(id);
+    await getOrHydrateSession(id);
 
     const updated = updateSessionSystemPrompt(id, options);
     if (!updated) {

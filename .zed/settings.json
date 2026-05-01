@@ -1,6 +1,24 @@
 {
+    "lsp": {
+        "eslint": {
+            "settings": {
+                "validate": "on",
+                "packageManager": "npm"
+            }
+        },
+        "vscode-css-language-server": {
+            "settings": {
+                "css": {
+                    "lint": {
+                        "unknownAtRules": "ignore",
+                        "unknownProperties": "ignore"
+                    }
+                }
+            }
+        }
+    },
     "tab_size": 4,
-    "soft_wrap": "preferred_line_length",
+    "soft_wrap": "prefer_line",
     "preferred_line_length": 100,
     "format_on_save": "on",
     "formatter": "language_server",

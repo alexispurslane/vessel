@@ -72,7 +72,7 @@
     }
 
     // Click (not drag) to toggle sidebar
-    function handleClick(e: MouseEvent) {
+    function handleClick(_e: MouseEvent) {
         if (!didDrag) {
             sidebar.toggle();
         }

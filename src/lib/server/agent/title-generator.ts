@@ -12,6 +12,7 @@
 import {
     complete,
     Type,
+    type Api,
     type Context,
     type Model,
     type Tool,
@@ -123,7 +124,7 @@ async function extractFirstUserMessage(conversationId: string): Promise<string |
  * Prefers the secondary model, falls back to the default model.
  * Uses findModelById (pi-ai ModelRegistry) as the single source of truth.
  */
-function resolveTitleModel(): Model<any> | null {
+function resolveTitleModel(): Model<Api> | null {
     const db = getDb();
     const settingsRows = db.prepare("SELECT key, value FROM settings").all() as {
         key: string;
@@ -181,7 +182,7 @@ const generateTitleTool: Tool = {
  * in the options. (pi-coding-agent's AgentSession does this same
  * resolution internally before every request.)
  */
-async function callModelForTitle(model: Model<any>, userMessage: string, existingTags: string[]): Promise<GenerateResult> {
+async function callModelForTitle(model: Model<Api>, userMessage: string, existingTags: string[]): Promise<GenerateResult> {
     // Resolve API key and headers from ModelRegistry
     const modelRegistry = getModelRegistry();
     const auth = await modelRegistry.getApiKeyAndHeaders(model);

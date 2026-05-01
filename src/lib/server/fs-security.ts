@@ -1,4 +1,4 @@
-import { basename, resolve, join, sep } from "path";
+import { basename, resolve, sep } from "path";
 import { realpathSync } from "fs";
 
 /**
@@ -6,7 +6,8 @@ import { realpathSync } from "fs";
  * This excludes control characters, path separators, and null bytes.
  * We intentionally allow spaces, unicode, hyphens, and dots.
  */
-const FORBIDDEN_FILENAME_CHARS = /[\x00-\x1f\x7f\\/]/;
+// eslint-disable-next-line no-control-regex
+const FORBIDDEN_FILENAME_CHARS = /[\x00-\x1f\x7f\\/]/u;
 
 /**
  * Sanitize a user-supplied filename by stripping directory components and

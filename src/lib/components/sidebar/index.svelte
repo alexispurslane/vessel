@@ -27,6 +27,8 @@
     } from "$lib/components/ui/dialog";
     import { Input } from "$lib/components/ui/input";
     import { goto } from "$app/navigation";
+    import { resolve } from "$app/paths";
+    import { SvelteMap } from "svelte/reactivity";
     import { hashHue } from "$lib/utils.js";
     import {
         getConversations,
@@ -46,11 +48,11 @@
 
     let { currentPath }: { currentPath: string } = $props();
 
-    const auth = getAuth();
+    const _auth = getAuth();
     const convs = getConversations();
 
     let allTags = $derived.by(() => {
-        const tagCounts = new Map<string, number>();
+        const tagCounts = new SvelteMap<string, number>();
         for (const conv of convs.list) {
             for (const tag of conv.tags) {
                 tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
@@ -66,7 +68,7 @@
         setActiveConversation(null);
         clearMessages();
         disconnectStream();
-        goto("/");
+        goto(resolve("/"));
     }
 
     async function handleDeleteConversation(id: string, e: MouseEvent) {
@@ -76,14 +78,14 @@
         if (id === convs.activeId) {
             clearMessages();
             disconnectStream();
-            goto("/");
+            goto(resolve("/"));
         }
     }
 
     async function handleSelectConversation(id: string) {
         if (id === convs.activeId) return;
         switchConversation(id);
-        goto(`/chat/${id}`);
+        goto(resolve(`/chat/${id}`));
     }
 
     async function handleLogout() {
@@ -152,7 +154,11 @@
     <SidebarHeader>
         <SidebarMenu>
             <SidebarMenuItem>
-                <SidebarMenuButton size="lg" class="font-semibold flex flex-row justify-between" onclick={handleNewChat}>
+                <SidebarMenuButton
+                    size="lg"
+                    class="font-semibold flex flex-row justify-between"
+                    onclick={handleNewChat}
+                >
                     <img src="/vessel.png" alt="Vessel" class="size-6 rounded" />
                     Vessel
                     <MessageSquarePlus />
@@ -169,7 +175,7 @@
                     <div class="flex flex-wrap gap-1 px-2">
                         {#each allTags as { tag, count } (tag)}
                             <a
-                                href="/tags/{tag}"
+                                href={resolve(`/tags/${tag}`)}
                                 class="tag-pill-colors inline-flex items-center justify-center h-5 px-1.5 rounded-full text-[10px] leading-none font-medium whitespace-nowrap cursor-pointer hover:opacity-80 transition-opacity"
                                 style="--tag-hue: {hashHue(tag)}"
                             >
@@ -223,7 +229,7 @@
             <SidebarMenuItem>
                 <SidebarMenuButton
                     isActive={currentPath === "/settings"}
-                    onclick={() => goto("/settings")}
+                    onclick={() => goto(resolve("/settings"))}
                 >
                     <Settings />
                     Settings

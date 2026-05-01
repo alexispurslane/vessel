@@ -1,6 +1,12 @@
 <script lang="ts">
     import type { SessionTreeNodeData } from "$lib/api.js";
-    import { graphStratify, sugiyama, coordSimplex, decrossTwoLayer, layeringLongestPath } from "d3-dag";
+    import {
+        graphStratify,
+        sugiyama,
+        coordSimplex,
+        decrossTwoLayer,
+        layeringLongestPath,
+    } from "d3-dag";
     import GitBranch from "@lucide/svelte/icons/git-branch";
     import User from "@lucide/svelte/icons/user";
     import Bot from "@lucide/svelte/icons/bot";
@@ -16,12 +22,7 @@
         navigating?: boolean;
     }
 
-    let {
-        nodes,
-        leafId,
-        onnavigateto,
-        navigating = false,
-    }: Props = $props();
+    let { nodes, leafId, onnavigateto, navigating = false }: Props = $props();
 
     // Only show message entries (user + assistant)
     const messageNodes = $derived(nodes.filter((n) => n.type === "message"));
@@ -34,9 +35,7 @@
 
         const visibleById = new Map(messageNodes.map((n) => [n.id, n]));
         // Check if all parentIDs already reference visible nodes (the fast path)
-        const allValid = messageNodes.every(
-            (n) => !n.parentId || visibleById.has(n.parentId)
-        );
+        const allValid = messageNodes.every((n) => !n.parentId || visibleById.has(n.parentId));
         if (allValid) return messageNodes;
 
         // Slow path: repair any dangling parentIds by walking up via the full node list
@@ -53,11 +52,19 @@
     });
 
     // Active branch IDs
-    const activeBranchIds = $derived(new Set(repairedNodes().filter((n) => n.onActiveBranch).map((n) => n.id)));
+    const activeBranchIds = $derived(
+        new Set(
+            repairedNodes()
+                .filter((n) => n.onActiveBranch)
+                .map((n) => n.id)
+        )
+    );
 
     // Hovered node
     let hoveredId = $state<string | null>(null);
-    const hoveredNode = $derived(hoveredId ? repairedNodes().find((n) => n.id === hoveredId) : null);
+    const hoveredNode = $derived(
+        hoveredId ? repairedNodes().find((n) => n.id === hoveredId) : null
+    );
 
     // Layout constants
     const NODE_WIDTH = 220;
@@ -120,7 +127,9 @@
             const builder = graphStratify()
                 .id((d: DagNodeData) => d.id)
                 .parentIds((d: DagNodeData) => d.parentIds);
-            const dag = builder(stratifyData as readonly (DagNodeData & { id: string; parentIds: string[] })[]);
+            const dag = builder(
+                stratifyData as readonly (DagNodeData & { id: string; parentIds: string[] })[]
+            );
 
             const layout = sugiyama()
                 .nodeSize([NODE_WIDTH + GAP_X, NODE_HEIGHT + GAP_Y])
@@ -157,7 +166,8 @@
                         x: dagLink.target.x ?? 0,
                         y: dagLink.target.y ?? 0,
                     },
-                    onActiveBranch: activeBranchIds.has(sourceData.id) && activeBranchIds.has(targetData.id),
+                    onActiveBranch:
+                        activeBranchIds.has(sourceData.id) && activeBranchIds.has(targetData.id),
                 });
             }
 
@@ -229,7 +239,7 @@
             >
                 <g transform="translate({PADDING}, {PADDING})">
                     <!-- Links (arrows) - drawn first so they're behind nodes -->
-                    {#each result.links as link}
+                    {#each result.links as link (link.source.id + "-" + link.target.id)}
                         <path
                             d={linkPath(link)}
                             fill="none"
@@ -242,7 +252,7 @@
                     {/each}
 
                     <!-- Nodes -->
-                    {#each result.nodes as laidNode}
+                    {#each result.nodes as laidNode (laidNode.id)}
                         {@const node = laidNode.node}
                         {@const isActive = activeBranchIds.has(node.id)}
                         {@const isLeaf = node.id === leafId}
@@ -255,7 +265,9 @@
                             onmouseenter={() => (hoveredId = node.id)}
                             onmouseleave={() => (hoveredId = null)}
                             onclick={() => onnavigateto?.(node.id)}
-                            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') onnavigateto?.(node.id); }}
+                            onkeydown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") onnavigateto?.(node.id);
+                            }}
                             role="button"
                             tabindex="0"
                             aria-label="{isUser ? 'User' : 'Assistant'}: {node.preview}"
@@ -273,7 +285,10 @@
 
                             <!-- Role icon -->
                             <foreignObject x="4" y={(NODE_HEIGHT - 20) / 2} width="20" height="20">
-                                <div class="dag-icon-wrap {isUser ? 'icon-user' : 'icon-assistant'}" xmlns="http://www.w3.org/1999/xhtml">
+                                <div
+                                    class="dag-icon-wrap {isUser ? 'icon-user' : 'icon-assistant'}"
+                                    xmlns="http://www.w3.org/1999/xhtml"
+                                >
                                     {#if isUser}
                                         <User class="size-3.5" />
                                     {:else}
@@ -287,7 +302,9 @@
                                 x="30"
                                 y={NODE_HEIGHT / 2}
                                 dominant-baseline="central"
-                                class="dag-text {isActive || isLeaf ? 'text-active' : 'text-inactive'}"
+                                class="dag-text {isActive || isLeaf
+                                    ? 'text-active'
+                                    : 'text-inactive'}"
                             >
                                 {truncatePreview(node.preview)}
                             </text>
@@ -314,7 +331,9 @@
 
     <!-- Navigation indicator -->
     {#if navigating}
-        <div class="border-t px-3 py-1.5 bg-muted/50 text-xs text-muted-foreground flex items-center gap-1.5">
+        <div
+            class="border-t px-3 py-1.5 bg-muted/50 text-xs text-muted-foreground flex items-center gap-1.5"
+        >
             <span class="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
             Navigating...
         </div>

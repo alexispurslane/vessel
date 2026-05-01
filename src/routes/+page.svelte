@@ -1,11 +1,12 @@
 <script lang="ts">
     import { goto } from "$app/navigation";
+    import { resolve } from "$app/paths";
     import { createConversation } from "$lib/stores/conversations.svelte.js";
     import { getConversations, loadConversations } from "$lib/stores/conversations.svelte.js";
     import { getSettingsStore } from "$lib/stores/settings.svelte.js";
     import { ChatInput } from "$lib/components/chat/index.js";
     import { Button } from "$lib/components/ui/button/index.js";
-    import { Spinner } from "$lib/components/ui/spinner/index.js";
+
     import MessageSquare from "@lucide/svelte/icons/message-square";
     import Box from "@lucide/svelte/icons/box";
     import Globe from "@lucide/svelte/icons/globe";
@@ -104,14 +105,15 @@
             url += `&netAllDomainsOn=${netAllDomainsOn}`;
             url += `&mcpServersOn=${mcpServersOn}`;
             url += `&agentMode=${agentMode}`;
-            goto(url);
+            // @ts-expect-error -- dynamic URL with query params can't satisfy SvelteKit typed routes
+            goto(resolve(url));
         } else {
             isCreating = false;
         }
     }
 
     function selectConversation(id: string) {
-        goto(`/chat/${id}`);
+        goto(resolve(`/chat/${id}`));
     }
 </script>
 

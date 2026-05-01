@@ -1,8 +1,5 @@
 <script lang="ts">
-    import {
-        SidebarMenuItem,
-        SidebarMenuButton,
-    } from "$lib/components/ui/sidebar/index.js";
+    import { SidebarMenuItem, SidebarMenuButton } from "$lib/components/ui/sidebar/index.js";
     import {
         ContextMenu,
         ContextMenuContent,
@@ -16,6 +13,7 @@
     import Tag from "@lucide/svelte/icons/tag";
     import Sparkles from "@lucide/svelte/icons/sparkles";
     import { hashHue } from "$lib/utils.js";
+    import { resolve } from "$app/paths";
 
     interface Conversation {
         id: string;
@@ -47,11 +45,7 @@
 <SidebarMenuItem>
     <ContextMenu>
         <ContextMenuTrigger>
-            <SidebarMenuButton
-                isActive={isActive}
-                onclick={() => onSelect(conv.id)}
-                class="group h-12"
-            >
+            <SidebarMenuButton {isActive} onclick={() => onSelect(conv.id)} class="group h-12">
                 <MessageSquare class="shrink-0" />
                 <div class="flex-1 min-w-0 flex flex-col">
                     <span class="truncate">{conv.title}</span>
@@ -59,7 +53,7 @@
                         <div class="flex gap-1 mt-1 pb-1 overflow-x-auto no-scrollbar">
                             {#each conv.tags as tag (tag)}
                                 <a
-                                    href="/tags/{tag}"
+                                    href={resolve(`/tags/${tag}`)}
                                     class="tag-pill-colors inline-flex items-center justify-center h-3.5 px-1 rounded-full text-[8px] leading-none font-medium whitespace-nowrap cursor-pointer hover:opacity-80 transition-opacity shrink-0"
                                     style="--tag-hue: {hashHue(tag)}"
                                     onclick={(e) => e.stopPropagation()}
@@ -88,12 +82,9 @@
                 <Tag class="mr-2 h-4 w-4" />
                 Edit Tags
             </ContextMenuItem>
-            <ContextMenuItem
-                onclick={() => onGenerateTitle(conv.id)}
-                disabled={generatingTitle}
-            >
+            <ContextMenuItem onclick={() => onGenerateTitle(conv.id)} disabled={generatingTitle}>
                 <Sparkles class="mr-2 h-4 w-4" />
-                {generatingTitle ? 'Generating...' : 'Generate New Title'}
+                {generatingTitle ? "Generating..." : "Generate New Title"}
             </ContextMenuItem>
             <ContextMenuSeparator />
             <ContextMenuItem

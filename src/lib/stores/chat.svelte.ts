@@ -28,7 +28,6 @@ import { setActiveConversation, updateConversationTitleAndTags } from "./convers
 // Import message management functions from chat-messages module
 import {
     setStreamingMessageId,
-    getStreamingMsg,
     populateFromHistory,
     clearMessages as _clearMessages,
     reloadMessages as _reloadMessages,
@@ -144,7 +143,7 @@ function handleTurnStart(s: ChatState): void {
 }
 
 /** Handle the 'turn_end' SSE event. */
-function handleTurnEnd(s: ChatState): void {
+function handleTurnEnd(_s: ChatState): void {
     // Turn ended, but generation might continue with more turns
 }
 

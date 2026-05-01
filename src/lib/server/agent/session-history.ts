@@ -41,6 +41,211 @@ export interface SessionTreeRelation {
 
 // --- History building ---
 
+/** Mutable state shared across the entry-type handlers during history building. */
+interface HistoryBuilderState {
+    messages: HistoryMessage[];
+    pendingToolCalls: Map<
+        string,
+        { toolName: string; msgIndex: number; toolCallIndex: number }
+    >;
+    lastModelProvider: string | null;
+    lastModelId: string | null;
+    lastAssistantMsgIndex: number;
+    accumulatedSources: FetchedSource[];
+}
+
+/** Track model changes from `model_change` entries. */
+function handleModelChange(state: HistoryBuilderState, entry: unknown): void {
+    const modelEntry = entry as unknown as { provider: string; modelId: string };
+    state.lastModelProvider = modelEntry.provider ?? null;
+    state.lastModelId = modelEntry.modelId ?? null;
+}
+
+/** Accumulate fetched_sources custom entries and retroactively attach them. */
+function handleFetchedSources(state: HistoryBuilderState, entry: unknown): void {
+    const sources = (entry as { data: FetchedSource[] | undefined }).data;
+    if (sources && sources.length > 0) {
+        state.accumulatedSources = [...state.accumulatedSources, ...sources];
+        // Retroactively attach to the assistant message that just produced them
+        if (state.lastAssistantMsgIndex >= 0) {
+            state.messages[state.lastAssistantMsgIndex].fetchedSources = [
+                ...state.accumulatedSources,
+            ];
+        }
+    }
+}
+
+/** Match tool result messages back to their pending tool calls. */
+function handleToolResult(
+    state: HistoryBuilderState,
+    msg: Record<string, unknown>
+): void {
+    const toolCallId = (msg.toolCallId ?? msg.tool_call_id) as string | undefined;
+    if (toolCallId && state.pendingToolCalls.has(toolCallId)) {
+        const pending = state.pendingToolCalls.get(toolCallId)!;
+        const targetMsg = state.messages[pending.msgIndex];
+        if (targetMsg?.toolCalls?.[pending.toolCallIndex]) {
+            const tc = targetMsg.toolCalls[pending.toolCallIndex];
+            tc.status = msg.isError ? "error" : "completed";
+            if (Array.isArray(msg.content)) {
+                tc.output = (msg.content as Record<string, unknown>[])
+                    .filter((b) => b.type === "text" && typeof b.text === "string")
+                    .map((b) => b.text as string)
+                    .join("");
+            } else if (typeof msg.content === "string") {
+                tc.output = msg.content;
+            }
+        }
+        state.pendingToolCalls.delete(toolCallId);
+    }
+}
+
+/** Parsed content blocks from a message's content field. */
+interface ExtractedContent {
+    textContent: string;
+    thinkingContent: string | undefined;
+    toolCalls: Array<{
+        toolName: string;
+        status: string;
+        output?: string;
+        toolCallId?: string;
+        arguments?: Record<string, unknown>;
+    }>;
+}
+
+/** Parse a message's content field into text, thinking, and tool call blocks. */
+function extractMessageContent(msg: Record<string, unknown>): ExtractedContent {
+    let textContent = "";
+    let thinkingContent: string | undefined;
+    const toolCalls: ExtractedContent["toolCalls"] = [];
+
+    if (Array.isArray(msg.content)) {
+        for (const block of msg.content as Record<string, unknown>[]) {
+            if (block.type === "text" && typeof block.text === "string") {
+                textContent += block.text;
+            } else if (
+                block.type === "thinking" &&
+                typeof block.thinking === "string"
+            ) {
+                thinkingContent = (thinkingContent ?? "") + block.thinking;
+            } else if (block.type === "toolCall") {
+                toolCalls.push({
+                    toolName: (block.name as string) ?? "unknown",
+                    status: "completed",
+                    toolCallId: block.id as string,
+                    arguments: block.arguments as Record<string, unknown> | undefined,
+                });
+            }
+        }
+    } else if (typeof msg.content === "string") {
+        textContent = msg.content;
+    }
+
+    // Strip leading newlines
+    textContent = textContent.replace(/^\n+/, "");
+    if (thinkingContent) {
+        thinkingContent = thinkingContent.replace(/^\n+/, "");
+    }
+
+    return { textContent, thinkingContent, toolCalls };
+}
+
+/** Extract token usage data from an assistant message, if present. */
+function extractUsage(msg: Record<string, unknown>): HistoryMessage["usage"] {
+    if (!msg.usage) return undefined;
+    const u = msg.usage as Record<string, unknown>;
+    return {
+        input: (u.input as number) ?? 0,
+        output: (u.output as number) ?? 0,
+        cacheRead: (u.cacheRead as number) ?? 0,
+        cacheWrite: (u.cacheWrite as number) ?? 0,
+        totalTokens: (u.totalTokens as number) ?? 0,
+    };
+}
+
+/** After appending an assistant message, update accumulated-source tracking. */
+function handlePostAssistantPush(
+    state: HistoryBuilderState,
+    msgIndex: number
+): void {
+    state.lastAssistantMsgIndex = msgIndex;
+    if (state.accumulatedSources.length > 0) {
+        state.messages[msgIndex].fetchedSources = [...state.accumulatedSources];
+    }
+}
+
+/** Register tool calls from a message so later tool-result messages can match back. */
+function registerPendingToolCalls(
+    state: HistoryBuilderState,
+    toolCalls: ExtractedContent["toolCalls"],
+    msgIndex: number
+): void {
+    for (let tcIdx = 0; tcIdx < toolCalls.length; tcIdx++) {
+        const tc = toolCalls[tcIdx];
+        if (tc.toolCallId) {
+            state.pendingToolCalls.set(tc.toolCallId, {
+                toolName: tc.toolName,
+                msgIndex,
+                toolCallIndex: tcIdx,
+            });
+        }
+    }
+}
+
+/** Resolve assistant-specific fields (model, provider, error, usage) from a message. */
+function resolveAssistantFields(
+    msg: Record<string, unknown>,
+    role: string,
+    state: HistoryBuilderState
+): Pick<HistoryMessage, "model" | "modelProvider" | "isError" | "usage"> {
+    if (role !== "assistant") {
+        return { model: undefined, modelProvider: undefined, isError: undefined, usage: undefined };
+    }
+    return {
+        model: (msg.model as string | undefined) ?? state.lastModelId ?? undefined,
+        modelProvider: (msg.provider as string | undefined) ?? state.lastModelProvider ?? undefined,
+        isError: !!msg.errorMessage || undefined,
+        usage: extractUsage(msg),
+    };
+}
+
+/** Process a user or assistant message entry and append it to the history. */
+function handleMessage(
+    state: HistoryBuilderState,
+    entry: { id: string },
+    msg: Record<string, unknown>,
+    role: string
+): void {
+    const { textContent, thinkingContent, toolCalls } = extractMessageContent(msg);
+
+    // Skip empty user messages that pi sometimes adds
+    if (role === "user" && !textContent.trim()) return;
+
+    const { model, modelProvider, isError, usage } = resolveAssistantFields(msg, role, state);
+
+    const msgIndex = state.messages.length;
+    state.messages.push({
+        id: entry.id,
+        role,
+        content: textContent,
+        thinking: thinkingContent || undefined,
+        model,
+        modelProvider,
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+        isError,
+        usage,
+        timestamp: (msg.timestamp as number) ?? 0,
+    });
+
+    if (role === "assistant") {
+        handlePostAssistantPush(state, msgIndex);
+    }
+
+    if (toolCalls.length > 0) {
+        registerPendingToolCalls(state, toolCalls, msgIndex);
+    }
+}
+
 /**
  * Build message history from an in-memory session, respecting the
  * current branch/leaf position. Uses the SessionManager's getBranch() method
@@ -57,42 +262,25 @@ export function buildHistoryFromSession(
     // getBranch() returns entries from root to current leaf
     const branchEntries = sessionManager.getBranch();
 
-    const messages: HistoryMessage[] = [];
-
-    // Track tool call IDs to match results from tool-role messages
-    const pendingToolCalls: Map<
-        string,
-        { toolName: string; msgIndex: number; toolCallIndex: number }
-    > = new Map();
-
-    let lastModelProvider: string | null = null;
-    let lastModelId: string | null = null;
-
-    // Accumulated fetched sources — once sources enter the LLM context, they
-    // remain there for all subsequent assistant messages, so each one gets the
-    // full cumulative list appended to it.
-    let lastAssistantMsgIndex = -1;
-    let accumulatedSources: FetchedSource[] = [];
+    const state: HistoryBuilderState = {
+        messages: [],
+        pendingToolCalls: new Map(),
+        lastModelProvider: null,
+        lastModelId: null,
+        lastAssistantMsgIndex: -1,
+        accumulatedSources: [],
+    };
 
     for (const entry of branchEntries) {
         // Track model changes
         if (entry.type === "model_change") {
-            const modelEntry = entry as unknown as { provider: string; modelId: string };
-            lastModelProvider = modelEntry.provider ?? null;
-            lastModelId = modelEntry.modelId ?? null;
+            handleModelChange(state, entry);
             continue;
         }
 
         // Accumulate fetched_sources custom entries — they stay in context forever
-        if (entry.type === "custom" && (entry as any).customType === "fetched_sources") {
-            const sources = (entry as any).data as FetchedSource[] | undefined;
-            if (sources && sources.length > 0) {
-                accumulatedSources = [...accumulatedSources, ...sources];
-                // Retroactively attach to the assistant message that just produced them
-                if (lastAssistantMsgIndex >= 0) {
-                    messages[lastAssistantMsgIndex].fetchedSources = [...accumulatedSources];
-                }
-            }
+        if (entry.type === "custom" && (entry as { customType: string }).customType === "fetched_sources") {
+            handleFetchedSources(state, entry);
             continue;
         }
 
@@ -105,136 +293,23 @@ export function buildHistoryFromSession(
 
         // Handle tool result messages — attach output to the matching pending tool call
         if (role === "toolResult") {
-            const toolCallId = (msg.toolCallId ?? msg.tool_call_id) as string | undefined;
-            if (toolCallId && pendingToolCalls.has(toolCallId)) {
-                const pending = pendingToolCalls.get(toolCallId)!;
-                const targetMsg = messages[pending.msgIndex];
-                if (targetMsg?.toolCalls?.[pending.toolCallIndex]) {
-                    const tc = targetMsg.toolCalls[pending.toolCallIndex];
-                    tc.status = msg.isError ? "error" : "completed";
-                    if (Array.isArray(msg.content)) {
-                        tc.output = (msg.content as Record<string, unknown>[])
-                            .filter(
-                                (b) => b.type === "text" && typeof b.text === "string"
-                            )
-                            .map((b) => b.text as string)
-                            .join("");
-                    } else if (typeof msg.content === "string") {
-                        tc.output = msg.content;
-                    }
-                }
-                pendingToolCalls.delete(toolCallId);
-            }
+            handleToolResult(state, msg);
             continue;
         }
 
         if (role !== "user" && role !== "assistant") continue;
 
-        // Extract text content
-        let textContent = "";
-        let thinkingContent: string | undefined;
-        const extractedToolCalls: Array<{
-            toolName: string;
-            status: string;
-            output?: string;
-            toolCallId?: string;
-            arguments?: Record<string, unknown>;
-        }> = [];
-
-        if (Array.isArray(msg.content)) {
-            for (const block of msg.content as Record<string, unknown>[]) {
-                if (block.type === "text" && typeof block.text === "string") {
-                    textContent += block.text;
-                } else if (
-                    block.type === "thinking" &&
-                    typeof block.thinking === "string"
-                ) {
-                    thinkingContent = (thinkingContent ?? "") + block.thinking;
-                } else if (block.type === "toolCall") {
-                    extractedToolCalls.push({
-                        toolName: (block.name as string) ?? "unknown",
-                        status: "completed",
-                        toolCallId: block.id as string,
-                        arguments: block.arguments as Record<string, unknown> | undefined,
-                    });
-                }
-            }
-        } else if (typeof msg.content === "string") {
-            textContent = msg.content;
-        }
-
-        // Skip empty user messages that pi sometimes adds
-        if (role === "user" && !textContent.trim()) continue;
-
-        // Strip leading newlines
-        textContent = textContent.replace(/^\n+/, "");
-        if (thinkingContent) {
-            thinkingContent = thinkingContent.replace(/^\n+/, "");
-        }
-
-        const model =
-            role === "assistant" ? (msg.model as string | undefined) ?? lastModelId ?? undefined : undefined;
-        const modelProvider =
-            role === "assistant"
-                ? (msg.provider as string | undefined) ?? lastModelProvider ?? undefined
-                : undefined;
-        const isError = role === "assistant" && !!msg.errorMessage;
-
-        // Extract usage data from assistant messages
-        const usage = role === "assistant" && msg.usage ? {
-            input: (msg.usage as Record<string, unknown>).input as number ?? 0,
-            output: (msg.usage as Record<string, unknown>).output as number ?? 0,
-            cacheRead: (msg.usage as Record<string, unknown>).cacheRead as number ?? 0,
-            cacheWrite: (msg.usage as Record<string, unknown>).cacheWrite as number ?? 0,
-            totalTokens: (msg.usage as Record<string, unknown>).totalTokens as number ?? 0,
-        } : undefined;
-
-        const msgIndex = messages.length;
-        messages.push({
-            id: entry.id,
-            role,
-            content: textContent,
-            thinking: thinkingContent || undefined,
-            model,
-            modelProvider,
-            toolCalls: extractedToolCalls.length > 0 ? extractedToolCalls : undefined,
-            isError: isError || undefined,
-            usage,
-            timestamp: (msg.timestamp as number) ?? 0,
-        });
-
-        // Track the last assistant message index for attaching fetched_sources.
-        // Also attach any accumulated sources — once sources are in the LLM context,
-        // they remain there for every subsequent assistant message.
-        if (role === "assistant") {
-            lastAssistantMsgIndex = msgIndex;
-            if (accumulatedSources.length > 0) {
-                messages[msgIndex].fetchedSources = [...accumulatedSources];
-            }
-        }
-
-        // Register tool calls for later matching with tool result messages
-        if (extractedToolCalls.length > 0) {
-            extractedToolCalls.forEach((tc, tcIdx) => {
-                if (tc.toolCallId) {
-                    pendingToolCalls.set(tc.toolCallId, {
-                        toolName: tc.toolName,
-                        msgIndex,
-                        toolCallIndex: tcIdx,
-                    });
-                }
-            });
-        }
+        handleMessage(state, entry, msg, role);
     }
 
     const model =
-        lastModelProvider && lastModelId
-            ? { provider: lastModelProvider, modelId: lastModelId }
+        state.lastModelProvider && state.lastModelId
+            ? { provider: state.lastModelProvider, modelId: state.lastModelId }
             : row.model_provider && row.model_id
                 ? { provider: row.model_provider, modelId: row.model_id }
                 : null;
 
-    return { messages, model };
+    return { messages: state.messages, model };
 }
 
 // --- Session tree ---

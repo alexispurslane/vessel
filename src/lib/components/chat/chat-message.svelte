@@ -16,7 +16,6 @@
     import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
     import X from "@lucide/svelte/icons/x";
     import Check from "@lucide/svelte/icons/check";
-    import CodeBlock from "$lib/components/chat/code-block.svelte";
     import ToolCall from "$lib/components/chat/tool-call.svelte";
     import FetchedSources from "$lib/components/chat/fetched-sources.svelte";
     import type { ChatMessage as ChatMessageType } from "$lib/types.js";

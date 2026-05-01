@@ -40,6 +40,7 @@ import { createSessionSandbox, getSessionWorkDir, loadConversationSettingsFromDb
 import type { Model as PiModel, Api } from "@mariozechner/pi-ai";
 import { getDb } from "../db/index.js";
 import type { ChatSSEEvent, ActiveSession, ConversationListItem, CustomModelDef } from "./types.js";
+import type { ConversationSettings } from "$lib/types.js";
 import type { Sandbox } from "zerobox";
 import { getToolRegistry, getToolDefinitions, getBaseToolDefinitions, getResourceLoaderAdapter } from "./pi-adapter.js";
 
@@ -294,45 +295,41 @@ export async function destroyConversation(conversationId: string): Promise<void>
     log.info("session-store", `Destroyed conversation ${conversationId} (explicit user delete)`);
 }
 
-/**
- * Get or create an active AgentSession for a conversation.
- * If the session is already in memory, return it.
- * If not, hydrate from the pi session file.
- */
-export async function getOrCreateConversation(conversationId: string): Promise<PiAgentSession> {
-    const existing = sessions.get(conversationId);
-    if (existing) {
-        cancelDispose(conversationId);
-        return existing.agentSession;
-    }
+/** Open the SessionManager for a conversation, overriding cwd to match the session work dir. */
+function openSessionManager(row: { session_file_path: string }, sessionWorkDir: string): SessionManager {
+    return SessionManager.open(row.session_file_path, SESSIONS_DIR, sessionWorkDir);
+}
 
-    // Look up our metadata including model selection
-    const db = getDb();
-    const row = db
-        .prepare(
-            "SELECT session_file_path, model_provider, model_id FROM conversations WHERE id = ?"
-        )
-        .get(conversationId) as
-        | { session_file_path: string; model_provider: string | null; model_id: string | null }
-        | undefined;
-
-    if (!row) {
-        throw new Error(`Conversation ${conversationId} not found`);
-    }
-
-    // Set up pi's infrastructure
-    const modelRegistry = getModelRegistry();
-
-    let sessionManager: SessionManager;
-    if (row.session_file_path) {
-        sessionManager = SessionManager.open(row.session_file_path, SESSIONS_DIR);
+/** Resolve MCP config: write per-conversation or use global, return flags and whether MCP is active. */
+function resolveMcpConfig(conversationId: string, conversationSettings: ConversationSettings | null): {
+    mcpFlagValues: Map<string, boolean | string>;
+    hasMcpServers: boolean;
+} {
+    ensureMcpConfigFile();
+    const mcpFlagValues = new Map<string, boolean | string>();
+    const enabledMcpServers = conversationSettings?.enabledMcpServers ?? null;
+    if (enabledMcpServers !== null) {
+        const convConfigPath = writeConversationMcpConfig(conversationId, enabledMcpServers);
+        mcpFlagValues.set("mcp-config", convConfigPath);
     } else {
-        sessionManager = SessionManager.create(process.cwd(), SESSIONS_DIR);
-        sessionManager.newSession({ id: conversationId });
+        mcpFlagValues.set("mcp-config", MCP_CONFIG_PATH);
     }
 
+    const activeMcpServers = filterMcpServers(enabledMcpServers);
+    const hasMcpServers = Object.keys(activeMcpServers).length > 0;
+    return { mcpFlagValues, hasMcpServers };
+}
+
+// --- getOrCreateConversation helpers ---
+
+/** Resolve the model for a conversation: conversation-specific → global default → none. */
+function resolveSessionModel(
+    row: { model_provider: string | null; model_id: string | null },
+    settingsManager: SettingsManager,
+    modelRegistry: ReturnType<typeof getModelRegistry>
+): PiModel<Api> | undefined {
     // Apply default model settings from our DB settings table
-    const settingsManager = SettingsManager.inMemory();
+    const db = getDb();
     const settingsRows = db.prepare("SELECT key, value FROM settings").all() as {
         key: string;
         value: string;
@@ -354,67 +351,39 @@ export async function getOrCreateConversation(conversationId: string): Promise<P
     }
 
     // Try to resolve the model for this conversation
-    let model: PiModel<Api> | undefined;
-
     // First, try the conversation-specific model
     if (row.model_id) {
-        model = findModelById(row.model_id, modelRegistry);
+        const model = findModelById(row.model_id, modelRegistry);
+        if (model) return model;
     }
 
     // Fall back to default model from settings
-    if (!model && defaultModelId) {
-        model = findModelById(defaultModelId, modelRegistry);
+    if (defaultModelId) {
+        return findModelById(defaultModelId, modelRegistry);
     }
 
-    mkdirSync(AGENT_DIR, { recursive: true });
+    return undefined;
+}
 
-    // Load per-conversation settings (override global sandbox settings)
-    const conversationSettings = loadConversationSettingsFromDb(conversationId);
+interface SessionInfrastructureOptions {
+    sessionManager: SessionManager;
+    model: PiModel<Api> | undefined;
+    settingsManager: SettingsManager;
+    modelRegistry: ReturnType<typeof getModelRegistry>;
+    mcpFlagValues: Map<string, boolean | string>;
+    hasMcpServers: boolean;
+    eventBus: ReturnType<typeof createEventBus>;
+    sessionWorkDir: string;
+}
 
-    // Create per-session zerobox sandbox for tool execution isolation.
-    // Returns null if sandboxing is disabled in settings.
-    // Per-conversation settings override global sandbox config.
-    const sandbox = await createSessionSandbox(conversationId, conversationSettings);
-
-    // Determine the effective CWD for the agent session.
-    // When sandboxing is enabled, the agent operates inside a sandbox workspace,
-    // so the CWD must be the sandbox directory (not the backend's process.cwd()).
-    // The CWD is embedded in the system prompt ("Current working directory") and
-    // used by tool definitions for path resolution.
-    const sessionWorkDir = sandbox ? getSessionWorkDir(conversationId) : process.cwd();
-
-    // Ensure the global MCP config file exists on disk so pi-mcp-adapter can read it.
-    ensureMcpConfigFile();
-
-    // ALWAYS point pi-mcp-adapter at our own mcp.json via the mcp-config flag.
-    // Without this, the adapter falls back to ~/.pi/agent/mcp.json and also imports
-    // servers from Claude Desktop, Cursor, etc. — which is not what we want.
-    // We only want servers the user explicitly configured through Vessel.
-    const mcpFlagValues = new Map<string, boolean | string>();
-    const enabledMcpServers = conversationSettings?.enabledMcpServers ?? null;
-    if (enabledMcpServers !== null) {
-        // Per-conversation override: write a conversation-specific mcp.json
-        const convConfigPath = writeConversationMcpConfig(conversationId, enabledMcpServers);
-        mcpFlagValues.set("mcp-config", convConfigPath);
-    } else {
-        // Inherit mode: use the global mcp.json we wrote to data/agent/
-        mcpFlagValues.set("mcp-config", MCP_CONFIG_PATH);
-    }
-
-    // Determine which MCP servers will be active for this conversation, so we can
-    // skip adding the mcpAdapter extension entirely when no MCP tools are toggled on.
-    const activeMcpServers = filterMcpServers(enabledMcpServers);
-    const hasMcpServers = Object.keys(activeMcpServers).length > 0;
-
-    // Create a shared EventBus for the session. We pass it into the ResourceLoader
-    // so that extensions can emit events via pi.events, and we can subscribe to those
-    // events from outside the extension system (e.g., to broadcast fetched pages via SSE).
-    const eventBus = createEventBus();
+/** Create the agent session infrastructure: extensions, resource loader, and the session itself. */
+async function createSessionInfrastructure(
+    opts: SessionInfrastructureOptions
+): Promise<{ agentSession: PiAgentSession; extensionsResult: Awaited<ReturnType<typeof createAgentSession>>["extensionsResult"] }> {
+    const { sessionManager, model, settingsManager, modelRegistry, mcpFlagValues, hasMcpServers, eventBus, sessionWorkDir } = opts;
 
     // Create a custom ResourceLoader that includes the fetch tracker (always) and
     // pi-mcp-adapter (only when there are enabled MCP servers).
-    // This gives extensions access to the full ExtensionAPI lifecycle (session_start,
-    // session_shutdown, etc.) which they need to properly connect/teardown resources.
     const extensionFactories = hasMcpServers ? [mcpAdapter, fetchTracker] : [fetchTracker];
     const resourceLoader = new DefaultResourceLoader({
         cwd: sessionWorkDir,
@@ -443,7 +412,6 @@ export async function getOrCreateConversation(conversationId: string): Promise<P
 
     // If MCP servers are configured and we have a per-conversation config path,
     // set the mcp-config flag so pi-mcp-adapter picks it up during session_start.
-    // Skip this entirely when no MCP servers are active (mcpAdapter not loaded).
     if (hasMcpServers && mcpFlagValues.size > 0 && extensionsResult) {
         for (const [name, value] of mcpFlagValues) {
             extensionsResult.runtime.flagValues.set(name, value);
@@ -455,19 +423,19 @@ export async function getOrCreateConversation(conversationId: string): Promise<P
     // In the web app we don't have a TUI, so we pass empty bindings.
     await agentSession.bindExtensions({});
 
+    return { agentSession, extensionsResult };
+}
+
+/** Register Vessel-specific tools (fetch, search, sandboxed tools) and set active tools. */
+function registerVesselTools(
+    agentSession: PiAgentSession,
+    conversationSettings: ConversationSettings | null,
+    sandbox: Sandbox | null,
+    searchResultUrls: Set<string>
+): void {
+    const db = getDb();
+
     // Determine the effective tool set for this conversation.
-    // Extension tools (like the MCP gateway tool) are registered in the tool
-    // registry but NOT automatically activated by _buildRuntime. resolveActiveToolNames()
-    // handles discovering all registered tools and deciding which should be active
-    // based on sandbox mode, disabled tools, and MCP off state.
-    //
-    // The fetch tool is registered later (below) so it's not in getAllTools() yet.
-    // We append it to allRegisteredToolNames so resolveActiveToolNames() knows about
-    // it for toggle/disabled logic.
-    //
-    // Identify MCP/extension tools by their sourceInfo.source — tools from extensions
-    // (like pi-mcp-adapter) have source "local", while built-in tools have "builtin" and
-    // SDK-injected tools (like our fetch tool) have "sdk".
     const allAgentTools = agentSession.getAllTools() as Array<{ name: string; sourceInfo: { source: string; scope: string } }>;
     const mcpToolNames = new Set(
         allAgentTools
@@ -488,19 +456,6 @@ export async function getOrCreateConversation(conversationId: string): Promise<P
         networkAllowed: isNetworkAllowed(conversationSettings),
     });
 
-    // Register Vessel-specific tools (fetch, web_search) into the agent session.
-    // These aren't part of pi-coding-agent's built-in set, so we need to inject
-    // them into all three internal maps:
-    //   _toolRegistry      — used by setActiveToolsByName() to resolve tool objects
-    //   _toolDefinitions    — used by getAllTools() / getSessionAgentInfo() to list available tools
-    //   _baseToolDefinitions — used by _refreshToolRegistry() to rebuild maps from scratch
-    // Without all three, the tool would be callable but invisible in the UI/agent-info.
-
-    // Shared URL tracker: records URLs that appeared in web search results so the
-    // fetch tool can skip re-fetching them and instead tell the model the page was
-    // already fetched in search results.
-    const searchResultUrls = new Set<string>();
-
     const fetchTool = sandbox
         ? createFetchTool({ sandbox, searchResultUrls })
         : createFetchTool({ searchResultUrls });
@@ -508,16 +463,12 @@ export async function getOrCreateConversation(conversationId: string): Promise<P
     const toolDefinitions = getToolDefinitions(agentSession);
     const baseToolDefinitions = getBaseToolDefinitions(agentSession);
     toolRegistry.set(fetchTool.name, fetchTool);
-    // Wrap as a tool definition entry with sourceInfo so getAllTools() / getSessionAgentInfo() sees it.
-    // Using source "sdk" matches how pi-coding-agent tags SDK-registered custom tools.
     toolDefinitions.set(fetchTool.name, {
         definition: fetchTool,
         sourceInfo: { path: `<sdk:${fetchTool.name}>`, source: "sdk", scope: "user", origin: "top-level" },
     });
     baseToolDefinitions.set(fetchTool.name, fetchTool);
 
-    // Register the web search tool — always active when network access is on.
-    // Read settings from DB at creation time; sessions are restarted on settings change.
     const searchBaseUrl = (() => {
         const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(SEARCH_SETTINGS_KEYS.BASE_URL) as { value: string } | undefined;
         return row?.value || undefined;
@@ -534,50 +485,37 @@ export async function getOrCreateConversation(conversationId: string): Promise<P
     });
     baseToolDefinitions.set(searchTool.name, searchTool);
 
-    if (sandbox) {
-        // Sandbox mode: replace default tool execution with sandboxed operations
-        // while keeping the default tool definitions (with promptSnippet) intact.
-        const sandboxedTools = createSandboxedCodingTools(sessionWorkDir, sandbox, { searchResultUrls });
-        // Note: grep is intentionally omitted from sandboxed tools because its
-        // search runs directly on the host. If grep is not disabled and sandbox
-        // is on, we still don't include it for security consistency.
+    const sessionWorkDir = sandbox ? getSessionWorkDir(agentSession.sessionId) : process.cwd();
 
-        // Patch the tool registry: replace default tools with sandboxed versions.
+    if (sandbox) {
+        const sandboxedTools = createSandboxedCodingTools(sessionWorkDir, sandbox, { searchResultUrls });
         for (const tool of sandboxedTools) {
             toolRegistry.set(tool.name, tool);
         }
-        // Also remove grep from the registry and definitions since sandboxed
-        // tools omit it for security consistency.
         toolRegistry.delete("grep");
         toolDefinitions.delete("grep");
         baseToolDefinitions.delete("grep");
-
         agentSession.setActiveToolsByName(activeToolDecision.desiredToolNames);
     } else if (activeToolDecision.needsUpdate) {
         agentSession.setActiveToolsByName(activeToolDecision.desiredToolNames);
     }
+}
 
-    // Apply custom/append system prompt — per-conversation overrides global.
-    // customSystemPrompt replaces the default prompt entirely.
-    // appendSystemPrompt adds to the default prompt.
-    // These are injected into the ResourceLoader so that _rebuildSystemPrompt picks
-    // them up on every rebuild (not just once). We then trigger a rebuild.
+/** Read a global setting from the DB by key, returning its string value or null. */
+function readGlobalSetting(key: string): string | null {
+    const db = getDb();
+    const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined;
+    return row?.value ?? null;
+}
 
-    // Resolve customSystemPrompt: conversation override → global setting
-    let customSystemPrompt = conversationSettings?.customSystemPrompt ?? null;
-    if (customSystemPrompt === null) {
-        const globalRow = db.prepare("SELECT value FROM settings WHERE key = ?").get("agent.customSystemPrompt") as { value: string } | undefined;
-        customSystemPrompt = globalRow?.value ?? null;
-    }
-
-    // Resolve appendSystemPrompt: conversation override → global setting
-    // Supports string (legacy) and string[] (current) formats.
+/** Resolve the append system prompt: conversation override → global, migrating legacy string format. */
+function resolveAppendSystemPrompt(conversationSettings: ConversationSettings | null): string[] {
     let rawAppend = conversationSettings?.appendSystemPrompt ?? null;
     if (rawAppend === null) {
-        const globalRow = db.prepare("SELECT value FROM settings WHERE key = ?").get("agent.appendSystemPrompt") as { value: string } | undefined;
-        if (globalRow?.value) {
+        const globalValue = readGlobalSetting("agent.appendSystemPrompt");
+        if (globalValue) {
             try {
-                rawAppend = JSON.parse(globalRow.value);
+                rawAppend = JSON.parse(globalValue);
             } catch (e) {
                 log.debug("session-store", "Failed to parse global append system prompt setting", e);
                 rawAppend = null;
@@ -592,9 +530,18 @@ export async function getOrCreateConversation(conversationId: string): Promise<P
         : [];
     // Prepend the Vessel-specific append prompt (from VESSEL_APPEND.md)
     const vesselAppend = loadVesselAppendPrompt();
-    const appendSystemPrompt: string[] = vesselAppend
-        ? [vesselAppend, ...userAppend]
-        : userAppend;
+    return vesselAppend ? [vesselAppend, ...userAppend] : userAppend;
+}
+
+/** Apply custom/append system prompt overrides to the agent session. */
+function applySystemPromptOverrides(
+    agentSession: PiAgentSession,
+    conversationSettings: ConversationSettings | null
+): void {
+    // Resolve customSystemPrompt: conversation override → global setting
+    const customSystemPrompt = conversationSettings?.customSystemPrompt ?? readGlobalSetting("agent.customSystemPrompt");
+    const appendSystemPrompt = resolveAppendSystemPrompt(conversationSettings);
+
     if (customSystemPrompt !== null || appendSystemPrompt.length > 0) {
         const resourceLoader = getResourceLoaderAdapter(agentSession);
         if (customSystemPrompt !== null) {
@@ -604,13 +551,18 @@ export async function getOrCreateConversation(conversationId: string): Promise<P
         // Rebuild the system prompt with the new values
         agentSession.setActiveToolsByName(agentSession.getActiveToolNames());
     }
+}
 
-    // Subscribe to events and broadcast to SSE subscribers
-    const unsubscribe = agentSession.subscribe((event: PiAgentSessionEvent) => {
+/** Wire up agent + EventBus subscriptions to broadcast SSE events. */
+function setupSessionEventSubscriptions(
+    agentSession: PiAgentSession,
+    eventBus: ReturnType<typeof createEventBus>,
+    conversationId: string
+): () => void {
+    const unsubscribeAgent = agentSession.subscribe((event: PiAgentSessionEvent) => {
         const session = sessions.get(conversationId);
 
-        // Track turn generation for stream recovery — increment on each
-        // message_start so the client can distinguish different streaming turns
+        // Track turn generation for stream recovery
         if (session && event.type === "message_start") {
             session.turnGeneration++;
         }
@@ -620,8 +572,7 @@ export async function getOrCreateConversation(conversationId: string): Promise<P
             data: formatEventPayload(event),
         };
 
-        // Embed turnGeneration in streaming events so the client can correlate
-        // them with stream_recovery and avoid processing stale deltas
+        // Embed turnGeneration in streaming events
         if (session && (event.type === "message_start" || event.type === "message_update" || event.type === "message_end")) {
             (sseEvent.data as Record<string, unknown>).turnGeneration = session.turnGeneration;
         }
@@ -629,10 +580,6 @@ export async function getOrCreateConversation(conversationId: string): Promise<P
         broadcast(sessions, scheduleDispose, disposeIfIdle, conversationId, sseEvent);
     });
 
-    // Subscribe to the shared EventBus for extension-originated events that
-    // don't flow through the agent's subscribe() channel (e.g., pi.appendEntry
-    // doesn't emit message_start/message_end). The source tracker extension emits
-    // "fetched_sources" via pi.events, and we broadcast it as a custom SSE event.
     const unsubscribeEventBus = eventBus.on("fetched_sources", (data) => {
         const sources = data as FetchedSource[];
         log.debug("fetch-tracker", `EventBus received fetched_sources: ${sources.length} sources for conversation ${conversationId}`);
@@ -642,14 +589,77 @@ export async function getOrCreateConversation(conversationId: string): Promise<P
         });
     });
 
+    return () => {
+        unsubscribeAgent();
+        unsubscribeEventBus();
+    };
+}
+
+/**
+ * Get or create an active AgentSession for a conversation.
+ * If the session is already in memory, return it.
+ * If not, hydrate from the pi session file.
+ */
+export async function getOrHydrateSession(conversationId: string): Promise<PiAgentSession> {
+    const existing = sessions.get(conversationId);
+    if (existing) {
+        cancelDispose(conversationId);
+        return existing.agentSession;
+    }
+
+    // Look up our metadata including model selection
+    const db = getDb();
+    const row = db
+        .prepare(
+            "SELECT session_file_path, model_provider, model_id FROM conversations WHERE id = ?"
+        )
+        .get(conversationId) as
+        | { session_file_path: string; model_provider: string | null; model_id: string | null }
+        | undefined;
+
+    if (!row) {
+        throw new Error(`Conversation ${conversationId} not found`);
+    }
+
+    const modelRegistry = getModelRegistry();
+
+    // Load per-conversation settings and compute session work dir before opening session
+    const conversationSettings = loadConversationSettingsFromDb(conversationId);
+    const sandbox = await createSessionSandbox(conversationId, conversationSettings);
+    const sessionWorkDir = sandbox ? getSessionWorkDir(conversationId) : process.cwd();
+    const sessionManager = openSessionManager(row, sessionWorkDir);
+
+    // Resolve the model for this conversation
+    const settingsManager = SettingsManager.inMemory();
+    const model = resolveSessionModel(row, settingsManager, modelRegistry);
+
+    mkdirSync(AGENT_DIR, { recursive: true });
+
+    // Resolve MCP config
+    const { mcpFlagValues, hasMcpServers } = resolveMcpConfig(conversationId, conversationSettings);
+
+    // Create the agent session with extensions and resource loader
+    const eventBus = createEventBus();
+    const { agentSession } = await createSessionInfrastructure({
+        sessionManager, model, settingsManager, modelRegistry,
+        mcpFlagValues, hasMcpServers, eventBus, sessionWorkDir
+    });
+
+    // Register Vessel-specific tools and set active tools
+    const searchResultUrls = new Set<string>();
+    registerVesselTools(agentSession, conversationSettings, sandbox, searchResultUrls);
+
+    // Apply custom/append system prompt overrides
+    applySystemPromptOverrides(agentSession, conversationSettings);
+
+    // Wire up event subscriptions
+    const unsubscribe = setupSessionEventSubscriptions(agentSession, eventBus, conversationId);
+
     sessions.set(conversationId, {
         agentSession,
         sessionId: conversationId,
         subscribers: new Map(),
-        unsubscribe: () => {
-            unsubscribe();
-            unsubscribeEventBus();
-        },
+        unsubscribe,
         sandbox,
         conversationSettings: conversationSettings ?? undefined,
         turnGeneration: 0,
@@ -714,7 +724,7 @@ export async function sendCustomMessage(
     content: string,
     options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" }
 ): Promise<void> {
-    const agentSession = await getOrCreateConversation(conversationId);
+    const agentSession = await getOrHydrateSession(conversationId);
     return sendCustomMessageToSession(agentSession, customType, content, options);
 }
 
@@ -722,7 +732,7 @@ export async function sendCustomMessage(
  * Send a user message to the agent.
  */
 export async function sendMessage(conversationId: string, content: string, statusContent?: string): Promise<void> {
-    const agentSession = await getOrCreateConversation(conversationId);
+    const agentSession = await getOrHydrateSession(conversationId);
     return sendMessageToSession(agentSession, conversationId, content, statusContent);
 }
 
@@ -967,7 +977,7 @@ export async function getSessionHistory(conversationId: string): Promise<{
     // Ensure the session is loaded — it restores from the JSONL file automatically.
     // This also gives us tree-aware history (respecting the current leaf position
     // after any navigation/edit/delete operations).
-    await getOrCreateConversation(conversationId);
+    await getOrHydrateSession(conversationId);
 
     // Cancel any pending disposal since we're actively using the session
     cancelDispose(conversationId);
@@ -1038,7 +1048,7 @@ export async function navigateMessage(
     targetEntryId: string
 ): Promise<{ editorText?: string; cancelled: boolean }> {
     // Ensure session is loaded (it might have been disposed after idle timeout)
-    const agentSession = await getOrCreateConversation(conversationId);
+    const agentSession = await getOrHydrateSession(conversationId);
 
     // Cancel any pending disposal since we're actively using the session
     cancelDispose(conversationId);
@@ -1063,7 +1073,7 @@ export async function editAssistantMessage(
     newContent: string
 ): Promise<{ cancelled: boolean }> {
     // Ensure session is loaded
-    const agentSession = await getOrCreateConversation(conversationId);
+    const agentSession = await getOrHydrateSession(conversationId);
     cancelDispose(conversationId);
 
     return editSessionAssistantMessage(agentSession, targetEntryId, newContent);
@@ -1092,7 +1102,7 @@ export async function getSessionTree(conversationId: string): Promise<{
     relations: import("./session-messages.js").SessionTreeRelation[];
     leafId: string | null;
 }> {
-    const agentSession = await getOrCreateConversation(conversationId);
+    const agentSession = await getOrHydrateSession(conversationId);
     cancelDispose(conversationId);
 
     return getSessionTreeFromSession(agentSession);
@@ -1105,7 +1115,7 @@ export async function getSessionTree(conversationId: string): Promise<{
  * branches to the target entry.
  */
 export async function setSessionLeaf(conversationId: string, targetEntryId: string): Promise<void> {
-    const agentSession = await getOrCreateConversation(conversationId);
+    const agentSession = await getOrHydrateSession(conversationId);
     cancelDispose(conversationId);
 
     return setSessionLeafEntry(agentSession, targetEntryId);

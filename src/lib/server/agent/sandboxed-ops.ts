@@ -33,7 +33,7 @@ import type {
  */
 export function createSandboxedBashOps(sandbox: Sandbox): BashOperations {
     return {
-        async exec(command, cwd, options) {
+        async exec(command, _cwd, options) {
             // Run the command inside the sandbox, collect all output
             const result: CommandOutput = await sandbox.exec("sh", ["-c", command]).output();
 

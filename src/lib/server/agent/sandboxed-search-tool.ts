@@ -67,40 +67,14 @@ export interface SearchToolDetails {
     results: SearchResult[];
 }
 
-// --- API response types ---
-
-/** Shape returned by the Synthetic API */
-interface SyntheticSearchResponse {
-    results: Array<{
-        url: string;
-        title: string;
-        text?: string;
-        published?: string;
-    }>;
-}
-
-/** Shape returned by the Exa API */
-interface ExaSearchResponse {
-    requestId?: string;
-    results: Array<{
-        title?: string;
-        url: string;
-        publishedDate?: string;
-        text?: string;
-        highlights?: string[];
-        summary?: string;
-        author?: string;
-    }>;
-}
-
 // --- Normalize results ---
 
 function normalizeResults(data: unknown): SearchResult[] {
-    if (!data || typeof data !== "object" || !Array.isArray((data as any).results)) {
+    if (!data || typeof data !== "object" || !Array.isArray((data as { results?: unknown[] }).results)) {
         return [];
     }
 
-    const rawResults = (data as any).results as Array<Record<string, unknown>>;
+    const rawResults = (data as { results: Array<Record<string, unknown>> }).results;
 
     return rawResults.map((r) => ({
         url: String(r.url ?? ""),

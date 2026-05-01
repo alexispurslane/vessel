@@ -10,7 +10,6 @@
     import ChevronDown from "@lucide/svelte/icons/chevron-down";
     import Trash2 from "@lucide/svelte/icons/trash-2";
     import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
-    import CodeBlock from "$lib/components/chat/code-block.svelte";
     import ToolCall from "$lib/components/chat/tool-call.svelte";
     import type { ThinkingGroup } from "$lib/types.js";
 
@@ -149,7 +148,7 @@
             bind:this={thinkingEl}
             class="border-t px-3 py-2 text-xs text-muted-foreground max-h-96 overflow-auto"
         >
-            {#each group.steps as step, stepIdx (step.id)}
+            {#each group.steps as step, _stepIdx (step.id)}
                 {#if step.type === "thinking" && step.thinking}
                     <div class="markdown-prose markdown-thinking">
                         <Streamdown

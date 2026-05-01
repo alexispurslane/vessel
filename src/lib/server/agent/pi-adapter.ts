@@ -19,6 +19,62 @@ import type { AgentSession as PiAgentSession } from "@mariozechner/pi-coding-age
 import { ModelRegistry } from "@mariozechner/pi-coding-agent";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 
+// --- Internal interfaces for casting to private fields ---
+// These interfaces describe the internal shape of pi-coding-agent objects
+// that are not part of the public API. They are used exclusively in this
+// adapter layer to avoid `any` casts. If pi-coding-agent changes its
+// internals, the runtime guards below will catch the breakage.
+
+/**
+ * Type alias for storing heterogeneous AgentTool instances in maps/arrays.
+ *
+ * AgentTool is contravariant in its TParameters generic (the execute method
+ * consumes params), so specific tool types like `AgentTool<FetchSchema, FetchDetails>`
+ * are NOT assignable to `AgentTool<TSchema, unknown>`. This alias uses the same
+ * erasure approach as the pi-agent-core library itself (which uses `AgentTool<any>[]`
+ * in its own AgentState interface). The `any` here is required for type compatibility
+ * when storing tools with different parameter schemas in a single collection.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyAgentTool = AgentTool<any>;
+
+/** Shape of a tool definition record as stored in _toolDefinitions. */
+export interface ToolDefinitionRecord {
+    definition: AnyAgentTool;
+    sourceInfo: {
+        path: string;
+        source: string;
+        scope: string;
+        origin: string;
+    };
+}
+
+/** Internal AgentSession shape for accessing private properties. */
+interface InternalAgentSession {
+    _toolRegistry: Map<string, AnyAgentTool>;
+    _toolDefinitions: Map<string, ToolDefinitionRecord>;
+    _baseToolDefinitions: Map<string, AnyAgentTool>;
+    extensionRunner: ExtensionRunner | undefined;
+}
+
+/** Minimal shape of the extension runner (used for MCP status reporting). */
+export interface ExtensionRunner {
+    extensions?: Array<{ tools?: Map<string, unknown>;[key: string]: unknown }>;
+    adapters?: Array<unknown>;
+    [key: string]: unknown;
+}
+
+/** Internal ResourceLoader shape for accessing prompt properties. */
+interface InternalResourceLoader {
+    systemPrompt: string | undefined;
+    appendSystemPrompt: string[];
+}
+
+/** Internal ModelRegistry shape for accessing the models array. */
+interface InternalModelRegistry {
+    models: Array<{ provider: string }>;
+}
+
 // --- Error message template ---
 
 const ISSUE_URL = "https://github.com/mariozechner/pi-coding-agent/issues";
@@ -44,12 +100,12 @@ function internalAccessError(objectName: string, propertyName: string): Error {
  *
  * Runtime guard: throws if the property is undefined.
  */
-export function getToolRegistry(session: PiAgentSession): Map<string, AgentTool<any>> {
-    const registry = (session as any)._toolRegistry;
+export function getToolRegistry(session: PiAgentSession): Map<string, AnyAgentTool> {
+    const registry = (session as unknown as InternalAgentSession)._toolRegistry;
     if (!registry) {
         throw internalAccessError("agentSession", "_toolRegistry");
     }
-    return registry as Map<string, AgentTool<any>>;
+    return registry as Map<string, AnyAgentTool>;
 }
 
 /**
@@ -62,12 +118,12 @@ export function getToolRegistry(session: PiAgentSession): Map<string, AgentTool<
  *
  * Runtime guard: throws if the property is undefined.
  */
-export function getToolDefinitions(session: PiAgentSession): Map<string, any> {
-    const definitions = (session as any)._toolDefinitions;
+export function getToolDefinitions(session: PiAgentSession): Map<string, ToolDefinitionRecord> {
+    const definitions = (session as unknown as InternalAgentSession)._toolDefinitions;
     if (!definitions) {
         throw internalAccessError("agentSession", "_toolDefinitions");
     }
-    return definitions as Map<string, any>;
+    return definitions as Map<string, ToolDefinitionRecord>;
 }
 
 /**
@@ -80,12 +136,12 @@ export function getToolDefinitions(session: PiAgentSession): Map<string, any> {
  *
  * Runtime guard: throws if the property is undefined.
  */
-export function getBaseToolDefinitions(session: PiAgentSession): Map<string, any> {
-    const definitions = (session as any)._baseToolDefinitions;
+export function getBaseToolDefinitions(session: PiAgentSession): Map<string, AnyAgentTool> {
+    const definitions = (session as unknown as InternalAgentSession)._baseToolDefinitions;
     if (!definitions) {
         throw internalAccessError("agentSession", "_baseToolDefinitions");
     }
-    return definitions as Map<string, any>;
+    return definitions as Map<string, AnyAgentTool>;
 }
 
 /**
@@ -103,9 +159,9 @@ export function getBaseToolDefinitions(session: PiAgentSession): Map<string, any
  * This is intentional: the extension runner is only needed for optional
  * MCP status reporting, not core functionality.
  */
-export function getExtensionRunner(session: PiAgentSession): any | undefined {
-    const runner = (session as any).extensionRunner;
-    return runner ?? undefined;
+export function getExtensionRunner(session: PiAgentSession): ExtensionRunner | undefined {
+    const runner = (session as unknown as InternalAgentSession).extensionRunner;
+    return (runner as ExtensionRunner | undefined) ?? undefined;
 }
 
 // --- ResourceLoader internal accessors ---
@@ -135,11 +191,11 @@ export interface ResourceLoaderAdapter {
  * Runtime guard: throws if `resourceLoader` is undefined.
  */
 export function getResourceLoaderAdapter(session: PiAgentSession): ResourceLoaderAdapter {
-    const rl = session.resourceLoader as any;
+    const rl = session.resourceLoader as unknown as InternalResourceLoader;
     if (!rl) {
         throw internalAccessError("agentSession", "resourceLoader");
     }
-    return rl as ResourceLoaderAdapter;
+    return rl as unknown as ResourceLoaderAdapter;
 }
 
 // --- ModelRegistry internal accessors ---
@@ -157,7 +213,7 @@ export function getResourceLoaderAdapter(session: PiAgentSession): ResourceLoade
  * should always have a models array after initialization).
  */
 export function getModelList(registry: ModelRegistry): Array<{ provider: string }> {
-    const models = (registry as any).models;
+    const models = (registry as unknown as InternalModelRegistry).models;
     if (!models) {
         throw internalAccessError("ModelRegistry", "models");
     }
@@ -174,8 +230,8 @@ export function getModelList(registry: ModelRegistry): Array<{ provider: string 
  * Runtime guard: throws if the property doesn't exist on the registry object.
  */
 export function setModelList(registry: ModelRegistry, models: Array<{ provider: string }>): void {
-    if (!("models" in (registry as any))) {
+    if (!("models" in (registry as unknown as InternalModelRegistry))) {
         throw internalAccessError("ModelRegistry", "models");
     }
-    (registry as any).models = models;
+    (registry as unknown as InternalModelRegistry).models = models;
 }

@@ -19,13 +19,13 @@ import type { ChatSSEEvent, ActiveSession } from "./types.js";
  * while streaming — now it's safe to clean up.
  *
  * @param sessions - The sessions Map (passed in to avoid circular dependency on session-store)
- * @param scheduleDisposeFn - Callback to schedule disposal (passed in to avoid circular dependency)
+ * @param _scheduleDisposeFn - Callback to schedule disposal (passed in to avoid circular dependency on session-store)
  * @param conversationId - The conversation/session ID
  * @param event - The SSE event to broadcast
  */
 export function broadcast(
     sessions: Map<string, ActiveSession>,
-    scheduleDisposeFn: (conversationId: string) => void,
+    _scheduleDisposeFn: (conversationId: string) => void,
     disposeIfIdleFn: (conversationId: string) => void,
     conversationId: string,
     event: ChatSSEEvent

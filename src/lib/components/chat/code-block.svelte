@@ -2,7 +2,6 @@
     import Clipboard from "@lucide/svelte/icons/clipboard";
     import Check from "@lucide/svelte/icons/check";
     import { highlightElement } from "@speed-highlight/core";
-    import { detectLanguage } from "@speed-highlight/core/detect";
 
     interface Props {
         lang?: string;
@@ -61,6 +60,11 @@
     // Re-highlight when text or lang changes — but skip while streaming to avoid
     // re-highlighting the entire growing code block on every delta. Once streaming
     // finishes, we highlight the complete block once.
+    // Direct DOM manipulation is required here because @speed-highlight/core's
+    // highlightElement() needs to read/modify className and textContent on the
+    // raw DOM node. Svelte bindings can't replace this — the library operates on
+    // the element directly.
+    /* eslint-disable svelte/no-dom-manipulating */
     $effect(() => {
         if (!codeEl) return;
         const mapped = mapLang(lang);
@@ -70,6 +74,7 @@
             highlightElement(codeEl);
         }
     });
+    /* eslint-enable svelte/no-dom-manipulating */
 </script>
 
 <div class="relative group/code rounded-lg overflow-hidden border bg-background my-3 max-w-[60ch]">

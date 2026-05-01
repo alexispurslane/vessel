@@ -9,6 +9,7 @@ import {
 } from "$lib/api.js";
 import type { AuthStatus } from "$lib/types.js";
 import { goto } from "$app/navigation";
+import { resolve } from "$app/paths";
 
 let status = $state<AuthStatus>({ setup: false, authenticated: false, username: undefined });
 let loading = $state(false);
@@ -86,7 +87,7 @@ export async function doLogin(username: string, password: string): Promise<boole
     try {
         await apiLogin(username, password);
         status = { setup: true, authenticated: true };
-        goto("/");
+        goto(resolve("/"));
         return true;
     } catch (e) {
         error = e instanceof Error ? e.message : "Login failed";
@@ -101,7 +102,7 @@ export async function doLogout(): Promise<void> {
     try {
         await apiLogout();
         status = { setup: true, authenticated: false };
-        goto("/login");
+        goto(resolve("/login"));
     } catch (e) {
         error = e instanceof Error ? e.message : "Logout failed";
     } finally {

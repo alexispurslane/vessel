@@ -1,6 +1,7 @@
 <script lang="ts">
     import { getAuth, doLogin, clearError } from "$lib/stores/auth.svelte.js";
     import { goto } from "$app/navigation";
+    import { resolve } from "$app/paths";
     import { onMount } from "svelte";
     import {
         Card,
@@ -25,9 +26,9 @@
 
     onMount(() => {
         if (auth.needsSetup) {
-            goto("/setup");
+            goto(resolve("/setup"));
         } else if (auth.isAuthenticated) {
-            goto("/");
+            goto(resolve("/"));
         }
     });
 

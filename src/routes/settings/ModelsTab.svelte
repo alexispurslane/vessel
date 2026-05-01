@@ -165,17 +165,17 @@
 
     // --- Models state ---
     let models = $state<ModelInfo[]>([]);
-    let modelLoading = $state(true);
-    let modelError = $state<string | null>(null);
+    let _modelLoading = $state(true);
+    let _modelError = $state<string | null>(null);
 
     async function loadModels() {
-        modelLoading = true;
+        _modelLoading = true;
         try {
             models = await listModels();
         } catch (e) {
-            modelError = e instanceof Error ? e.message : "Failed to load models";
+            _modelError = e instanceof Error ? e.message : "Failed to load models";
         } finally {
-            modelLoading = false;
+            _modelLoading = false;
         }
     }
 
@@ -544,7 +544,7 @@
                                             Available models ({fetchedModels[prov.provider].length})
                                         </p>
                                         <div class="flex flex-wrap gap-1.5">
-                                            {#each fetchedModels[prov.provider] as modelId}
+                                            {#each fetchedModels[prov.provider] as modelId (modelId)}
                                                 {@const alreadyAdded = isModelAdded(modelId)}
                                                 <Badge
                                                     variant={alreadyAdded ? "secondary" : "outline"}
@@ -596,7 +596,7 @@
                                     class="mt-1 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                 >
                                     <option value="" disabled>Select provider</option>
-                                    {#each PROVIDERS as prov}
+                                    {#each PROVIDERS as prov (prov.id)}
                                         <option value={prov.id}>{prov.displayName}</option>
                                     {/each}
                                 </select>
@@ -786,7 +786,7 @@
                                     bind:value={cmApi}
                                     class="mt-1 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                 >
-                                    {#each API_OPTIONS as opt}
+                                    {#each API_OPTIONS as opt (opt)}
                                         <option value={opt}>{opt}</option>
                                     {/each}
                                 </select>

@@ -49,13 +49,7 @@
         disabled?: boolean;
     }
 
-    let {
-        items,
-        fields,
-        onChange,
-        addButtonLabel = "Add",
-        disabled = false,
-    }: Props = $props();
+    let { items, fields, onChange, addButtonLabel = "Add", disabled = false }: Props = $props();
 
     // State for the "add new" form
     let showAddForm = $state(false);
@@ -82,13 +76,17 @@
                 updated[field.key] = vals[field.key] ?? (items[index][field.key] as string);
             }
             updated.editing = false;
-            onChange(items.map((item, i) => i === index ? updated : { ...item, editing: false }));
+            onChange(items.map((item, i) => (i === index ? updated : { ...item, editing: false })));
         }
         delete editValues[index];
     }
 
     function cancelEdit(index: number) {
-        onChange(items.map((item, i) => i === index ? { ...item, editing: false } : { ...item, editing: false }));
+        onChange(
+            items.map((item, i) =>
+                i === index ? { ...item, editing: false } : { ...item, editing: false }
+            )
+        );
         delete editValues[index];
     }
 
@@ -121,13 +119,19 @@
 </script>
 
 <div class="flex flex-wrap gap-2">
-    {#each items as item, index (item[fields[0].key] + '-' + index)}
+    {#each items as item, index (item[fields[0].key] + "-" + index)}
         {#if item.editing}
-            <div class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm">
-                {#each fields as field}
+            <div
+                class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm"
+            >
+                {#each fields as field (field.key)}
                     <input
                         type={field.type ?? "text"}
-                        class="{field.width ?? 'w-24'} rounded border-0 bg-muted px-2 py-1 text-xs {field.mono !== false ? 'font-mono' : ''} focus:ring-1 focus:ring-ring"
+                        class="{field.width ??
+                            'w-24'} rounded border-0 bg-muted px-2 py-1 text-xs {field.mono !==
+                        false
+                            ? 'font-mono'
+                            : ''} focus:ring-1 focus:ring-ring"
                         placeholder={field.placeholder}
                         value={editValues[index]?.[field.key] ?? (item[field.key] as string)}
                         oninput={(e) => {
@@ -160,10 +164,14 @@
                 </Button>
             </div>
         {:else}
-            <div class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm">
-                {#each fields as field, fieldIndex}
+            <div
+                class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm"
+            >
+                {#each fields as field, fieldIndex (field.key)}
                     {#if field.showInView !== false}
-                        {#if fieldIndex > 0 && fields.filter(f => f.showInView !== false).indexOf(field) > 0}
+                        {#if fieldIndex > 0 && fields
+                                .filter((f) => f.showInView !== false)
+                                .indexOf(field) > 0}
                             {#if fieldIndex === 1}
                                 <span class="text-muted-foreground">=</span>
                             {/if}
@@ -171,11 +179,15 @@
                         {#if field.viewDisplay === "mask"}
                             <span class="font-mono text-muted-foreground text-xs">•••</span>
                         {:else}
-                            <span class="font-mono {fieldIndex === 0 ? 'font-medium' : 'text-muted-foreground'} text-xs">{item[field.key]}</span>
+                            <span
+                                class="font-mono {fieldIndex === 0
+                                    ? 'font-medium'
+                                    : 'text-muted-foreground'} text-xs">{item[field.key]}</span
+                            >
                         {/if}
                     {/if}
                 {/each}
-                {#each fields as field}
+                {#each fields as field (field.key)}
                     {#if field.showInView === false && item[field.key]}
                         <span class="text-xs text-muted-foreground">({item[field.key]})</span>
                     {/if}
@@ -201,11 +213,16 @@
     {/each}
 
     {#if showAddForm}
-        <div class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm">
-            {#each fields as field}
+        <div
+            class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm"
+        >
+            {#each fields as field (field.key)}
                 <input
                     type={field.type ?? "text"}
-                    class="{field.width ?? 'w-24'} rounded border-0 bg-muted px-2 py-1 text-xs {field.mono !== false ? 'font-mono' : ''} focus:ring-1 focus:ring-ring"
+                    class="{field.width ??
+                        'w-24'} rounded border-0 bg-muted px-2 py-1 text-xs {field.mono !== false
+                        ? 'font-mono'
+                        : ''} focus:ring-1 focus:ring-ring"
                     placeholder={field.placeholder}
                     value={newValues[field.key] ?? ""}
                     oninput={(e) => {
@@ -221,21 +238,10 @@
                     }}
                 />
             {/each}
-            <Button
-                variant="ghost"
-                size="icon"
-                class="h-5 w-5"
-                onclick={confirmAdd}
-                disabled={disabled}
-            >
+            <Button variant="ghost" size="icon" class="h-5 w-5" onclick={confirmAdd} {disabled}>
                 <Check class="h-3 w-3" />
             </Button>
-            <Button
-                variant="ghost"
-                size="icon"
-                class="h-5 w-5"
-                onclick={cancelAdd}
-            >
+            <Button variant="ghost" size="icon" class="h-5 w-5" onclick={cancelAdd}>
                 <X class="h-3 w-3" />
             </Button>
         </div>
@@ -245,9 +251,10 @@
             size="sm"
             class="h-7 rounded-full"
             onclick={() => (showAddForm = true)}
-            disabled={disabled}
+            {disabled}
         >
-            <Plus class="h-3.5 w-3.5 mr-1" /> {addButtonLabel}
+            <Plus class="h-3.5 w-3.5 mr-1" />
+            {addButtonLabel}
         </Button>
     {/if}
 </div>

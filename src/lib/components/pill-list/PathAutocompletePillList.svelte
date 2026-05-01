@@ -73,12 +73,20 @@
 
     function confirmEdit(index: number) {
         const value = editValues[index] ?? items[index].path;
-        onChange(items.map((item, i) => i === index ? { path: value, editing: false } : { ...item, editing: false }));
+        onChange(
+            items.map((item, i) =>
+                i === index ? { path: value, editing: false } : { ...item, editing: false }
+            )
+        );
         cleanupEdit(index);
     }
 
     function cancelEdit(index: number) {
-        onChange(items.map((item, i) => i === index ? { ...item, editing: false } : { ...item, editing: false }));
+        onChange(
+            items.map((item, i) =>
+                i === index ? { ...item, editing: false } : { ...item, editing: false }
+            )
+        );
         cleanupEdit(index);
     }
 
@@ -95,7 +103,10 @@
 
     function confirmAdd() {
         if (!newValue.trim()) return;
-        onChange([...items.map((item) => ({ ...item, editing: false })), { path: newValue.trim(), editing: false }]);
+        onChange([
+            ...items.map((item) => ({ ...item, editing: false })),
+            { path: newValue.trim(), editing: false },
+        ]);
         newValue = "";
         showAddForm = false;
         addCompletions = [];
@@ -161,7 +172,8 @@
             addSelectedIndex = (addSelectedIndex + 1) % addCompletions.length;
         } else if (e.key === "ArrowUp" && showAddCompletions && addCompletions.length > 0) {
             e.preventDefault();
-            addSelectedIndex = addSelectedIndex <= 0 ? addCompletions.length - 1 : addSelectedIndex - 1;
+            addSelectedIndex =
+                addSelectedIndex <= 0 ? addCompletions.length - 1 : addSelectedIndex - 1;
         } else if (e.key === "Tab" && showAddCompletions && addSelectedIndex >= 0) {
             e.preventDefault();
             newValue = addCompletions[addSelectedIndex];
@@ -194,9 +206,11 @@
 </script>
 
 <div class="flex flex-wrap gap-2">
-    {#each items as item, index (item.path + '-' + index)}
+    {#each items as item, index (item.path + "-" + index)}
         {#if item.editing}
-            <div class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm relative">
+            <div
+                class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm relative"
+            >
                 <input
                     type="text"
                     value={editValues[index] ?? item.path}
@@ -206,11 +220,16 @@
                     onkeydown={(e) => handleEditKeydown(index, e)}
                 />
                 {#if (editShowCompletions[index] ?? false) && (editCompletions[index] ?? []).length > 0}
-                    <div class="absolute top-full left-0 mt-1 w-56 max-h-32 overflow-auto rounded border bg-popover shadow-lg z-50">
-                        {#each (editCompletions[index] ?? []) as completion, idx}
+                    <div
+                        class="absolute top-full left-0 mt-1 w-56 max-h-32 overflow-auto rounded border bg-popover shadow-lg z-50"
+                    >
+                        {#each editCompletions[index] ?? [] as completion, idx (completion)}
                             <button
                                 type="button"
-                                class="w-full px-2 py-1 text-left text-xs font-mono hover:bg-muted {idx === (editSelectedIndex[index] ?? -1) ? 'bg-muted' : ''}"
+                                class="w-full px-2 py-1 text-left text-xs font-mono hover:bg-muted {idx ===
+                                (editSelectedIndex[index] ?? -1)
+                                    ? 'bg-muted'
+                                    : ''}"
                                 onmouseenter={() => (editSelectedIndex[index] = idx)}
                                 onclick={() => {
                                     editValues[index] = completion;
@@ -233,7 +252,9 @@
                 </Button>
             </div>
         {:else}
-            <div class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm">
+            <div
+                class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm"
+            >
                 <span class="font-mono text-xs">{item.path}</span>
                 <Button
                     size="sm"
@@ -256,7 +277,9 @@
     {/each}
 
     {#if showAddForm}
-        <div class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm relative">
+        <div
+            class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm relative"
+        >
             <input
                 type="text"
                 value={newValue}
@@ -266,11 +289,16 @@
                 onkeydown={handleAddKeydown}
             />
             {#if showAddCompletions && addCompletions.length > 0}
-                <div class="absolute top-full left-0 mt-1 w-56 max-h-32 overflow-auto rounded border bg-popover shadow-lg z-50">
-                    {#each addCompletions as completion, idx}
+                <div
+                    class="absolute top-full left-0 mt-1 w-56 max-h-32 overflow-auto rounded border bg-popover shadow-lg z-50"
+                >
+                    {#each addCompletions as completion, idx (completion)}
                         <button
                             type="button"
-                            class="w-full px-2 py-1 text-left text-xs font-mono hover:bg-muted {idx === addSelectedIndex ? 'bg-muted' : ''}"
+                            class="w-full px-2 py-1 text-left text-xs font-mono hover:bg-muted {idx ===
+                            addSelectedIndex
+                                ? 'bg-muted'
+                                : ''}"
                             onmouseenter={() => (addSelectedIndex = idx)}
                             onclick={() => {
                                 newValue = completion;
@@ -292,12 +320,7 @@
             >
                 <Check class="h-3 w-3" />
             </Button>
-            <Button
-                size="sm"
-                variant="ghost"
-                class="h-5 w-5 rounded-full p-0"
-                onclick={cancelAdd}
-            >
+            <Button size="sm" variant="ghost" class="h-5 w-5 rounded-full p-0" onclick={cancelAdd}>
                 <X class="h-3 w-3" />
             </Button>
         </div>
@@ -308,7 +331,8 @@
             class="rounded-full h-8 px-3"
             onclick={() => (showAddForm = true)}
         >
-            <Plus class="h-3.5 w-3.5 mr-1" /> {addButtonLabel}
+            <Plus class="h-3.5 w-3.5 mr-1" />
+            {addButtonLabel}
         </Button>
     {/if}
 </div>

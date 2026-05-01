@@ -154,7 +154,6 @@
                     instructions={agentInstructions}
                     customSystemPrompt={agentCustomSystemPrompt}
                     effectiveSystemPrompt="(will be applied on next session start)"
-                    mode="deferred"
                     onadd={handleAgentAdd}
                     onremove={handleAgentRemove}
                     onedit={handleAgentEdit}

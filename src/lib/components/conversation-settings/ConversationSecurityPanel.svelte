@@ -21,6 +21,7 @@
         type McpServerStatus,
     } from "$lib/api.js";
     import type { ConversationSettings } from "$lib/types.js";
+    import { SvelteSet } from "svelte/reactivity";
     import { reconnectStream } from "$lib/stores/chat.svelte.js";
     import Shield from "@lucide/svelte/icons/shield";
     import Check from "@lucide/svelte/icons/check";
@@ -71,7 +72,7 @@
     //   true  = On (custom selection of MCP servers, persisted as an explicit list)
     //   false = Off (no MCP servers at all, persisted as empty array)
     let mcpState: boolean | null = $state(null);
-    let enabledMcpServers = $state<Set<string>>(new Set());
+    let enabledMcpServers = new SvelteSet<string>();
     let availableMcpServers = $state<McpServerInfo[]>([]);
     let mcpServerStatuses = $state<McpServerStatus[]>([]);
 
@@ -158,19 +159,23 @@
                 // No per-conversation override — inherit global defaults
                 mcpState = null;
                 // Pre-populate from global defaults so toggles are ready if user switches to On
-                enabledMcpServers = new Set(
-                    availableMcpServers
-                        .filter((s) => s.config.defaultEnabled !== false)
-                        .map((s) => s.name)
-                );
+                enabledMcpServers.clear();
+                for (const s of availableMcpServers.filter(
+                    (s) => s.config.defaultEnabled !== false
+                )) {
+                    enabledMcpServers.add(s.name);
+                }
             } else if (settings.enabledMcpServers.length === 0) {
                 // Explicitly off — no MCP servers
                 mcpState = false;
-                enabledMcpServers = new Set();
+                enabledMcpServers.clear();
             } else {
                 // Explicit custom list
                 mcpState = true;
-                enabledMcpServers = new Set(settings.enabledMcpServers);
+                enabledMcpServers.clear();
+                for (const name of settings.enabledMcpServers) {
+                    enabledMcpServers.add(name);
+                }
             }
 
             // Load MCP server connection statuses from the active session
@@ -472,7 +477,6 @@
                                                     } else {
                                                         enabledMcpServers.delete(server.name);
                                                     }
-                                                    enabledMcpServers = new Set(enabledMcpServers);
                                                 }}
                                             />
                                         </div>

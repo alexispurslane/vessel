@@ -217,7 +217,6 @@
 
     let dagNodes = $state<SessionTreeNodeData[]>([]);
     let dagLeafId = $state<string | null>(null);
-    let dagLoading = $state(false);
 
     // Context window usage fraction (based on currently selected model)
     let contextUsageFraction = $derived.by(() => {
@@ -387,7 +386,7 @@
 
     $effect(() => {
         const conversationInfo = conversations.list.find((x) => x.id === chat.conversationId);
-        if (!!conversationInfo) {
+        if (conversationInfo) {
             conversationTitle = conversationInfo.title;
         }
     });
@@ -593,7 +592,7 @@
         // upload files with a progress bar, then send to the AI.
         if (filesToSend.length > 0) {
             // Move text into a message bubble right away (just the user's text, not status updates)
-            const msgId = chat.addLocalUserMessage(text || "📎 Uploading files...");
+            chat.addLocalUserMessage(text || "📎 Uploading files...");
             inputText = "";
             pendingFiles = [];
             sessionStorage.removeItem(draftKey(id));
@@ -728,15 +727,12 @@
 
     async function loadDagData() {
         if (!id) return;
-        dagLoading = true;
         try {
             const tree = await getSessionTree(id);
             dagNodes = tree.nodes;
             dagLeafId = tree.leafId;
         } catch (e) {
             console.error("Failed to load session tree:", e);
-        } finally {
-            dagLoading = false;
         }
     }
 

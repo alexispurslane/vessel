@@ -2,6 +2,7 @@
     import ChevronDown from "@lucide/svelte/icons/chevron-down";
     import Globe from "@lucide/svelte/icons/globe";
     import Search from "@lucide/svelte/icons/search";
+    import { SvelteMap, SvelteSet } from "svelte/reactivity";
     import type { FetchedSource } from "$lib/types.js";
 
     interface OgMetadata {
@@ -23,9 +24,9 @@
     let { sources, onsearchclick, onpageclick }: Props = $props();
 
     // Cache OG metadata so we don't re-fetch on re-render
-    const ogCache = new Map<string, OgMetadata>();
+    const ogCache = new SvelteMap<string, OgMetadata>();
     let ogData = $state<Record<number, OgMetadata>>({});
-    let loadingUrls = $state<Set<string>>(new Set());
+    let loadingUrls = new SvelteSet<string>();
 
     function extractDomain(url: string): string {
         try {
@@ -121,7 +122,7 @@
         <ChevronDown class="size-3 ml-auto shrink-0 transition-transform group-open:rotate-180" />
     </summary>
     <div class="border-t px-3 py-2 flex flex-col gap-1.5">
-        {#each sources as source, i}
+        {#each sources as source, i (i)}
             {@const isPreviousTurn = (source.turn ?? 0) < maxTurn}
             {#if source.type === "page"}
                 {@const og = getOg(i)}

@@ -126,19 +126,27 @@
 
     function scopeLabel(scope: string): string {
         switch (scope) {
-            case "user": return "Global";
-            case "project": return "Project";
-            case "temporary": return "Temp";
-            default: return scope;
+            case "user":
+                return "Global";
+            case "project":
+                return "Project";
+            case "temporary":
+                return "Temp";
+            default:
+                return scope;
         }
     }
 
     function scopeBadgeClass(scope: string): string {
         switch (scope) {
-            case "user": return "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400";
-            case "project": return "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400";
-            case "temporary": return "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400";
-            default: return "bg-muted text-muted-foreground";
+            case "user":
+                return "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400";
+            case "project":
+                return "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400";
+            case "temporary":
+                return "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400";
+            default:
+                return "bg-muted text-muted-foreground";
         }
     }
 
@@ -177,14 +185,18 @@
                             <Wrench class="size-3" />
                             Tools
                             {#if info.tools.length > 0}
-                                <span class="ml-0.5 text-muted-foreground">({info.tools.length})</span>
+                                <span class="ml-0.5 text-muted-foreground"
+                                    >({info.tools.length})</span
+                                >
                             {/if}
                         </TabsTrigger>
                         <TabsTrigger value="skills" class="text-[11px] flex-1 gap-1 px-2">
                             <Sparkles class="size-3" />
                             Skills
                             {#if info.skills.length > 0}
-                                <span class="ml-0.5 text-muted-foreground">({info.skills.length})</span>
+                                <span class="ml-0.5 text-muted-foreground"
+                                    >({info.skills.length})</span
+                                >
                             {/if}
                         </TabsTrigger>
                     </TabsList>
@@ -197,7 +209,6 @@
                             effectiveSystemPrompt={info.systemPrompt}
                             {saving}
                             error={saveError}
-                            mode="immediate"
                             onadd={handleAddInstruction}
                             onremove={handleRemoveInstruction}
                             onedit={handleEditInstruction}
@@ -209,24 +220,44 @@
                     <!-- Tools Tab -->
                     <TabsContent value="tools" class="mt-2">
                         {#if info.tools.length === 0}
-                            <p class="text-xs text-muted-foreground py-4 text-center">No tools configured</p>
+                            <p class="text-xs text-muted-foreground py-4 text-center">
+                                No tools configured
+                            </p>
                         {:else}
                             <div class="rounded-lg border overflow-hidden">
                                 <table class="w-full text-[11px]">
                                     <thead>
                                         <tr class="border-b bg-muted/30">
-                                            <th class="px-3 py-1.5 text-left font-medium text-muted-foreground">Name</th>
-                                            <th class="px-3 py-1.5 text-left font-medium text-muted-foreground">Description</th>
-                                            <th class="px-3 py-1.5 text-left font-medium text-muted-foreground">Scope</th>
+                                            <th
+                                                class="px-3 py-1.5 text-left font-medium text-muted-foreground"
+                                                >Name</th
+                                            >
+                                            <th
+                                                class="px-3 py-1.5 text-left font-medium text-muted-foreground"
+                                                >Description</th
+                                            >
+                                            <th
+                                                class="px-3 py-1.5 text-left font-medium text-muted-foreground"
+                                                >Scope</th
+                                            >
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {#each info.tools as tool, i}
-                                            <tr class="{i < info.tools.length - 1 ? 'border-b' : ''}">
-                                                <td class="px-3 py-1.5 font-mono font-medium whitespace-nowrap">{tool.name}</td>
-                                                <td class="px-3 py-1.5 text-muted-foreground">{tool.description}</td>
+                                        {#each info.tools as tool, i (tool.name)}
+                                            <tr class={i < info.tools.length - 1 ? "border-b" : ""}>
+                                                <td
+                                                    class="px-3 py-1.5 font-mono font-medium whitespace-nowrap"
+                                                    >{tool.name}</td
+                                                >
+                                                <td class="px-3 py-1.5 text-muted-foreground"
+                                                    >{tool.description}</td
+                                                >
                                                 <td class="px-3 py-1.5">
-                                                    <span class="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium {scopeBadgeClass(tool.scope)}">
+                                                    <span
+                                                        class="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium {scopeBadgeClass(
+                                                            tool.scope
+                                                        )}"
+                                                    >
                                                         {scopeLabel(tool.scope)}
                                                     </span>
                                                 </td>
@@ -241,29 +272,54 @@
                     <!-- Skills Tab -->
                     <TabsContent value="skills" class="mt-2">
                         {#if info.skills.length === 0}
-                            <p class="text-xs text-muted-foreground py-4 text-center">No skills configured</p>
+                            <p class="text-xs text-muted-foreground py-4 text-center">
+                                No skills configured
+                            </p>
                         {:else}
                             <div class="rounded-lg border overflow-hidden">
                                 <table class="w-full text-[11px]">
                                     <thead>
                                         <tr class="border-b bg-muted/30">
-                                            <th class="px-3 py-1.5 text-left font-medium text-muted-foreground">Name</th>
-                                            <th class="px-3 py-1.5 text-left font-medium text-muted-foreground">Description</th>
-                                            <th class="px-3 py-1.5 text-left font-medium text-muted-foreground">Scope</th>
+                                            <th
+                                                class="px-3 py-1.5 text-left font-medium text-muted-foreground"
+                                                >Name</th
+                                            >
+                                            <th
+                                                class="px-3 py-1.5 text-left font-medium text-muted-foreground"
+                                                >Description</th
+                                            >
+                                            <th
+                                                class="px-3 py-1.5 text-left font-medium text-muted-foreground"
+                                                >Scope</th
+                                            >
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {#each info.skills as skill, i}
-                                            <tr class="{i < info.skills.length - 1 ? 'border-b' : ''}">
-                                                <td class="px-3 py-1.5 font-mono font-medium whitespace-nowrap">
+                                        {#each info.skills as skill, i (skill.name)}
+                                            <tr
+                                                class={i < info.skills.length - 1 ? "border-b" : ""}
+                                            >
+                                                <td
+                                                    class="px-3 py-1.5 font-mono font-medium whitespace-nowrap"
+                                                >
                                                     {skill.name}
                                                     {#if skill.disableModelInvocation}
-                                                        <span class="ml-1 text-[9px] text-amber-600 dark:text-amber-400" title="Model cannot invoke this skill automatically">manual</span>
+                                                        <span
+                                                            class="ml-1 text-[9px] text-amber-600 dark:text-amber-400"
+                                                            title="Model cannot invoke this skill automatically"
+                                                            >manual</span
+                                                        >
                                                     {/if}
                                                 </td>
-                                                <td class="px-3 py-1.5 text-muted-foreground">{skill.description}</td>
+                                                <td class="px-3 py-1.5 text-muted-foreground"
+                                                    >{skill.description}</td
+                                                >
                                                 <td class="px-3 py-1.5">
-                                                    <span class="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium {scopeBadgeClass(skill.scope)}">
+                                                    <span
+                                                        class="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium {scopeBadgeClass(
+                                                            skill.scope
+                                                        )}"
+                                                    >
                                                         {scopeLabel(skill.scope)}
                                                     </span>
                                                 </td>

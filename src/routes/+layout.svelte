@@ -10,15 +10,16 @@
     import { onMount } from "svelte";
     import { page } from "$app/stores";
     import { ModeWatcher } from "mode-watcher";
-    import { getAuth, checkAuth, initAuth, doLogout } from "$lib/stores/auth.svelte.js";
+    import { getAuth, checkAuth, initAuth } from "$lib/stores/auth.svelte.js";
     import {
         getConversations,
         loadConversations,
         setActiveConversation,
     } from "$lib/stores/conversations.svelte.js";
-    import { disconnectStream, getChat } from "$lib/stores/chat.svelte.js";
+    import { getChat } from "$lib/stores/chat.svelte.js";
     import { loadSettings } from "$lib/stores/settings.svelte.js";
     import { hashHue } from "$lib/utils.js";
+    import { resolve } from "$app/paths";
     import AppSidebar from "$lib/components/sidebar/index.svelte";
     import type { AuthStatus } from "$lib/types.js";
 
@@ -135,9 +136,9 @@
                     </span>
                     {#if convs.activeConversation?.tags?.length}
                         <div class="flex items-center gap-1 shrink-0">
-                            {#each convs.activeConversation.tags as tag}
+                            {#each convs.activeConversation.tags as tag (tag)}
                                 <a
-                                    href="/tags/{tag}"
+                                    href={resolve(`/tags/${tag}`)}
                                     class="tag-pill-colors inline-flex items-center justify-center h-5 px-1.5 rounded-full text-[10px] leading-none font-medium whitespace-nowrap cursor-pointer hover:opacity-80 transition-opacity"
                                     style="--tag-hue: {hashHue(tag)}"
                                 >

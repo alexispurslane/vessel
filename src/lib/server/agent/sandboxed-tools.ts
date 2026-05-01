@@ -16,6 +16,13 @@ import {
     createLsTool,
 } from "@mariozechner/pi-coding-agent";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
+
+/**
+ * Type for heterogeneous AgentTool arrays.
+ * See pi-adapter.ts AnyAgentTool for rationale on the `any` generic.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyAgentTool = AgentTool<any>;
 import {
     createSandboxedBashOps,
     createSandboxedReadOps,
@@ -47,7 +54,7 @@ export interface SandboxedCodingToolsOptions {
  * can use bash with grep/rg commands instead, which goes through the sandboxed
  * bash operations.
  */
-export function createSandboxedCodingTools(cwd: string, sandbox: Sandbox, options?: SandboxedCodingToolsOptions): AgentTool<any>[] {
+export function createSandboxedCodingTools(cwd: string, sandbox: Sandbox, options?: SandboxedCodingToolsOptions): AnyAgentTool[] {
     return [
         createBashTool(cwd, {
             operations: createSandboxedBashOps(sandbox),

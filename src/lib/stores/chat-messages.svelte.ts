@@ -273,7 +273,7 @@ export async function reloadMessages(s: ChatState): Promise<void> {
 export async function deleteMessage(
     s: ChatState,
     messageId: string,
-    role: string,
+    _role: string,
     abortFn: () => Promise<void>
 ): Promise<void> {
     if (!s.currentConversationId) return;
@@ -442,7 +442,7 @@ export function handleStreamRecovery(s: ChatState, e: MessageEvent): void {
             // serializeStreamingMessageForRecovery adds status/output/isError
             // by cross-referencing ToolResultMessage entries, so completed
             // tools show up correctly instead of being stuck as "running".
-            const toolCalls = (data.message.toolCalls ?? []).map((tc: any) => ({
+            const toolCalls = (data.message.toolCalls ?? []).map((tc: { name?: string; toolName?: string; status?: string; arguments?: Record<string, unknown>; output?: string; isError?: boolean }) => ({
                 toolName: tc.name ?? tc.toolName,
                 status: (tc.status ?? "running") as "running" | "completed" | "error",
                 arguments: tc.arguments,

@@ -1,6 +1,6 @@
 import type { RequestHandler } from "./$types.js";
 import {
-    getOrCreateConversation,
+    getOrHydrateSession,
     subscribeToConversation,
 } from "$lib/server/agent/session-store.js";
 import type { ChatSSEEvent } from "$lib/server/agent/types.js";
@@ -13,11 +13,11 @@ import { log } from "$lib/server/logger.js";
  * SSE event stream for a session. EventSource-compatible.
  * Client connects once and receives all agent events in real-time.
  */
-export const GET: RequestHandler = async ({ params, request, url }) => {
+export const GET: RequestHandler = async ({ params, request, url: _url }) => {
     const conversationId = params.id;
 
     // Ensure the AgentSession is loaded (hydrates from .jsonl if needed)
-    await getOrCreateConversation(conversationId);
+    await getOrHydrateSession(conversationId);
 
     const subscriberId = randomUUID();
 

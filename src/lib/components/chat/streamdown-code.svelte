@@ -12,7 +12,7 @@
     import CodeBlock from "$lib/components/chat/code-block.svelte";
     import type { Tokens } from "marked";
 
-    let { token, id: _id }: { token: Tokens.Code; id: string } = $props();
+    let { token }: { token: Tokens.Code } = $props();
 </script>
 
 <CodeBlock lang={token.lang} text={token.text} codeStreaming={false} />

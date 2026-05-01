@@ -1,6 +1,7 @@
 <script lang="ts">
     import { page } from "$app/stores";
     import { goto } from "$app/navigation";
+    import { resolve } from "$app/paths";
     import { listConversationsByTag } from "$lib/api.js";
     import type { ConversationListItem } from "$lib/types.js";
     import { Button } from "$lib/components/ui/button/index.js";
@@ -38,7 +39,7 @@
     });
 
     function openConversation(id: string) {
-        goto(`/chat/${id}`);
+        goto(resolve(`/chat/${id}`));
     }
 
     function formatDate(dateStr: string): string {
@@ -94,7 +95,7 @@
                             {#each conv.tags as t (t)}
                                 {#if t !== tag}
                                     <a
-                                        href="/tags/{t}"
+                                        href={resolve(`/tags/${t}`)}
                                         class="tag-pill-colors inline-flex items-center justify-center h-4 px-1 rounded-full text-[9px] leading-none font-medium cursor-pointer hover:opacity-80 transition-opacity"
                                         style="--tag-hue: {hashHue(t)}"
                                     >

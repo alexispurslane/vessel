@@ -1,6 +1,7 @@
 <script lang="ts">
     import { getAuth, setup, clearError } from "$lib/stores/auth.svelte.js";
     import { goto } from "$app/navigation";
+    import { resolve } from "$app/paths";
     import { onMount } from "svelte";
     import {
         Card,
@@ -33,7 +34,7 @@
 
     onMount(() => {
         if (!auth.needsSetup) {
-            goto("/login");
+            goto(resolve("/login"));
         }
     });
 
@@ -45,7 +46,7 @@
         try {
             const success = await setup(username, password);
             if (success) {
-                goto("/");
+                goto(resolve("/"));
             }
         } finally {
             submitting = false;

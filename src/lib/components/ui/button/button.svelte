@@ -48,6 +48,7 @@
 </script>
 
 <script lang="ts">
+    /* eslint-disable svelte/no-navigation-without-resolve -- primitive UI component, href is caller's responsibility */
     let {
         class: className,
         variant = "default",

@@ -58,11 +58,21 @@
     }
 
     function confirmEdit(index: number, value: string) {
-        onChange(items.map((item, i) => i === index ? { ...item, [labelKey]: value, editing: false } : { ...item, editing: false }));
+        onChange(
+            items.map((item, i) =>
+                i === index
+                    ? { ...item, [labelKey]: value, editing: false }
+                    : { ...item, editing: false }
+            )
+        );
     }
 
     function cancelEdit(index: number) {
-        onChange(items.map((item, i) => i === index ? { ...item, editing: false } : { ...item, editing: false }));
+        onChange(
+            items.map((item, i) =>
+                i === index ? { ...item, editing: false } : { ...item, editing: false }
+            )
+        );
     }
 
     function deleteItem(index: number) {
@@ -71,7 +81,10 @@
 
     function confirmAdd() {
         if (!newValue.trim()) return;
-        onChange([...items.map((item) => ({ ...item, editing: false })), { [labelKey]: newValue.trim(), editing: false }]);
+        onChange([
+            ...items.map((item) => ({ ...item, editing: false })),
+            { [labelKey]: newValue.trim(), editing: false },
+        ]);
         newValue = "";
         showAddForm = false;
     }
@@ -86,15 +99,19 @@
 </script>
 
 <div class="flex flex-wrap gap-2">
-    {#each items as item, index (item[labelKey] + '-' + index)}
+    {#each items as item, index (item[labelKey] + "-" + index)}
         {#if item.editing}
-            <div class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm">
+            <div
+                class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm"
+            >
                 <input
                     type="text"
                     value={item[labelKey] as string}
                     placeholder={addPlaceholder}
-                    class="{inputWidth} rounded border-0 bg-muted px-2 py-1 text-xs {mono ? 'font-mono' : ''} focus:ring-1 focus:ring-ring"
-                    onfocus={(e) => {
+                    class="{inputWidth} rounded border-0 bg-muted px-2 py-1 text-xs {mono
+                        ? 'font-mono'
+                        : ''} focus:ring-1 focus:ring-ring"
+                    onfocus={(_e) => {
                         // Track the edit value locally
                         editValues[index] = item[labelKey] as string;
                     }}
@@ -114,13 +131,16 @@
                     size="sm"
                     variant="ghost"
                     class="h-5 w-5 rounded-full p-0"
-                    onclick={() => confirmEdit(index, editValues[index] ?? (item[labelKey] as string))}
+                    onclick={() =>
+                        confirmEdit(index, editValues[index] ?? (item[labelKey] as string))}
                 >
                     <Check class="h-3 w-3" />
                 </Button>
             </div>
         {:else}
-            <div class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm">
+            <div
+                class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm"
+            >
                 <span class={mono ? "font-mono text-xs" : "text-xs"}>{item[labelKey]}</span>
                 <Button
                     size="sm"
@@ -143,12 +163,16 @@
     {/each}
 
     {#if showAddForm}
-        <div class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm">
+        <div
+            class="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 px-3 py-1.5 text-sm"
+        >
             <input
                 type="text"
                 bind:value={newValue}
                 placeholder={addPlaceholder}
-                class="{inputWidth} rounded border-0 bg-muted px-2 py-1 text-xs {mono ? 'font-mono' : ''} focus:ring-1 focus:ring-ring"
+                class="{inputWidth} rounded border-0 bg-muted px-2 py-1 text-xs {mono
+                    ? 'font-mono'
+                    : ''} focus:ring-1 focus:ring-ring"
                 onkeydown={(e) => {
                     if (e.key === "Enter") {
                         e.preventDefault();
@@ -167,12 +191,7 @@
             >
                 <Check class="h-3 w-3" />
             </Button>
-            <Button
-                size="sm"
-                variant="ghost"
-                class="h-5 w-5 rounded-full p-0"
-                onclick={cancelAdd}
-            >
+            <Button size="sm" variant="ghost" class="h-5 w-5 rounded-full p-0" onclick={cancelAdd}>
                 <X class="h-3 w-3" />
             </Button>
         </div>
@@ -182,9 +201,10 @@
             variant="outline"
             class="rounded-full h-8 px-3"
             onclick={() => (showAddForm = true)}
-            disabled={disabled}
+            {disabled}
         >
-            <Plus class="h-3.5 w-3.5 mr-1" /> {addButtonLabel}
+            <Plus class="h-3.5 w-3.5 mr-1" />
+            {addButtonLabel}
         </Button>
     {/if}
 </div>

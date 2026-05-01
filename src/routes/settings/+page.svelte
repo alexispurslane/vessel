@@ -6,6 +6,7 @@
     import FileText from "@lucide/svelte/icons/file-text";
     import PageLayout from "$lib/components/page-layout/index.svelte";
     import { goto } from "$app/navigation";
+    import { resolve } from "$app/paths";
     import { getConversations } from "$lib/stores/conversations.svelte.js";
     import ModelsTab from "./ModelsTab.svelte";
     import SandboxTab from "./SandboxTab.svelte";
@@ -18,9 +19,9 @@
         const convs = getConversations();
         const activeId = convs.activeId;
         if (activeId) {
-            goto(`/chat/${activeId}`);
+            goto(resolve(`/chat/${activeId}`));
         } else {
-            goto("/");
+            goto(resolve("/"));
         }
     }
 </script>

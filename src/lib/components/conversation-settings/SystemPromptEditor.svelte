@@ -34,11 +34,6 @@
         saving?: boolean;
         /** Error message to display, if any */
         error?: string | null;
-        /**
-         * "immediate": each change triggers onAdd/onRemove/onEdit/onReplaceChange immediately.
-         * "deferred": changes accumulate in local state; parent reads them via onAdd/onRemove/onEdit/onReplaceChange.
-         */
-        mode?: "immediate" | "deferred";
         /** An instruction was added. */
         onadd?: (text: string) => void;
         /** An instruction was removed. */
@@ -57,7 +52,6 @@
         effectiveSystemPrompt = "",
         saving = false,
         error = null,
-        mode = "immediate" as "immediate" | "deferred",
         onadd,
         onremove,
         onedit,
@@ -135,7 +129,9 @@
         if (!effectiveSystemPrompt) return;
         await navigator.clipboard.writeText(effectiveSystemPrompt);
         systemPromptCopied = true;
-        setTimeout(() => { systemPromptCopied = false; }, 2000);
+        setTimeout(() => {
+            systemPromptCopied = false;
+        }, 2000);
     }
 </script>
 
@@ -150,8 +146,10 @@
     <div class="p-2 space-y-2">
         {#if getInstructions().length > 0}
             <div class="space-y-1.5">
-                {#each getInstructions() as instruction, i}
-                    <div class="group flex items-start gap-1.5 rounded border bg-background px-2 py-1.5">
+                {#each getInstructions() as instruction, i (i)}
+                    <div
+                        class="group flex items-start gap-1.5 rounded border bg-background px-2 py-1.5"
+                    >
                         {#if editingIndex === i}
                             <div class="flex-1 space-y-1.5">
                                 <textarea
@@ -182,8 +180,14 @@
                                 </div>
                             </div>
                         {:else}
-                            <p class="flex-1 text-[11px] leading-relaxed whitespace-pre-wrap break-words text-foreground/80 font-mono">{instruction}</p>
-                            <div class="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <p
+                                class="flex-1 text-[11px] leading-relaxed whitespace-pre-wrap break-words text-foreground/80 font-mono"
+                            >
+                                {instruction}
+                            </p>
+                            <div
+                                class="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
                                 <button
                                     onclick={() => startEditInstruction(i)}
                                     class="inline-flex items-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer p-0.5 rounded hover:bg-muted"
@@ -205,7 +209,9 @@
                 {/each}
             </div>
         {:else}
-            <p class="text-[10px] text-muted-foreground text-center py-2">No custom instructions yet.</p>
+            <p class="text-[10px] text-muted-foreground text-center py-2">
+                No custom instructions yet.
+            </p>
         {/if}
 
         {#if error}
@@ -253,7 +259,8 @@
             <TriangleAlert class="size-3 text-amber-500" />
             <span class="text-[11px] font-medium text-muted-foreground">Replace System Prompt</span>
             {#if customSystemPrompt}
-                <span class="text-[9px] text-amber-600 dark:text-amber-400 font-medium">active</span>
+                <span class="text-[9px] text-amber-600 dark:text-amber-400 font-medium">active</span
+                >
             {/if}
         </div>
         {#if replaceOpen}
@@ -265,7 +272,8 @@
     {#if replaceOpen}
         <div class="px-3 py-2 space-y-2 border-t">
             <p class="text-[10px] text-amber-600 dark:text-amber-400 leading-relaxed">
-                Replaces the <em>entire</em> default system prompt — tool descriptions, guidelines, working directory, and all. Prefer <strong>Custom Instructions</strong> above instead.
+                Replaces the <em>entire</em> default system prompt — tool descriptions, guidelines,
+                working directory, and all. Prefer <strong>Custom Instructions</strong> above instead.
             </p>
             {#if editingReplace}
                 <textarea
@@ -297,7 +305,8 @@
                 </div>
             {:else if customSystemPrompt}
                 <div class="space-y-2">
-                    <pre class="text-[11px] leading-relaxed whitespace-pre-wrap break-words font-mono text-foreground/80 max-h-[25vh] overflow-y-auto bg-muted/30 rounded p-2">{customSystemPrompt}</pre>
+                    <pre
+                        class="text-[11px] leading-relaxed whitespace-pre-wrap break-words font-mono text-foreground/80 max-h-[25vh] overflow-y-auto bg-muted/30 rounded p-2">{customSystemPrompt}</pre>
                     <div class="flex items-center justify-end gap-1.5">
                         <button
                             onclick={startEditReplace}
@@ -355,6 +364,7 @@
         </button>
     </div>
     <div class="p-3">
-        <pre class="text-[11px] leading-relaxed whitespace-pre-wrap break-words font-mono text-foreground/80 max-h-[50vh] overflow-y-auto">{effectiveSystemPrompt}</pre>
+        <pre
+            class="text-[11px] leading-relaxed whitespace-pre-wrap break-words font-mono text-foreground/80 max-h-[50vh] overflow-y-auto">{effectiveSystemPrompt}</pre>
     </div>
 </div>

@@ -9,7 +9,7 @@
  * standard `loadMcpConfig()` function.
  */
 
-import { join, resolve } from "path";
+import { resolve } from "path";
 import { writeFileSync, mkdirSync, existsSync, renameSync } from "fs";
 import { getDb } from "../db/index.js";
 import { log } from "$lib/server/logger.js";

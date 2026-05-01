@@ -1,7 +1,7 @@
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types.js";
 import { getSessionWorkDir, createFileManagementSandbox } from "$lib/server/agent/sandbox-factory.js";
-import { getOrCreateConversation } from "$lib/server/agent/session-store.js";
+import { getOrHydrateSession } from "$lib/server/agent/session-store.js";
 import { sanitizeFilename, sanitizeAndResolvePath } from "$lib/server/fs-security.js";
 import { badRequest, notFound, internalError } from "$lib/server/api-errors.js";
 import { mkdirSync, createWriteStream, unlinkSync } from "fs";
@@ -27,7 +27,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 
     // Verify the conversation/session exists
     try {
-        await getOrCreateConversation(conversationId);
+        await getOrHydrateSession(conversationId);
     } catch {
         return notFound("Conversation not found");
     }
@@ -133,7 +133,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
                 // rename can fail across mount points; fall back to copy + delete
                 const { copyFileSync } = await import("fs");
                 copyFileSync(tmpAbsPath, filePath);
-                try { unlinkSync(tmpAbsPath); } catch { }
+                try { unlinkSync(tmpAbsPath); } catch { /* ignore cleanup errors */ }
             }
         }
 
