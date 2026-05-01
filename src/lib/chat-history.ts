@@ -25,6 +25,7 @@ export function messageHistoryToChatMessages(history: MessageHistory): ChatMessa
                 arguments: tc.arguments,
             })) ?? [],
         isError: msg.isError,
+        errorMessage: msg.errorMessage,
         usage: msg.usage,
         fetchedSources: msg.fetchedSources,
         streaming: false,

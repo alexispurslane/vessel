@@ -12,6 +12,8 @@
     import Globe from "@lucide/svelte/icons/globe";
     import Puzzle from "@lucide/svelte/icons/puzzle";
     import Wrench from "@lucide/svelte/icons/wrench";
+    import Settings from "@lucide/svelte/icons/settings";
+    import ArrowRight from "@lucide/svelte/icons/arrow-right";
     import {
         Tooltip,
         TooltipContent,
@@ -19,8 +21,8 @@
         TooltipTrigger,
     } from "$lib/components/ui/tooltip/index.js";
 
-    import { listModels } from "$lib/api.js";
-    import type { ModelInfo } from "$lib/types.js";
+    import { listModels, listProviders } from "$lib/api.js";
+    import type { ModelInfo, ProviderInfo } from "$lib/types.js";
     import { onMount } from "svelte";
 
     const convs = getConversations();
@@ -45,14 +47,26 @@
         }
     });
     let availableModels = $state<ModelInfo[]>([]);
+    let providers = $state<ProviderInfo[]>([]);
+    let isSetupLoading = $state(true);
     let selectedModelId = $state(""); // Just the model ID
+
+    /** Whether the app has at least one provider and one model configured */
+    let isSetupComplete = $derived(providers.length > 0 && availableModels.length > 0);
 
     onMount(async () => {
         void loadConversations();
         try {
-            availableModels = await listModels();
+            const [modelsResult, providersResult] = await Promise.all([
+                listModels(),
+                listProviders(),
+            ]);
+            availableModels = modelsResult;
+            providers = providersResult;
         } catch {
-            // Models will be empty, user can still chat with default
+            // Models/providers will be empty, setup prompt will show
+        } finally {
+            isSetupLoading = false;
         }
 
         // Restore toggle states from localStorage on mount (handles SSR mismatch)
@@ -119,144 +133,212 @@
 
 <div class="flex flex-1 flex-col items-center justify-center p-4">
     <div class="w-full max-w-2xl">
-        <!-- Logo/Header -->
-        <div class="mb-8 text-center">
-            <div
-                class="mx-auto mb-4 flex size-16 items-center justify-center rounded-full bg-muted overflow-hidden"
-            >
-                <img src="/vessel.png" alt="Vessel" class="size-16 rounded-full" />
+        {#if isSetupLoading}
+            <!-- Loading state -->
+            <div class="flex items-center justify-center py-16">
+                <div
+                    class="size-6 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent"
+                ></div>
             </div>
-            <h1 class="text-2xl font-bold">Vessel</h1>
-            <p class="mt-2 text-muted-foreground">Start a conversation with a message</p>
-        </div>
+        {:else if !isSetupComplete}
+            <!-- Setup prompt -->
+            <div class="text-center">
+                <div
+                    class="mx-auto mb-4 flex size-16 items-center justify-center rounded-full bg-muted overflow-hidden"
+                >
+                    <img src="/vessel.png" alt="Vessel" class="size-16 rounded-full" />
+                </div>
+                <h1 class="text-2xl font-bold">Welcome to Vessel</h1>
+                <p class="mt-2 text-muted-foreground">
+                    Before you can start chatting, you need to add at least one provider and model.
+                </p>
 
-        <!-- Input Box -->
-        <div class="mb-6">
-            <ChatInput
-                bind:value={inputValue}
-                placeholder="Type your message..."
-                disabled={isCreating}
-                connected={true}
-                generating={false}
-                models={availableModels}
-                bind:selectedModelId
-                defaultModelId={settingsStore.defaultModel}
-                onsend={handleStartChat}
-            />
-
-            <!-- Sandbox quick-toggle buttons -->
-            <div class="flex items-center gap-1 mt-2">
-                <TooltipProvider>
-                    <Tooltip>
-                        <TooltipTrigger>
-                            {#snippet child({ props })}
-                                <button
-                                    {...props}
-                                    type="button"
-                                    class="inline-flex items-center justify-center size-7 rounded-md transition-colors {sandboxOn
-                                        ? 'bg-primary text-primary-foreground'
-                                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
-                                    onclick={() => (sandboxOn = !sandboxOn)}
-                                    aria-label="Toggle sandbox"
+                <div class="mt-8 space-y-3 text-left">
+                    {#if providers.length === 0}
+                        <div class="rounded-lg border p-4">
+                            <div class="flex items-center gap-3">
+                                <div
+                                    class="flex size-8 items-center justify-center rounded-full bg-primary text-primary-foreground text-sm font-bold"
                                 >
-                                    <Box class="size-4" />
-                                </button>
-                            {/snippet}
-                        </TooltipTrigger>
-                        <TooltipContent>Sandbox</TooltipContent>
-                    </Tooltip>
-                </TooltipProvider>
-
-                <TooltipProvider>
-                    <Tooltip>
-                        <TooltipTrigger>
-                            {#snippet child({ props })}
-                                <button
-                                    {...props}
-                                    type="button"
-                                    class="inline-flex items-center justify-center size-7 rounded-md transition-colors {netAllDomainsOn
-                                        ? 'bg-primary text-primary-foreground'
-                                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
-                                    onclick={() => (netAllDomainsOn = !netAllDomainsOn)}
-                                    aria-label="Toggle network & all domains"
+                                    1
+                                </div>
+                                <div>
+                                    <p class="font-medium">Add an API provider</p>
+                                    <p class="text-sm text-muted-foreground">
+                                        Configure an LLM provider like OpenAI, Anthropic, or Ollama.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    {/if}
+                    {#if providers.length > 0 && availableModels.length === 0}
+                        <div class="rounded-lg border p-4">
+                            <div class="flex items-center gap-3">
+                                <div
+                                    class="flex size-8 items-center justify-center rounded-full bg-primary text-primary-foreground text-sm font-bold"
                                 >
-                                    <Globe class="size-4" />
-                                </button>
-                            {/snippet}
-                        </TooltipTrigger>
-                        <TooltipContent>Network &amp; all domains</TooltipContent>
-                    </Tooltip>
-                </TooltipProvider>
+                                    1
+                                </div>
+                                <div>
+                                    <p class="font-medium">Add a model</p>
+                                    <p class="text-sm text-muted-foreground">
+                                        Define a model from one of your configured providers, or
+                                        fetch models automatically.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    {/if}
+                </div>
 
-                <TooltipProvider>
-                    <Tooltip>
-                        <TooltipTrigger>
-                            {#snippet child({ props })}
-                                <button
-                                    {...props}
-                                    type="button"
-                                    class="inline-flex items-center justify-center size-7 rounded-md transition-colors {mcpServersOn
-                                        ? 'bg-primary text-primary-foreground'
-                                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
-                                    onclick={() => (mcpServersOn = !mcpServersOn)}
-                                    aria-label="Toggle MCP servers"
-                                >
-                                    <Puzzle class="size-4" />
-                                </button>
-                            {/snippet}
-                        </TooltipTrigger>
-                        <TooltipContent>MCP servers</TooltipContent>
-                    </Tooltip>
-                </TooltipProvider>
-
-                <TooltipProvider>
-                    <Tooltip>
-                        <TooltipTrigger>
-                            {#snippet child({ props })}
-                                <button
-                                    {...props}
-                                    type="button"
-                                    class="inline-flex items-center justify-center size-7 rounded-md transition-colors {agentMode ===
-                                    'agent'
-                                        ? 'bg-primary text-primary-foreground'
-                                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
-                                    onclick={() =>
-                                        (agentMode = agentMode === "agent" ? "chat" : "agent")}
-                                    aria-label="Toggle agent/chat mode"
-                                >
-                                    <Wrench class="size-4" />
-                                </button>
-                            {/snippet}
-                        </TooltipTrigger>
-                        <TooltipContent
-                            >{agentMode === "agent"
-                                ? "Agent mode (tools on)"
-                                : "Chat mode (tools off)"}</TooltipContent
-                        >
-                    </Tooltip>
-                </TooltipProvider>
+                <Button class="mt-6" onclick={() => goto(resolve("/settings"))}>
+                    <Settings class="mr-2 h-4 w-4" />
+                    Go to Settings
+                    <ArrowRight class="ml-2 h-4 w-4" />
+                </Button>
             </div>
-        </div>
+        {:else}
+            <!-- Logo/Header -->
+            <div class="mb-8 text-center">
+                <div
+                    class="mx-auto mb-4 flex size-16 items-center justify-center rounded-full bg-muted overflow-hidden"
+                >
+                    <img src="/vessel.png" alt="Vessel" class="size-16 rounded-full" />
+                </div>
+                <h1 class="text-2xl font-bold">Vessel</h1>
+                <p class="mt-2 text-muted-foreground">Start a conversation with a message</p>
+            </div>
 
-        <!-- Recent Chats -->
-        {#if recentConversations.length > 0}
-            <div class="w-full">
-                <h2 class="mb-3 text-sm font-medium text-muted-foreground">Recent Conversations</h2>
-                <div class="space-y-1">
-                    {#each recentConversations as conv (conv.id)}
-                        <Button
-                            variant="ghost"
-                            class="w-full justify-start gap-3 px-3 py-2 h-auto text-left"
-                            onclick={() => {
-                                selectConversation(conv.id);
-                            }}
-                        >
-                            <MessageSquare class="h-4 w-4 shrink-0 text-muted-foreground" />
-                            <span class="truncate">{conv.title}</span>
-                        </Button>
-                    {/each}
+            <!-- Input Box -->
+            <div class="mb-6">
+                <ChatInput
+                    bind:value={inputValue}
+                    placeholder="Type your message..."
+                    disabled={isCreating}
+                    connected={true}
+                    generating={false}
+                    models={availableModels}
+                    bind:selectedModelId
+                    defaultModelId={settingsStore.defaultModel}
+                    onsend={handleStartChat}
+                />
+
+                <!-- Sandbox quick-toggle buttons -->
+                <div class="flex items-center gap-1 mt-2">
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger>
+                                {#snippet child({ props })}
+                                    <button
+                                        {...props}
+                                        type="button"
+                                        class="inline-flex items-center justify-center size-7 rounded-md transition-colors {sandboxOn
+                                            ? 'bg-primary text-primary-foreground'
+                                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+                                        onclick={() => (sandboxOn = !sandboxOn)}
+                                        aria-label="Toggle sandbox"
+                                    >
+                                        <Box class="size-4" />
+                                    </button>
+                                {/snippet}
+                            </TooltipTrigger>
+                            <TooltipContent>Sandbox</TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger>
+                                {#snippet child({ props })}
+                                    <button
+                                        {...props}
+                                        type="button"
+                                        class="inline-flex items-center justify-center size-7 rounded-md transition-colors {netAllDomainsOn
+                                            ? 'bg-primary text-primary-foreground'
+                                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+                                        onclick={() => (netAllDomainsOn = !netAllDomainsOn)}
+                                        aria-label="Toggle network & all domains"
+                                    >
+                                        <Globe class="size-4" />
+                                    </button>
+                                {/snippet}
+                            </TooltipTrigger>
+                            <TooltipContent>Network &amp; all domains</TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger>
+                                {#snippet child({ props })}
+                                    <button
+                                        {...props}
+                                        type="button"
+                                        class="inline-flex items-center justify-center size-7 rounded-md transition-colors {mcpServersOn
+                                            ? 'bg-primary text-primary-foreground'
+                                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+                                        onclick={() => (mcpServersOn = !mcpServersOn)}
+                                        aria-label="Toggle MCP servers"
+                                    >
+                                        <Puzzle class="size-4" />
+                                    </button>
+                                {/snippet}
+                            </TooltipTrigger>
+                            <TooltipContent>MCP servers</TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger>
+                                {#snippet child({ props })}
+                                    <button
+                                        {...props}
+                                        type="button"
+                                        class="inline-flex items-center justify-center size-7 rounded-md transition-colors {agentMode ===
+                                        'agent'
+                                            ? 'bg-primary text-primary-foreground'
+                                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+                                        onclick={() =>
+                                            (agentMode = agentMode === "agent" ? "chat" : "agent")}
+                                        aria-label="Toggle agent/chat mode"
+                                    >
+                                        <Wrench class="size-4" />
+                                    </button>
+                                {/snippet}
+                            </TooltipTrigger>
+                            <TooltipContent
+                                >{agentMode === "agent"
+                                    ? "Agent mode (tools on)"
+                                    : "Chat mode (tools off)"}</TooltipContent
+                            >
+                        </Tooltip>
+                    </TooltipProvider>
                 </div>
             </div>
+
+            <!-- Recent Chats -->
+            {#if recentConversations.length > 0}
+                <div class="w-full">
+                    <h2 class="mb-3 text-sm font-medium text-muted-foreground">
+                        Recent Conversations
+                    </h2>
+                    <div class="space-y-1">
+                        {#each recentConversations as conv (conv.id)}
+                            <Button
+                                variant="ghost"
+                                class="w-full justify-start gap-3 px-3 py-2 h-auto text-left"
+                                onclick={() => {
+                                    selectConversation(conv.id);
+                                }}
+                            >
+                                <MessageSquare class="h-4 w-4 shrink-0 text-muted-foreground" />
+                                <span class="truncate">{conv.title}</span>
+                            </Button>
+                        {/each}
+                    </div>
+                </div>
+            {/if}
         {/if}
     </div>
 </div>

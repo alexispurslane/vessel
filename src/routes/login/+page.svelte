@@ -16,13 +16,13 @@
 
     const auth = getAuth();
 
-    let username = $state("");
     let password = $state("");
     let submitting = $state(false);
 
-    let canSubmit = $derived(
-        username.length > 0 && password.length > 0 && !submitting && !auth.loading
-    );
+    // Username is auto-filled from auth status (single-user app)
+    let username = $derived(auth.username ?? "");
+
+    let canSubmit = $derived(password.length > 0 && !submitting && !auth.loading);
 
     onMount(() => {
         if (auth.needsSetup) {
@@ -50,7 +50,7 @@
         <CardHeader class="text-center">
             <img src="/vessel.png" alt="Vessel" class="mx-auto size-10 rounded-full" />
             <CardTitle class="text-xl">Vessel</CardTitle>
-            <CardDescription>Sign In</CardDescription>
+            <CardDescription>Sign in as {username}</CardDescription>
         </CardHeader>
         <CardContent>
             <form
@@ -60,18 +60,6 @@
                 }}
                 class="space-y-4"
             >
-                <div class="space-y-2">
-                    <Label for="username">Username</Label>
-                    <Input
-                        id="username"
-                        type="text"
-                        placeholder="Enter your username"
-                        bind:value={username}
-                        autocomplete="username"
-                        required
-                    />
-                </div>
-
                 <div class="space-y-2">
                     <Label for="password">Password</Label>
                     <Input

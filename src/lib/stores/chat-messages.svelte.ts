@@ -245,6 +245,7 @@ export async function reloadMessages(s: ChatState): Promise<void> {
                     arguments: tc.arguments,
                 })) ?? [],
             isError: msg.isError,
+            errorMessage: msg.errorMessage,
             usage: msg.usage,
             fetchedSources: msg.fetchedSources,
             streaming: false,
@@ -642,6 +643,7 @@ export function handleMessageUpdate(s: ChatState, e: MessageEvent): void {
                 msg.usage = data.message.usage;
         } else if (data?.type === "error") {
             // Pi error event (timeout, rate limit, rejection, etc.)
+            console.error(`[chat-lifecycle] handleMessageUpdate ERROR event:`, JSON.stringify(data).substring(0, 1000));
             msg.streaming = false;
             msg.thinkingStreaming = false;
             msg.isError = true;
@@ -651,6 +653,7 @@ export function handleMessageUpdate(s: ChatState, e: MessageEvent): void {
                 data.message?.errorMessage ||
                 data.reason ||
                 "An error occurred";
+            msg.errorMessage = errorMsg;
             msg.content = errorMsg;
             // End the message since it errored
             setStreamingMessageId(s, null, "message_update error");
@@ -699,6 +702,19 @@ export function handleMessageEnd(s: ChatState, e: MessageEvent): void {
         try {
             const data = JSON.parse(e.data);
             if (data?.message) {
+                // Check if the final message indicates an error (stopReason "error" or errorMessage)
+                if (data.message.stopReason === "error" || data.message.errorMessage) {
+                    console.error(`[chat-lifecycle] handleMessageEnd: error detected in final message, stopReason=${data.message.stopReason}, errorMessage=${data.message.errorMessage}`);
+                    if (!msg.isError) {
+                        msg.isError = true;
+                    }
+                    if (!msg.errorMessage) {
+                        msg.errorMessage = data.message.errorMessage || "An error occurred";
+                    }
+                    if (!msg.content) {
+                        msg.content = data.message.errorMessage || "An error occurred";
+                    }
+                }
                 if (!msg.content && data.message.content && !hasToolOutput) {
                     msg.content = extractTextFromContent(data.message.content);
                 }

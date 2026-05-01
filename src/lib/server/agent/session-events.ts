@@ -7,6 +7,7 @@
 
 import type { AgentSessionEvent as PiAgentSessionEvent } from "@mariozechner/pi-coding-agent";
 import type { ChatSSEEvent, ActiveSession } from "./types.js";
+import { log } from "$lib/server/logger.js";
 
 // --- Broadcast ---
 
@@ -202,8 +203,19 @@ export function serializeMessage(message: unknown): unknown {
  */
 export function formatEventPayload(event: PiAgentSessionEvent): unknown {
     switch (event.type) {
-        case "message_update":
+        case "message_update": {
+            const ame = event.assistantMessageEvent as Record<string, unknown>;
+            if (ame.type === "error") {
+                const errObj = ame.error as Record<string, unknown> | undefined;
+                const errKeys = errObj ? Object.keys(errObj) : [];
+                const errMsg = typeof errObj?.errorMessage === "string" ? errObj.errorMessage : undefined;
+                log.error("session-events", `message_update ERROR event: type=${ame.type as string}, reason=${String(ame.reason)}, error keys=${JSON.stringify(errKeys)}, errorMessage=${JSON.stringify(errMsg)}`);
+                // Serialize the AssistantMessage in the error field so the client
+                // can extract errorMessage and other fields properly
+                return { ...ame, error: serializeMessage(ame.error) };
+            }
             return event.assistantMessageEvent;
+        }
         case "message_start":
             return { type: event.type, message: serializeMessage(event.message) };
         case "message_end":
@@ -227,13 +239,13 @@ export function formatEventPayload(event: PiAgentSessionEvent): unknown {
                 toolResults: "toolResults" in event ? event.toolResults : undefined,
             };
         case "tool_execution_start":
-            return { type: event.type, toolName: event.toolName, toolCallId: event.toolCallId, args: event.args };
+            return { type: event.type, toolName: event.toolName, toolCallId: event.toolCallId, args: event.args as Record<string, unknown> };
         case "tool_execution_update":
             return {
                 type: event.type,
                 toolName: event.toolName,
                 toolCallId: event.toolCallId,
-                args: event.args,
+                args: event.args as Record<string, unknown>,
                 output: extractToolOutput(event.partialResult),
             };
         case "tool_execution_end":

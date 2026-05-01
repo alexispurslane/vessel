@@ -69,6 +69,44 @@ export function verifyUser(username: string, password: string): boolean {
     return bcrypt.compareSync(password, row.password_hash);
 }
 
+/**
+ * Verify password without checking username.
+ * Since there is only one user, the username check is redundant for login.
+ */
+export function verifyPassword(password: string): boolean {
+    const db = getDb();
+    const row = db.prepare("SELECT password_hash FROM auth WHERE id = 1").get() as
+        | { password_hash: string }
+        | undefined;
+
+    if (!row) return false;
+    return bcrypt.compareSync(password, row.password_hash);
+}
+
+export function getPronouns(): string | null {
+    const db = getDb();
+    const row = db.prepare("SELECT pronouns FROM auth WHERE id = 1").get() as
+        | { pronouns: string | null }
+        | undefined;
+    return row?.pronouns ?? null;
+}
+
+export function updateUsername(newUsername: string): void {
+    const db = getDb();
+    db.prepare("UPDATE auth SET username = ? WHERE id = 1").run(newUsername);
+}
+
+export function updatePassword(newPassword: string): void {
+    const db = getDb();
+    const hash = bcrypt.hashSync(newPassword, SALT_ROUNDS);
+    db.prepare("UPDATE auth SET password_hash = ? WHERE id = 1").run(hash);
+}
+
+export function updatePronouns(newPronouns: string | null): void {
+    const db = getDb();
+    db.prepare("UPDATE auth SET pronouns = ? WHERE id = 1").run(newPronouns);
+}
+
 // --- JWT session token management ---
 
 export async function createSessionToken(username: string): Promise<string> {

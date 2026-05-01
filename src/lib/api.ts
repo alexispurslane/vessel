@@ -72,6 +72,31 @@ export async function logout(): Promise<{ success: boolean }> {
     });
 }
 
+// --- User Info ---
+
+export interface UserInfo {
+    username: string;
+    pronouns: string | null;
+}
+
+export interface UpdateUserBody {
+    username?: string;
+    currentPassword?: string;
+    newPassword?: string;
+    pronouns?: string | null;
+}
+
+export async function getUserInfo(): Promise<UserInfo> {
+    return apiFetch<UserInfo>("/api/auth/user");
+}
+
+export async function updateUserInfo(body: UpdateUserBody): Promise<UserInfo & { success: boolean }> {
+    return apiFetch<UserInfo & { success: boolean }>("/api/auth/user", {
+        method: "PATCH",
+        body: JSON.stringify(body),
+    });
+}
+
 // --- Conversations / Sessions ---
 
 export async function listConversations(): Promise<ConversationListItem[]> {
@@ -406,6 +431,7 @@ export interface MessageHistoryItem {
         arguments?: Record<string, unknown>;
     }>;
     isError?: boolean;
+    errorMessage?: string;
     usage?: {
         input: number;
         output: number;
@@ -615,11 +641,20 @@ export async function fetchProviderModels(provider: string): Promise<{ models: s
     return apiFetch<{ models: string[] }>(`/api/providers/${provider}/fetch-models`);
 }
 
+export async function checkBaseUrl(
+    url: string
+): Promise<{ accessible: boolean; error?: string }> {
+    return apiFetch<{ accessible: boolean; error?: string }>('/api/providers/check-url', {
+        method: 'POST',
+        body: JSON.stringify({ url }),
+    });
+}
+
 // --- Filesystem ---
 
 export async function fsComplete(partial: string, type?: "file" | "directory" | "all"): Promise<{ completions: string[] }> {
-    return apiFetch<{ completions: string[] }>("/api/fs-complete", {
-        method: "POST",
+    return apiFetch<{ completions: string[] }>('/api/fs-complete', {
+        method: 'POST',
         body: JSON.stringify({ partial, type }),
     });
 }

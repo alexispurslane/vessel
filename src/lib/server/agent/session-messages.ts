@@ -75,7 +75,7 @@ export async function sendMessageToSession(
 
     // After the prompt completes, trigger title/tag generation in the background.
     // This runs even if the client isn't connected to the SSE stream yet.
-    generateTitleAndTags(conversationId).catch((err) => {
+    generateTitleAndTags(conversationId).catch((err: unknown) => {
         log.error(
             "session-messages",
             `Background title generation failed for ${conversationId}`,
@@ -131,6 +131,7 @@ export function getHistoryFromSession(
             arguments?: Record<string, unknown>;
         }>;
         isError?: boolean;
+        errorMessage?: string;
         usage?: {
             input: number;
             output: number;

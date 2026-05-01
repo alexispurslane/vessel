@@ -87,6 +87,7 @@ export function runMigrations(db: DatabaseType): void {
     const columnMigrations = [
         "ALTER TABLE providers ADD COLUMN display_name TEXT",
         "ALTER TABLE providers ADD COLUMN models_endpoint TEXT",
+        "ALTER TABLE auth ADD COLUMN pronouns TEXT",
     ];
 
     for (const sql of columnMigrations) {

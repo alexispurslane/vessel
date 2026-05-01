@@ -26,7 +26,7 @@ const PutBody = z.object({
         cacheWrite: z.number(),
     }).optional(),
     compat: z.record(z.string(), z.unknown()).optional(),
-}).passthrough();
+}).loose();
 
 const DeleteBody = z.object({
     id: z.string().min(1),

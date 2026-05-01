@@ -180,6 +180,8 @@ export interface ChatMessage {
     streaming?: boolean;
     /** Whether this message represents an error from the provider */
     isError?: boolean;
+    /** The error message from the provider, if any */
+    errorMessage?: string;
     /** Token usage data from the model provider (assistant messages only) */
     usage?: {
         input: number;
@@ -227,6 +229,8 @@ export interface HistoryMessage {
     modelProvider?: string;
     /** Whether this message represents an error from the provider */
     isError?: boolean;
+    /** The error message from the provider, if any */
+    errorMessage?: string;
     /** Token usage data from the model provider (assistant messages only) */
     usage?: {
         input: number;

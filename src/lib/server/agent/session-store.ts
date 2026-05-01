@@ -40,6 +40,7 @@ import type { FetchedSource } from "./extensions/fetch-tracker.js";
 import { createSessionSandbox, getSessionWorkDir, loadConversationSettingsFromDb, saveConversationSettingsToDb, isNetworkAllowed, getEffectiveAgentMode } from "./sandbox-factory.js";
 import type { Model as PiModel, Api } from "@mariozechner/pi-ai";
 import { getDb } from "../db/index.js";
+import { getUsername, getPronouns } from "../auth/index.js";
 import type { ChatSSEEvent, ActiveSession, ConversationListItem, CustomModelDef } from "./types.js";
 import type { ConversationSettings } from "$lib/types.js";
 import type { Sandbox } from "zerobox";
@@ -509,7 +510,9 @@ function readGlobalSetting(key: string): string | null {
     return row?.value ?? null;
 }
 
-/** Resolve the append system prompt: conversation override → global, migrating legacy string format. */
+/** Resolve the append system prompt: conversation override → global, migrating legacy string format.
+ *  Also appends user identity information (name and pronouns) so the AI can address the user properly.
+ */
 function resolveAppendSystemPrompt(conversationSettings: ConversationSettings | null): string[] {
     let rawAppend = conversationSettings?.appendSystemPrompt ?? null;
     if (rawAppend === null) {
@@ -531,7 +534,27 @@ function resolveAppendSystemPrompt(conversationSettings: ConversationSettings | 
         : [];
     // Prepend the Vessel-specific append prompt (from VESSEL_APPEND.md)
     const vesselAppend = loadVesselAppendPrompt();
-    return vesselAppend ? [vesselAppend, ...userAppend] : userAppend;
+    // Append user identity information so the AI can address the user properly
+    const userInfoAppend = buildUserInfoAppend();
+    return [
+        ...(vesselAppend ? [vesselAppend] : []),
+        ...userAppend,
+        ...(userInfoAppend ? [userInfoAppend] : []),
+    ];
+}
+
+/** Build the user identity append string (name and pronouns) for the system prompt. */
+function buildUserInfoAppend(): string | null {
+    const username = getUsername();
+    const pronouns = getPronouns();
+    if (!username && !pronouns) return null;
+
+    let info = "The user's name is " + (username ?? "unknown");
+    if (pronouns) {
+        info += " and their pronouns are " + pronouns;
+    }
+    info += ". Use this information to address the user appropriately.";
+    return info;
 }
 
 /** Apply custom/append system prompt overrides to the agent session. */
@@ -875,9 +898,12 @@ export function updateSessionSystemPrompt(
         // Always prepend the Vessel-specific append prompt
         const vesselAppend = loadVesselAppendPrompt();
         const userAppend: string[] = options.appendSystemPrompt ?? [];
-        resourceLoader.appendSystemPrompt = vesselAppend
-            ? [vesselAppend, ...userAppend]
-            : userAppend;
+        const userInfoAppend = buildUserInfoAppend();
+        resourceLoader.appendSystemPrompt = [
+            ...(vesselAppend ? [vesselAppend] : []),
+            ...userAppend,
+            ...(userInfoAppend ? [userInfoAppend] : []),
+        ];
     }
 
     // Rebuild the system prompt with the new values
@@ -959,6 +985,7 @@ export async function getSessionHistory(conversationId: string): Promise<{
             arguments?: Record<string, unknown>;
         }>;
         isError?: boolean;
+        errorMessage?: string;
         usage?: {
             input: number;
             output: number;

@@ -197,14 +197,16 @@ function resolveAssistantFields(
     msg: Record<string, unknown>,
     role: string,
     state: HistoryBuilderState
-): Pick<HistoryMessage, "model" | "modelProvider" | "isError" | "usage"> {
+): Pick<HistoryMessage, "model" | "modelProvider" | "isError" | "errorMessage" | "usage"> {
     if (role !== "assistant") {
-        return { model: undefined, modelProvider: undefined, isError: undefined, usage: undefined };
+        return { model: undefined, modelProvider: undefined, isError: undefined, errorMessage: undefined, usage: undefined };
     }
+    const errorMessage = typeof msg.errorMessage === "string" && msg.errorMessage ? msg.errorMessage : undefined;
     return {
         model: (msg.model as string | undefined) ?? state.lastModelId ?? undefined,
         modelProvider: (msg.provider as string | undefined) ?? state.lastModelProvider ?? undefined,
-        isError: !!msg.errorMessage || undefined,
+        isError: errorMessage ? true : undefined,
+        errorMessage,
         usage: extractUsage(msg),
     };
 }
@@ -221,7 +223,7 @@ function handleMessage(
     // Skip empty user messages that pi sometimes adds
     if (role === "user" && !textContent.trim()) return;
 
-    const { model, modelProvider, isError, usage } = resolveAssistantFields(msg, role, state);
+    const { model, modelProvider, isError, errorMessage, usage } = resolveAssistantFields(msg, role, state);
 
     const msgIndex = state.messages.length;
     state.messages.push({
@@ -233,6 +235,7 @@ function handleMessage(
         modelProvider,
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
         isError,
+        errorMessage,
         usage,
         timestamp: msg.timestamp as number,
     });

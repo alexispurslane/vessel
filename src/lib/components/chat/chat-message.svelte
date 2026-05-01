@@ -280,7 +280,7 @@
                 {#if msg.isError}
                     <span class="flex items-center gap-1.5 font-medium">
                         <AlertCircle class="size-4 shrink-0" />
-                        {msg.content}
+                        {msg.errorMessage || msg.content || "An error occurred"}
                     </span>
                 {:else if editing}
                     <!-- In-place editing mode for both user and assistant messages -->
