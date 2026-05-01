@@ -45,6 +45,7 @@ export default ts.config(
     },
     {
         rules: {
+            "@typescript-eslint/no-dynamic-delete": "off",
             // Allow variables prefixed with _ to be unused (discard pattern)
             "@typescript-eslint/no-unused-vars": [
                 "error",

@@ -51,10 +51,10 @@ export interface ToolDefinitionRecord {
 
 /** Internal AgentSession shape for accessing private properties. */
 interface InternalAgentSession {
-    _toolRegistry: Map<string, AnyAgentTool>;
-    _toolDefinitions: Map<string, ToolDefinitionRecord>;
-    _baseToolDefinitions: Map<string, AnyAgentTool>;
-    extensionRunner: ExtensionRunner | undefined;
+    _toolRegistry?: Map<string, AnyAgentTool>;
+    _toolDefinitions?: Map<string, ToolDefinitionRecord>;
+    _baseToolDefinitions?: Map<string, AnyAgentTool>;
+    extensionRunner?: ExtensionRunner;
 }
 
 /** Minimal shape of the extension runner (used for MCP status reporting). */
@@ -66,13 +66,13 @@ export interface ExtensionRunner {
 
 /** Internal ResourceLoader shape for accessing prompt properties. */
 interface InternalResourceLoader {
-    systemPrompt: string | undefined;
-    appendSystemPrompt: string[];
+    systemPrompt?: string | undefined;
+    appendSystemPrompt?: string[];
 }
 
 /** Internal ModelRegistry shape for accessing the models array. */
 interface InternalModelRegistry {
-    models: Array<{ provider: string }>;
+    models?: Array<{ provider: string }>;
 }
 
 // --- Error message template ---
@@ -105,7 +105,7 @@ export function getToolRegistry(session: PiAgentSession): Map<string, AnyAgentTo
     if (!registry) {
         throw internalAccessError("agentSession", "_toolRegistry");
     }
-    return registry as Map<string, AnyAgentTool>;
+    return registry;
 }
 
 /**
@@ -123,7 +123,7 @@ export function getToolDefinitions(session: PiAgentSession): Map<string, ToolDef
     if (!definitions) {
         throw internalAccessError("agentSession", "_toolDefinitions");
     }
-    return definitions as Map<string, ToolDefinitionRecord>;
+    return definitions;
 }
 
 /**
@@ -141,7 +141,7 @@ export function getBaseToolDefinitions(session: PiAgentSession): Map<string, Any
     if (!definitions) {
         throw internalAccessError("agentSession", "_baseToolDefinitions");
     }
-    return definitions as Map<string, AnyAgentTool>;
+    return definitions;
 }
 
 /**
@@ -161,7 +161,7 @@ export function getBaseToolDefinitions(session: PiAgentSession): Map<string, Any
  */
 export function getExtensionRunner(session: PiAgentSession): ExtensionRunner | undefined {
     const runner = (session as unknown as InternalAgentSession).extensionRunner;
-    return (runner as ExtensionRunner | undefined) ?? undefined;
+    return runner;
 }
 
 // --- ResourceLoader internal accessors ---
@@ -192,7 +192,7 @@ export interface ResourceLoaderAdapter {
  */
 export function getResourceLoaderAdapter(session: PiAgentSession): ResourceLoaderAdapter {
     const rl = session.resourceLoader as unknown as InternalResourceLoader;
-    if (!rl) {
+    if (!("systemPrompt" in rl) || !("appendSystemPrompt" in rl)) {
         throw internalAccessError("agentSession", "resourceLoader");
     }
     return rl as unknown as ResourceLoaderAdapter;
@@ -217,7 +217,7 @@ export function getModelList(registry: ModelRegistry): Array<{ provider: string 
     if (!models) {
         throw internalAccessError("ModelRegistry", "models");
     }
-    return models as Array<{ provider: string }>;
+    return models;
 }
 
 /**

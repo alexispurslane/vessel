@@ -88,9 +88,7 @@ function filterModelsToVesselProviders(registry: ModelRegistry): void {
         (db.prepare("SELECT provider FROM providers").all() as { provider: string }[]).map(r => r.provider)
     );
     const models = getModelList(registry);
-    if (models) {
-        setModelList(registry, models.filter(m => vesselProviders.has(m.provider)));
-    }
+    setModelList(registry, models.filter(m => vesselProviders.has(m.provider)));
 }
 
 /**
@@ -221,17 +219,17 @@ export function generateModelsJson(): void {
 
             providerEntry.models = modelsForProvider.map((m) => {
                 const model: Record<string, unknown> = {
-                    id: m.id as string,
-                    name: m.name as string,
+                    id: m.id,
+                    name: m.name,
                     reasoning: !!m.reasoning,
                     input: JSON.parse((m.input_types as string) || '["text"]'),
-                    contextWindow: m.context_window as number,
-                    maxTokens: m.max_tokens as number,
+                    contextWindow: m.context_window,
+                    maxTokens: m.max_tokens,
                     cost: {
-                        input: m.cost_input as number,
-                        output: m.cost_output as number,
-                        cacheRead: m.cost_cache_read as number,
-                        cacheWrite: m.cost_cache_write as number,
+                        input: m.cost_input,
+                        output: m.cost_output,
+                        cacheRead: m.cost_cache_read,
+                        cacheWrite: m.cost_cache_write,
                     },
                 };
 
