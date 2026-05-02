@@ -141,6 +141,7 @@
     }
 
     let inputText = $state("");
+    let inputFullscreen = $state(false);
     let pendingFiles = $state<{ file: File; id: string }[]>([]);
     /** Names of files already uploaded to the sandbox (persists across messages) */
     let sandboxFiles = $state<string[]>([]);
@@ -952,160 +953,178 @@
             <!-- Main chat area -->
             <ResizablePane defaultSize={sidePanel ? 75 : 100} minSize={50}>
                 <div class="h-full flex flex-col overflow-hidden max-w-[100ch] mx-auto">
-                    <!-- Message area -->
-                    <ScrollArea
-                        class="flex-1 min-h-0 overflow-hidden"
-                        bind:viewportRef={viewportEl}
-                    >
-                        <div class="flex flex-col gap-6 p-6">
-                            {#if displayMessages.length === 0}
-                                <div class="flex items-center justify-center py-24">
-                                    <div
-                                        class="flex flex-col items-center gap-4 text-muted-foreground"
-                                    >
-                                        <div class="rounded-full bg-muted p-4">
-                                            <Bot class="size-8 opacity-60" />
-                                        </div>
-                                        <div class="text-center">
-                                            <p class="text-sm font-medium">Start a conversation</p>
-                                            <p class="text-xs mt-1 opacity-70">
-                                                Send a message to begin chatting with the AI
-                                                assistant.
-                                            </p>
+                    <!-- Message area (hidden when input is fullscreen) -->
+                    {#if !inputFullscreen}
+                        <ScrollArea
+                            class="flex-1 min-h-0 overflow-hidden"
+                            bind:viewportRef={viewportEl}
+                        >
+                            <div class="flex flex-col gap-6 p-6">
+                                {#if displayMessages.length === 0}
+                                    <div class="flex items-center justify-center py-24">
+                                        <div
+                                            class="flex flex-col items-center gap-4 text-muted-foreground"
+                                        >
+                                            <div class="rounded-full bg-muted p-4">
+                                                <Bot class="size-8 opacity-60" />
+                                            </div>
+                                            <div class="text-center">
+                                                <p class="text-sm font-medium">
+                                                    Start a conversation
+                                                </p>
+                                                <p class="text-xs mt-1 opacity-70">
+                                                    Send a message to begin chatting with the AI
+                                                    assistant.
+                                                </p>
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                            {:else}
-                                {#each renderItems as item, i (item.type === "thinkingGroup" ? item.id : item.msg.id)}
-                                    {#if item.type === "thinkingGroup"}
-                                        <!-- Grouped thinking + tool calls -->
+                                {:else}
+                                    {#each renderItems as item, i (item.type === "thinkingGroup" ? item.id : item.msg.id)}
+                                        {#if item.type === "thinkingGroup"}
+                                            <!-- Grouped thinking + tool calls -->
+                                            <div class="flex w-full justify-start">
+                                                <div
+                                                    class="flex gap-3 w-[min(75%,65ch)] font-serif"
+                                                >
+                                                    <ChatAvatar
+                                                        role="assistant"
+                                                        isConsecutive={false}
+                                                        model={item.model}
+                                                        modelProvider={item.modelProvider}
+                                                        {getModelDisplayName}
+                                                        hasContent={true}
+                                                    />
+                                                    <div class="min-w-0 flex-1">
+                                                        <ThinkingGroup
+                                                            group={item}
+                                                            thinkingIsOpen={thinkingOpen[item.id]}
+                                                            onthinkingtoggle={(open: boolean) =>
+                                                                (thinkingOpen[item.id] = open)}
+                                                            ondelete={handleDeleteMessage}
+                                                            onregenerate={handleEditMessage}
+                                                            navigating={chat.navigating}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        {:else}
+                                            {@const msg = item.msg as ChatMessageType}
+                                            {@const nextItem = renderItems[i + 1]}
+                                            {@const isLastConsecutive =
+                                                // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime: `renderItems[i+1]` can be undefined for the last item
+                                                !nextItem ||
+                                                nextItem.type !== "message" ||
+                                                nextItem.msg.role !== msg.role}
+                                            <div
+                                                class="flex w-full {msg.role === 'user'
+                                                    ? 'justify-end'
+                                                    : 'justify-start'} {!isLastConsecutive
+                                                    ? '-mt-4'
+                                                    : ''}"
+                                            >
+                                                <div
+                                                    class="flex gap-3 w-max-[65ch] font-serif {msg.role ===
+                                                    'user'
+                                                        ? 'flex-row-reverse items-end'
+                                                        : ''}"
+                                                >
+                                                    <!-- Avatar -->
+                                                    <ChatAvatar
+                                                        role={msg.role}
+                                                        isConsecutive={!isLastConsecutive}
+                                                        username={auth.username}
+                                                        model={msg.model}
+                                                        modelProvider={msg.modelProvider}
+                                                        {getModelDisplayName}
+                                                        hasContent={!!(msg.content || msg.thinking)}
+                                                    />
+
+                                                    <!-- Message bubble and tool calls -->
+                                                    <div class="min-w-0 flex-1">
+                                                        <ChatMessage
+                                                            {msg}
+                                                            thinkingIsOpen={thinkingOpen[msg.id]}
+                                                            onthinkingtoggle={(open: boolean) =>
+                                                                (thinkingOpen[msg.id] = open)}
+                                                            scrollContainer={viewportEl}
+                                                            ondelete={handleDeleteMessage}
+                                                            onedit={handleEditMessage}
+                                                            oneditassistant={handleEditAssistantMessage}
+                                                            navigating={chat.navigating}
+                                                            onsearchclick={handleSearchClick}
+                                                            onpageclick={handlePageClick}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        {/if}
+                                    {/each}
+
+                                    <!-- Skeleton placeholder while waiting for model to start responding -->
+                                    {#if waitingForResponse}
                                         <div class="flex w-full justify-start">
                                             <div class="flex gap-3 w-[min(75%,65ch)] font-serif">
                                                 <ChatAvatar
                                                     role="assistant"
                                                     isConsecutive={false}
-                                                    model={item.model}
-                                                    modelProvider={item.modelProvider}
+                                                    model={chat.lastModel?.modelId}
+                                                    modelProvider={chat.lastModel?.provider}
                                                     {getModelDisplayName}
-                                                    hasContent={true}
+                                                    hasContent={false}
                                                 />
-                                                <div class="min-w-0 flex-1">
-                                                    <ThinkingGroup
-                                                        group={item}
-                                                        thinkingIsOpen={thinkingOpen[item.id]}
-                                                        onthinkingtoggle={(open: boolean) =>
-                                                            (thinkingOpen[item.id] = open)}
-                                                        ondelete={handleDeleteMessage}
-                                                        onregenerate={handleEditMessage}
-                                                        navigating={chat.navigating}
-                                                    />
-                                                </div>
-                                            </div>
-                                        </div>
-                                    {:else}
-                                        {@const msg = item.msg as ChatMessageType}
-                                        {@const nextItem = renderItems[i + 1]}
-                                        {@const isLastConsecutive =
-                                            nextItem.type !== "message" ||
-                                            nextItem.msg.role !== msg.role}
-                                        <div
-                                            class="flex w-full {msg.role === 'user'
-                                                ? 'justify-end'
-                                                : 'justify-start'} {!isLastConsecutive
-                                                ? '-mt-4'
-                                                : ''}"
-                                        >
-                                            <div
-                                                class="flex gap-3 w-max-[65ch] font-serif {msg.role ===
-                                                'user'
-                                                    ? 'flex-row-reverse items-end'
-                                                    : ''}"
-                                            >
-                                                <!-- Avatar -->
-                                                <ChatAvatar
-                                                    role={msg.role}
-                                                    isConsecutive={!isLastConsecutive}
-                                                    username={auth.username}
-                                                    model={msg.model}
-                                                    modelProvider={msg.modelProvider}
-                                                    {getModelDisplayName}
-                                                    hasContent={!!(msg.content || msg.thinking)}
-                                                />
-
-                                                <!-- Message bubble and tool calls -->
-                                                <div class="min-w-0 flex-1">
-                                                    <ChatMessage
-                                                        {msg}
-                                                        thinkingIsOpen={thinkingOpen[msg.id]}
-                                                        onthinkingtoggle={(open: boolean) =>
-                                                            (thinkingOpen[msg.id] = open)}
-                                                        scrollContainer={viewportEl}
-                                                        ondelete={handleDeleteMessage}
-                                                        onedit={handleEditMessage}
-                                                        oneditassistant={handleEditAssistantMessage}
-                                                        navigating={chat.navigating}
-                                                        onsearchclick={handleSearchClick}
-                                                        onpageclick={handlePageClick}
-                                                    />
+                                                <div
+                                                    class="min-w-0 flex-1 flex flex-col gap-2 py-1"
+                                                >
+                                                    <Skeleton class="h-4 w-3/4" />
+                                                    <Skeleton class="h-4 w-1/2" />
                                                 </div>
                                             </div>
                                         </div>
                                     {/if}
-                                {/each}
 
-                                <!-- Skeleton placeholder while waiting for model to start responding -->
-                                {#if waitingForResponse}
-                                    <div class="flex w-full justify-start">
-                                        <div class="flex gap-3 w-[min(75%,65ch)] font-serif">
-                                            <ChatAvatar
-                                                role="assistant"
-                                                isConsecutive={false}
-                                                model={chat.lastModel?.modelId}
-                                                modelProvider={chat.lastModel?.provider}
-                                                {getModelDisplayName}
-                                                hasContent={false}
-                                            />
-                                            <div class="min-w-0 flex-1 flex flex-col gap-2 py-1">
-                                                <Skeleton class="h-4 w-3/4" />
-                                                <Skeleton class="h-4 w-1/2" />
-                                            </div>
-                                        </div>
-                                    </div>
-                                {/if}
-
-                                <!-- File upload progress -->
-                                {#if uploadProgress}
-                                    <div class="flex w-full justify-end">
-                                        <div class="w-[min(75%,65ch)] flex flex-col gap-1.5">
-                                            <div
-                                                class="flex items-center gap-2 text-xs text-muted-foreground"
-                                            >
-                                                <span>Uploading {uploadProgress.currentFile}</span>
-                                                <span class="text-muted-foreground/60"
-                                                    >({uploadProgress.fileIndex +
-                                                        1}/{uploadProgress.totalFiles})</span
-                                                >
-                                            </div>
-                                            <div
-                                                class="h-1.5 rounded-full bg-muted overflow-hidden"
-                                            >
+                                    <!-- File upload progress -->
+                                    {#if uploadProgress}
+                                        <div class="flex w-full justify-end">
+                                            <div class="w-[min(75%,65ch)] flex flex-col gap-1.5">
                                                 <div
-                                                    class="h-full rounded-full bg-primary transition-[width] duration-200"
-                                                    style="width: {uploadProgress.fraction * 100}%"
-                                                ></div>
+                                                    class="flex items-center gap-2 text-xs text-muted-foreground"
+                                                >
+                                                    <span
+                                                        >Uploading {uploadProgress.currentFile}</span
+                                                    >
+                                                    <span class="text-muted-foreground/60"
+                                                        >({uploadProgress.fileIndex +
+                                                            1}/{uploadProgress.totalFiles})</span
+                                                    >
+                                                </div>
+                                                <div
+                                                    class="h-1.5 rounded-full bg-muted overflow-hidden"
+                                                >
+                                                    <div
+                                                        class="h-full rounded-full bg-primary transition-[width] duration-200"
+                                                        style="width: {uploadProgress.fraction *
+                                                            100}%"
+                                                    ></div>
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
+                                    {/if}
                                 {/if}
-                            {/if}
-                        </div>
-                    </ScrollArea>
+                            </div>
+                        </ScrollArea>
+                    {/if}
 
                     <!-- Input area -->
-                    <div class="shrink-0 px-4 py-3 bg-background">
+                    <div
+                        class="px-4 py-3 bg-background {inputFullscreen
+                            ? 'flex-1 min-h-0 pt-12 flex flex-col'
+                            : 'shrink-0'}"
+                    >
                         <ChatInput
                             bind:value={inputText}
                             bind:pendingFiles
+                            bind:fullscreen={inputFullscreen}
                             {sandboxFiles}
                             placeholder={chat.connected ? "Type a message..." : "Connecting..."}
                             disabled={!chat.connected || uploadProgress !== null}
