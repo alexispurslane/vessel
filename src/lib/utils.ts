@@ -46,6 +46,26 @@ export function tryJsonParse<T>(json: string | null | undefined, schema: ZodType
     return schema.parse(raw);
 }
 
+/**
+ * Validate an already-parsed value against a Zod schema, returning null on failure.
+ *
+ * Use this when you have an `unknown` value (e.g., from `JSON.parse()`)
+ * that needs runtime validation and type-safe narrowing.
+ * Unlike `safeJsonParse`, this does NOT parse a JSON string — it validates
+ * an already-parsed object.
+ *
+ * @param value  The already-parsed value to validate
+ * @param schema A Zod schema that describes the expected shape
+ * @returns      The validated & typed value, or null on failure
+ */
+export function safeValidate<T>(value: unknown, schema: ZodType<T>): T | null {
+    try {
+        return schema.parse(value);
+    } catch {
+        return null;
+    }
+}
+
 // --- Reusable Zod schemas for common types ---
 
 /** Zod schema for `string[]` — used for tags, domains, env vars, etc. */

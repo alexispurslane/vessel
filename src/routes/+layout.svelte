@@ -30,10 +30,14 @@
     // Fall back to the auth store's value (which starts as unauthenticated).
     let ssrAuth: AuthStatus | undefined = $derived($page.data.auth);
 
-    // Derived auth state: SSR data takes priority until the client-side
-    // checkAuth() completes, then the store is the source of truth.
-    // This ensures authenticated users see the app immediately (no spinner).
-    let isAuthenticated = $derived(ssrAuth?.authenticated ?? auth.isAuthenticated);
+    // Derived auth state: either source saying "authenticated" wins.
+    // - SSR data (`ssrAuth`) is authoritative for the initial page load.
+    // - Client-side store (`auth.isAuthenticated`) is more up-to-date after
+    //   login (before invalidated SSR data arrives).
+    // We use || instead of ?? because `ssrAuth?.authenticated` can be `false`
+    // (stale SSR data from before login), and `false ?? true` returns `false`
+    // which incorrectly hides the app behind the loading spinner.
+    let isAuthenticated = $derived(ssrAuth?.authenticated || auth.isAuthenticated);
 
     // Current route info
     let currentPath: string = $derived($page.url.pathname);

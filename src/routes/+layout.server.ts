@@ -8,12 +8,12 @@ import { userExists, getUsername } from "$lib/server/auth/index.js";
  * available to the page as $page.data.auth instead of requiring a client-side
  * fetch in onMount.
  */
-export const load = async ({ locals }: { locals: App.Locals }) => {
+export const load = ({ locals }: { locals: App.Locals }) => {
     const setup = userExists();
     return {
         auth: {
             setup,
-            authenticated: !!locals.authenticated,
+            authenticated: locals.authenticated,
             username: setup ? (locals.username ?? getUsername() ?? undefined) : undefined,
         },
     };

@@ -140,7 +140,7 @@ export const SESSION_COOKIE_NAME = "vessel_session";
 const SESSION_COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
 export function sessionCookie(token: string): string {
-    return `${SESSION_COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=${SESSION_COOKIE_MAX_AGE}`;
+    return `${SESSION_COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=${String(SESSION_COOKIE_MAX_AGE)}`;
 }
 
 export function clearSessionCookie(): string {

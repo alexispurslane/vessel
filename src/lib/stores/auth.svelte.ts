@@ -8,7 +8,7 @@ import {
     setupUser as apiSetup,
 } from "$lib/api.js";
 import type { AuthStatus } from "$lib/types.js";
-import { goto } from "$app/navigation";
+import { goto, invalidateAll } from "$app/navigation";
 import { resolve } from "$app/paths";
 
 let status = $state<AuthStatus>({ setup: false, authenticated: false, username: undefined });
@@ -87,6 +87,12 @@ export async function doLogin(username: string, password: string): Promise<boole
     try {
         await apiLogin(username, password);
         status = { setup: true, authenticated: true };
+        // Invalidate all load data so the layout re-fetches auth status
+        // from the server. Without this, $page.data.auth keeps the stale
+        // unauthenticated value from when the login page first loaded, and
+        // the ?? operator in the layout treats `false` as truthy-enough to
+        // suppress the client-side store value.
+        await invalidateAll();
         void goto(resolve("/"));
         return true;
     } catch (e) {
@@ -102,6 +108,8 @@ export async function doLogout(): Promise<void> {
     try {
         await apiLogout();
         status = { setup: true, authenticated: false };
+        // Invalidate all load data so the layout re-fetches auth status.
+        await invalidateAll();
         void goto(resolve("/login"));
     } catch (e) {
         error = e instanceof Error ? e.message : "Logout failed";

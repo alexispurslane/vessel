@@ -133,7 +133,7 @@ function handleAgentEnd(s: ChatState): void {
     // During SSE streaming, messages get temporary IDs (e.g. "assistant-1234567890").
     // After generation completes, we need the real JSONL entry IDs for
     // delete/edit operations to work correctly.
-    _reloadMessages(s);
+    void _reloadMessages(s);
 }
 
 /** Handle the 'turn_start' SSE event. */
@@ -152,7 +152,7 @@ function handleSessionTree(s: ChatState): void {
     // Only reload if we're not currently navigating ourselves
     // (our own navigate calls reloadMessages directly)
     if (!s.navigating) {
-        _reloadMessages(s);
+        void _reloadMessages(s);
     }
 }
 
@@ -561,7 +561,7 @@ export function switchConversation(conversationId: string): void {
     if (conversationId === state.currentConversationId) return;
 
     // connectStream → resetChatState handles all cleanup
-    connectStream(conversationId);
+    void connectStream(conversationId);
 }
 
 /**
@@ -582,5 +582,5 @@ export function reconnectStream(): void {
 
     // connectStream → resetChatState handles all state cleanup and
     // will call disconnectStream which gracefully closes the old connection.
-    connectStream(convId);
+    void connectStream(convId);
 }

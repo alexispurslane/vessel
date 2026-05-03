@@ -1,4 +1,5 @@
 <script lang="ts">
+    import type { ClassValue } from "clsx";
     import { cn } from "$lib/utils.js";
     import { Textarea } from "$lib/components/ui/textarea/index.js";
     import type { ComponentProps } from "svelte";
@@ -16,7 +17,7 @@
     data-slot="input-group-control"
     class={cn(
         "rounded-none border-0 bg-transparent py-2 shadow-none ring-0 focus-visible:ring-0 aria-invalid:ring-0 dark:bg-transparent flex-1 resize-none",
-        className
+        className as ClassValue
     )}
     bind:value
     {...props}
