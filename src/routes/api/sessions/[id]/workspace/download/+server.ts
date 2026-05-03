@@ -52,7 +52,8 @@ const MIME_TYPES: Record<string, string> = {
  *
  * Security: the resolved path is validated to stay within the workspace.
  */
-export const GET = tryApi(async ({ params, url }) => {
+export const GET = tryApi(({ params, url }) => {
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const id = params.id!;
     const workDir = getSessionWorkDir(id);
     const relativePath = url.searchParams.get("path");

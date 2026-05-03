@@ -7,7 +7,8 @@ import { tryApi } from "$lib/server/api-errors.js";
  * Get MCP server connection status for an active conversation session.
  * Returns an array of { name, status, toolCount } for each configured server.
  */
-export const GET = tryApi(async ({ params }) => {
+export const GET = tryApi(({ params }) => {
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const status = getMcpServerStatus(params.id!);
     return json(status);
 });

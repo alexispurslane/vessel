@@ -13,7 +13,8 @@ import { disposeSession } from "$lib/server/agent/session-store.js";
  * - The user closes the browser tab / ends the browser session
  * - The frontend wants to eagerly release memory for an inactive conversation
  */
-export const POST = tryApi(async ({ params }) => {
+export const POST = tryApi(({ params }) => {
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const id = params.id!;
     disposeSession(id);
     return json({ released: true });

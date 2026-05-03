@@ -18,6 +18,7 @@ export function preprocessMathMarkdown(content: string): string {
 
     // Display math: \[...\] → $$\n...\n$$
     content = content.replace(/\\\[([\s\S]*?)\\\]/g, (_match, inner: string) => {
+        // eslint-disable-next-line sonarjs/slow-regex -- server-side LLM output processing, not user input
         const trimmed = inner.replace(/^\n+/, "").replace(/\n+$/, "");
         return `$$\n${trimmed}\n$$`;
     });

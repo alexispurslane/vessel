@@ -10,6 +10,7 @@ import { getSessionTree } from "$lib/server/agent/session-store.js";
  * entries are on the current active branch.
  */
 export const GET = tryApi(async ({ params }) => {
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const id = params.id!;
     const tree = await getSessionTree(id);
     return json(tree);

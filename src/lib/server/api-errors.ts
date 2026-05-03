@@ -103,7 +103,7 @@ export function apiHandler<T>(
  *   });
  */
 export function tryApi(
-    handler: RequestHandler
+    handler: (event: Parameters<RequestHandler>[0]) => MaybePromise<Response>
 ): RequestHandler {
     return async (event) => {
         try {

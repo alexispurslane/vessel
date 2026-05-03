@@ -79,13 +79,9 @@
         Reflect.deleteProperty(editValues, index);
     }
 
-    function cancelEdit(index: number) {
-        onChange(
-            items.map((item, i) =>
-                i === index ? { ...item, editing: false } : { ...item, editing: false }
-            )
-        );
-        Reflect.deleteProperty(editValues, index);
+    function cancelEdit(_index: number) {
+        onChange(items.map((item) => ({ ...item, editing: false })));
+        Reflect.deleteProperty(editValues, _index);
     }
 
     function deleteItem(index: number) {
@@ -171,7 +167,7 @@
                     {#if field.showInView !== false}
                         {#if fieldIndex > 0 && fields
                                 .filter((f) => f.showInView !== false)
-                                .indexOf(field) > 0}
+                                .includes(field) && fields.filter((f) => f.showInView !== false)[0] !== field}
                             {#if fieldIndex === 1}
                                 <span class="text-muted-foreground">=</span>
                             {/if}

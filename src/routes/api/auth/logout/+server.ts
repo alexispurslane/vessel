@@ -1,12 +1,12 @@
 import { json } from "@sveltejs/kit";
-import type { RequestHandler } from "./$types.js";
 import { clearSessionCookie } from "$lib/server/auth/index.js";
+import { tryApi } from "$lib/server/api-errors.js";
 
 /**
  * POST /api/auth/logout
  * Clear session cookie.
  */
-export const POST: RequestHandler = async () => {
+export const POST = tryApi(() => {
     return json(
         { success: true },
         {
@@ -15,4 +15,4 @@ export const POST: RequestHandler = async () => {
             },
         }
     );
-};
+});

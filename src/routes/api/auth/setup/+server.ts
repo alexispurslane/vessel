@@ -13,7 +13,7 @@ const PostBody = z.object({
  * Create the single user. Only works if no user exists yet.
  * Guarded at both API level and DB level.
  */
-export const POST = apiHandler(PostBody, async ({ body }) => {
+export const POST = apiHandler(PostBody, ({ body }) => {
     if (userExists()) {
         return apiError("User already exists", 409);
     }

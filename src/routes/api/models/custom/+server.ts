@@ -36,7 +36,7 @@ const DeleteBody = z.object({
  * GET /api/models/custom
  * List all custom model definitions.
  */
-export const GET = tryApi(async () => {
+export const GET = tryApi(() => {
     return json(listCustomModels());
 });
 
@@ -45,7 +45,7 @@ export const GET = tryApi(async () => {
  * Add or update a custom model definition.
  * Validates that model IDs are unique across all providers.
  */
-export const PUT = apiHandler(PutBody, async ({ body }) => {
+export const PUT = apiHandler(PutBody, ({ body }) => {
     try {
         upsertCustomModel(body as CustomModelDef);
     } catch (e) {
@@ -67,7 +67,7 @@ export const PUT = apiHandler(PutBody, async ({ body }) => {
  * DELETE /api/models/custom
  * Remove a custom model definition. Only the model ID is needed.
  */
-export const DELETE = apiHandler(DeleteBody, async ({ body }) => {
+export const DELETE = apiHandler(DeleteBody, ({ body }) => {
     deleteCustomModel(body.id);
     refreshModelsJson();
     return json({ success: true });

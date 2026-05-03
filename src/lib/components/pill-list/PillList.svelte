@@ -67,12 +67,8 @@
         );
     }
 
-    function cancelEdit(index: number) {
-        onChange(
-            items.map((item, i) =>
-                i === index ? { ...item, editing: false } : { ...item, editing: false }
-            )
-        );
+    function cancelEdit(_index: number) {
+        onChange(items.map((item) => ({ ...item, editing: false })));
     }
 
     function deleteItem(index: number) {

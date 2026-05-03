@@ -81,13 +81,9 @@
         cleanupEdit(index);
     }
 
-    function cancelEdit(index: number) {
-        onChange(
-            items.map((item, i) =>
-                i === index ? { ...item, editing: false } : { ...item, editing: false }
-            )
-        );
-        cleanupEdit(index);
+    function cancelEdit(_index: number) {
+        onChange(items.map((item) => ({ ...item, editing: false })));
+        cleanupEdit(_index);
     }
 
     function cleanupEdit(index: number) {

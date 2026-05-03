@@ -66,7 +66,7 @@ export interface ExtensionRunner {
 
 /** Internal ResourceLoader shape for accessing prompt properties. */
 interface InternalResourceLoader {
-    systemPrompt?: string | undefined;
+    systemPrompt?: string;
     appendSystemPrompt?: string[];
 }
 

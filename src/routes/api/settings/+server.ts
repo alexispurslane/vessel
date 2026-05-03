@@ -9,7 +9,7 @@ const PutBody = z.record(z.string(), z.string());
  * GET /api/settings
  * Get all settings as key-value pairs.
  */
-export const GET = tryApi(async () => {
+export const GET = tryApi(() => {
     const db = getDb();
     const rows = db.prepare("SELECT key, value FROM settings").all() as {
         key: string;
@@ -29,7 +29,7 @@ export const GET = tryApi(async () => {
  * Update one or more settings.
  * Body: { key1: "value1", key2: "value2", ... }
  */
-export const PUT = apiHandler(PutBody, async ({ body }) => {
+export const PUT = apiHandler(PutBody, ({ body }) => {
     const db = getDb();
     const upsert = db.prepare(
         `INSERT INTO settings (key, value) VALUES (?, ?)

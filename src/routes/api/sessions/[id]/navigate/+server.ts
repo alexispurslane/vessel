@@ -22,6 +22,7 @@ const PostBody = z.object({
  *   { editorText?: string, cancelled: boolean }
  */
 export const POST = apiHandler(PostBody, async ({ body, event }) => {
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const id = event.params.id!;
     const result = await navigateMessage(id, body.targetEntryId);
     return json(result);

@@ -47,24 +47,27 @@ export const GET = tryApi(async ({ params }) => {
             return apiError(`Models endpoint returned ${res.status}: ${text}`, 502);
         }
 
-        const data = await res.json();
+        // Type the JSON response to avoid `any`
+        // OpenAI format: { data: [{ id: "...", ... }, ...] }
+        // Some endpoints return a flat array of model IDs or objects
+        type ModelsResponse = { data?: Array<Record<string, unknown>> } | Array<unknown> | null;
+        const data = (await res.json()) as ModelsResponse;
 
         // Normalize the response to a simple list of model IDs
-        // OpenAI format: { data: [{ id: "...", ... }, ...] }
         let models: string[];
-        if (Array.isArray(data?.data)) {
+        if (!Array.isArray(data) && typeof data === "object" && data !== null && Array.isArray(data.data)) {
             models = data.data
-                .map((m: Record<string, unknown>) => m.id as string)
+                .map((m) => m.id as string)
                 .filter(Boolean)
-                .sort();
+                .sort((a, b) => a.localeCompare(b));
         } else if (Array.isArray(data)) {
             // Some endpoints return a flat array of model IDs
             models = data
-                .map((m: unknown) =>
-                    typeof m === "string" ? m : ((m as Record<string, unknown>)?.id as string)
+                .map((m) =>
+                    typeof m === "string" ? m : ((m as Record<string, unknown>).id as string)
                 )
                 .filter(Boolean)
-                .sort();
+                .sort((a, b) => a.localeCompare(b));
         } else {
             models = [];
         }

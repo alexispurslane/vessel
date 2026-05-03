@@ -31,7 +31,7 @@ function extractFavicon(html: string, pageUrl: URL): string {
         /<link[^>]+href=["']([^"']+)["'][^>]+rel=["'](?:shortcut )?icon["']/i,
     ];
     for (const pattern of iconPatterns) {
-        const match = html.match(pattern);
+        const match = pattern.exec(html);
         if (match?.[1]) {
             try {
                 return new URL(match[1], pageUrl).href;
@@ -53,14 +53,14 @@ function extractOgField(html: string, property: string): string {
     // <meta content="..." property="og:XXX">
     const re1 = new RegExp(`<meta[^>]+property=["']${property}["'][^>]+content=["']([^"']*?)["']`, "i");
     const re2 = new RegExp(`<meta[^>]+content=["']([^"']*?)["'][^>]+property=["']${property}["']`, "i");
-    const match = html.match(re1) || html.match(re2);
+    const match = re1.exec(html) || re2.exec(html);
     return match?.[1] ?? "";
 }
 
 function extractTitle(html: string): string {
     const ogTitle = extractOgField(html, "og:title");
     if (ogTitle) return ogTitle;
-    const match = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+    const match = /<title[^>]*>([^<]+)<\/title>/i.exec(html);
     return match?.[1]?.trim() ?? "";
 }
 

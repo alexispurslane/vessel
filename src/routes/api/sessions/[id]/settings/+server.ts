@@ -30,7 +30,8 @@ const PutBody = z.object({
  * Get per-conversation settings.
  * Returns the effective settings (merged with defaults for null fields).
  */
-export const GET = tryApi(async ({ params }) => {
+export const GET = tryApi(({ params }) => {
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const id = params.id!;
     const db = getDb();
 
@@ -52,7 +53,8 @@ export const GET = tryApi(async ({ params }) => {
  * Replaces all settings for this conversation (full replacement, not partial merge).
  * If sandbox-affecting settings changed, restarts the in-memory session.
  */
-export const PUT = apiHandler(PutBody, async ({ body, event }) => {
+export const PUT = apiHandler(PutBody, ({ body, event }) => {
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const id = event.params.id!;
     // Build a clean ConversationSettings object from the validated input
     const settings: ConversationSettings = {};

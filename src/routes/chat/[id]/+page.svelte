@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { page } from "$app/stores";
+    import { page } from "$app/state";
     import {
         getChat,
         send,
@@ -68,7 +68,7 @@
     import type { SearchResultItem } from "$lib/types.js";
     import type { PageData } from "./$types.js";
 
-    const pageData = $derived($page.data as PageData);
+    const pageData = $derived(page.data as PageData);
 
     // --- Per-conversation persistence helpers ---
     const PANEL_STATE_PREFIX = "chat-panel-state:";
@@ -104,7 +104,7 @@
         }
     }
 
-    let id = $derived($page.params.id as string);
+    let id = $derived(page.params.id as string);
     const chat = getChat();
     const conversations = getConversations();
     const auth = getAuth();
@@ -483,8 +483,8 @@
                     draftRestored = true;
 
                     // If an initial message was passed (e.g., from the home page), send it now
-                    const initialMessage = $page.url.searchParams.get("initialMessage");
-                    const initialModel = $page.url.searchParams.get("initialModel");
+                    const initialMessage = page.url.searchParams.get("initialMessage");
+                    const initialModel = page.url.searchParams.get("initialModel");
                     if (initialMessage) {
                         // Use the model ID directly — provider is resolved automatically
                         const modelId = initialModel || selectedModelId;
@@ -496,10 +496,10 @@
                         // Each param is always present (true or false) matching the toggle state.
                         // We set conversation-level overrides so the session picks them up.
                         const sandboxSettings: ConversationSettings = {};
-                        const sandboxOnParam = $page.url.searchParams.get("sandboxOn");
-                        const netAllDomainsOnParam = $page.url.searchParams.get("netAllDomainsOn");
-                        const mcpServersOnParam = $page.url.searchParams.get("mcpServersOn");
-                        const agentModeParam = $page.url.searchParams.get("agentMode");
+                        const sandboxOnParam = page.url.searchParams.get("sandboxOn");
+                        const netAllDomainsOnParam = page.url.searchParams.get("netAllDomainsOn");
+                        const mcpServersOnParam = page.url.searchParams.get("mcpServersOn");
+                        const agentModeParam = page.url.searchParams.get("agentMode");
 
                         if (sandboxOnParam !== null)
                             sandboxSettings.sandboxEnabled = sandboxOnParam === "true";

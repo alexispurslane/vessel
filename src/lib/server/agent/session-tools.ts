@@ -143,7 +143,7 @@ export function getSessionAgentInfo(activeSession: ActiveSession): {
     const appendSystemPrompt: string[] | null = rawAppend
         ? Array.isArray(rawAppend)
             ? rawAppend
-            : [rawAppend as string]
+            : [rawAppend]
         : null;
 
     // Extract tools info
@@ -160,9 +160,9 @@ export function getSessionAgentInfo(activeSession: ActiveSession): {
     const skills = skillsResult.skills.map((s) => ({
         name: s.name,
         description: s.description,
-        source: s.sourceInfo?.source ?? "unknown",
-        scope: s.sourceInfo?.scope ?? "unknown",
-        disableModelInvocation: s.disableModelInvocation ?? false,
+        source: s.sourceInfo.source,
+        scope: s.sourceInfo.scope,
+        disableModelInvocation: s.disableModelInvocation,
     }));
 
     return { systemPrompt, customSystemPrompt, appendSystemPrompt, tools, skills };
@@ -233,7 +233,7 @@ export function getMcpServerStatus(activeSession: ActiveSession): McpServerStatu
             // Check if any tools with the server's prefix are registered
             const prefix = name.replace(/-/g, "_");
             let toolCount = 0;
-            for (const toolName of toolDefMap?.keys() ?? []) {
+            for (const toolName of toolDefMap.keys()) {
                 if (toolName === "mcp" || toolName.startsWith(prefix + "_")) {
                     toolCount++;
                 }

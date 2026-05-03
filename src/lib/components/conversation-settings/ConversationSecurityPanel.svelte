@@ -76,6 +76,14 @@
     let availableMcpServers = $state<McpServerInfo[]>([]);
     let mcpServerStatuses = $state<McpServerStatus[]>([]);
 
+    function toggleMcpServer(name: string) {
+        if (enabledMcpServers.has(name)) {
+            enabledMcpServers.delete(name);
+        } else {
+            enabledMcpServers.add(name);
+        }
+    }
+
     // --- Load / Save ---
     async function loadSettings() {
         loading = true;
@@ -471,13 +479,7 @@
                                             </div>
                                             <Switch
                                                 checked={enabledMcpServers.has(server.name)}
-                                                onCheckedChange={(checked: boolean) => {
-                                                    if (checked) {
-                                                        enabledMcpServers.add(server.name);
-                                                    } else {
-                                                        enabledMcpServers.delete(server.name);
-                                                    }
-                                                }}
+                                                onCheckedChange={() => toggleMcpServer(server.name)}
                                             />
                                         </div>
                                     {/each}

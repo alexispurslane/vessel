@@ -13,15 +13,11 @@
 
     const tag = $derived($page.params.tag as string);
 
-    const pageData = $derived($page.data as PageData);
-
     // Start with SSR data — conversations are in the HTML before JS loads.
     // Then refresh client-side when the tag changes.
     // We read $page.data directly (not through pageData) for the initial value
     // to avoid the "state_referenced_locally" warning — this is intentional one-time initialization.
-    let conversations = $state<ConversationListItem[]>(
-        (($page.data as PageData).conversations ?? []) as ConversationListItem[]
-    );
+    let conversations = $state<ConversationListItem[]>(($page.data as PageData).conversations);
     let refreshing = $state(false);
     let error = $state<string | null>(null);
 

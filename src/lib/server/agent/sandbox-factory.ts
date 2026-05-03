@@ -142,8 +142,8 @@ export async function ensureSandboxDeps(): Promise<void> {
         // Compare installed deps against the current spec
         try {
             const installed = JSON.parse(readFileSync(SANDBOX_DEPS_LOCKFILE, "utf-8")) as Record<string, string>;
-            const specKeys = Object.keys(SANDBOX_DEPS_PACKAGES).sort().join(",");
-            const installedKeys = Object.keys(installed).sort().join(",");
+            const specKeys = Object.keys(SANDBOX_DEPS_PACKAGES).sort((a, b) => a.localeCompare(b)).join(",");
+            const installedKeys = Object.keys(installed).sort((a, b) => a.localeCompare(b)).join(",");
             if (specKeys !== installedKeys) {
                 // Deps list has changed — reinstall
                 await installSandboxDeps();

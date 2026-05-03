@@ -4,7 +4,6 @@ import {
     listMcpServers,
     upsertMcpServer,
     deleteMcpServer,
-    type McpServerEntry,
 } from "$lib/server/agent/mcp-config.js";
 import { notFound, apiHandler, tryApi } from "$lib/server/api-errors.js";
 
@@ -13,7 +12,7 @@ const PutBody = z.object({
     config: z.object({
         command: z.string().optional(),
         url: z.string().optional(),
-    }).passthrough().refine(
+    }).loose().refine(
         (c) => c.command || c.url,
         "config must have either 'command' (stdio) or 'url' (HTTP)"
     ),
@@ -27,7 +26,7 @@ const DeleteBody = z.object({
  * GET /api/mcp-servers
  * List all configured MCP servers.
  */
-export const GET = tryApi(async () => {
+export const GET = tryApi(() => {
     const servers = listMcpServers();
     return json(servers);
 });
@@ -37,8 +36,8 @@ export const GET = tryApi(async () => {
  * Add or update an MCP server configuration.
  * Body: { name: string, config: ServerEntry }
  */
-export const PUT = apiHandler(PutBody, async ({ body }) => {
-    upsertMcpServer(body.name, body.config as McpServerEntry);
+export const PUT = apiHandler(PutBody, ({ body }) => {
+    upsertMcpServer(body.name, body.config);
     return json({ success: true });
 });
 
@@ -47,7 +46,7 @@ export const PUT = apiHandler(PutBody, async ({ body }) => {
  * Remove an MCP server configuration.
  * Body: { name: string }
  */
-export const DELETE = apiHandler(DeleteBody, async ({ body }) => {
+export const DELETE = apiHandler(DeleteBody, ({ body }) => {
     const deleted = deleteMcpServer(body.name);
     if (!deleted) {
         return notFound(`MCP server "${body.name}" not found`);

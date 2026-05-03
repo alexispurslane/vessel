@@ -85,7 +85,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
     // When the sandbox is not available (sandboxing disabled), we write
     // directly — snapshots are off anyway in that case.
     const UPLOAD_TMP_DIR = ".upload-tmp";
-    const tmpSuffix = `${String(Date.now())}.${Math.random().toString(36).slice(2)}`;
+    const tmpSuffix = `${String(Date.now())}.${crypto.randomUUID().slice(0, 8)}`;
     const tmpRelPath = join(UPLOAD_TMP_DIR, `${filename}.tmp.${tmpSuffix}`);
     const tmpAbsPath = resolve(workDir, tmpRelPath);
     mkdirSync(dirname(tmpAbsPath), { recursive: true });
@@ -97,7 +97,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
             const reader = request.body.getReader();
 
             try {
-                /* eslint-disable @typescript-eslint/no-unnecessary-condition -- while(true) is the idiomatic stream reading pattern */
+                /* eslint-disable @typescript-eslint/no-unnecessary-condition */
                 while (true) {
                     const { done, value } = await reader.read();
                     if (done) break;

@@ -271,8 +271,9 @@ async function callModelForTitle(model: Model<Api>, userMessage: string, existin
         return parseModelResponse(textContent);
     }
 
+    const errorDetail = assistantMessage.errorMessage ? `, error: ${assistantMessage.errorMessage}` : "";
     throw new Error(
-        `Model did not call the generate_conversation_title tool and produced no text (stopReason: ${assistantMessage.stopReason}${assistantMessage.errorMessage ? `, error: ${assistantMessage.errorMessage}` : ""})`
+        `Model did not call the generate_conversation_title tool and produced no text (stopReason: ${assistantMessage.stopReason}${errorDetail})`
     );
 }
 
@@ -282,7 +283,9 @@ async function callModelForTitle(model: Model<Api>, userMessage: string, existin
  */
 function parseModelResponse(content: string): GenerateResult {
     // Try to extract JSON from the response (may have markdown wrapping)
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    // Use a non-greedy pattern with RegExp.exec() to avoid ReDoS vulnerability
+    const jsonRegex = /\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/;
+    const jsonMatch = jsonRegex.exec(content);
     if (!jsonMatch) {
         // Fallback: use the whole response as a title
         return { title: content.trim().slice(0, 80), tags: [] };

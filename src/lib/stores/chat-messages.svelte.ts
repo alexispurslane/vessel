@@ -262,7 +262,8 @@ export function extractThinkingFromContent(content: unknown): string | undefined
  * Extract thinking content from <thinking>...</thinking> tags in text.
  */
 export function extractThinkingFromTags(text: string): string | undefined {
-    const match = text.match(/<thinking>([\s\S]*?)<\/thinking>/);
+    const thinkingRegex = /<thinking>([\s\S]*?)<\/thinking>/;
+    const match = thinkingRegex.exec(text);
     return match?.[1]?.trim() || undefined;
 }
 

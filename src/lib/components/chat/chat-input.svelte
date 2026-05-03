@@ -140,7 +140,6 @@
                 // only reliable way to insert text at the cursor in a contentEditable.
                 // The modern Input API (InputEvent.getTargetRanges() + execCommand)
                 // doesn't provide a direct replacement for insertText.
-                // eslint-disable-next-line @typescript-eslint/no-deprecated
                 document.execCommand("insertText", false, text);
             }
         } catch {
@@ -168,7 +167,7 @@
                 ...pendingFiles,
                 {
                     file,
-                    id: `${file.name}-${String(Date.now())}-${Math.random().toString(36).slice(2, 8)}`,
+                    id: `${file.name}-${String(Date.now())}-${crypto.randomUUID().slice(0, 8)}`,
                 },
             ];
         }

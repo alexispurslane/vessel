@@ -47,9 +47,9 @@
     }
 
     let {
-        instructions = [],
-        customSystemPrompt = "",
-        effectiveSystemPrompt = "",
+        instructions,
+        customSystemPrompt,
+        effectiveSystemPrompt,
         saving = false,
         error = null,
         onadd,

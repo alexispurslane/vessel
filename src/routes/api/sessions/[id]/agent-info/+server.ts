@@ -23,11 +23,12 @@ const PatchBody = z.object({
  * on demand if not already in memory.
  */
 export const GET = tryApi(async ({ params }) => {
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const id = params.id!;
     // Ensure the session is loaded in memory so we can read from it
     await getOrHydrateSession(id);
 
-    const info = await getSessionAgentInfo(id);
+    const info = getSessionAgentInfo(id);
     if (!info) {
         return notFound("Session not active");
     }
@@ -44,6 +45,7 @@ export const GET = tryApi(async ({ params }) => {
  * to the live session and persisted to conversation settings.
  */
 export const PATCH = apiHandler(PatchBody, async ({ body, event }) => {
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const id = event.params.id!;
     const options: {
         customSystemPrompt?: string | null;
@@ -66,6 +68,6 @@ export const PATCH = apiHandler(PatchBody, async ({ body, event }) => {
     }
 
     // Return the updated agent info so the client can refresh
-    const info = await getSessionAgentInfo(id);
+    const info = getSessionAgentInfo(id);
     return json({ success: true, info });
 });

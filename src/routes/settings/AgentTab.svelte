@@ -32,7 +32,7 @@
             if (raw) {
                 try {
                     const parsed = JSON.parse(raw) as string[] | string;
-                    agentInstructions = (Array.isArray(parsed) ? parsed : [parsed]) as string[];
+                    agentInstructions = Array.isArray(parsed) ? parsed : [parsed];
                 } catch {
                     agentInstructions = [];
                 }

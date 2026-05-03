@@ -45,7 +45,7 @@ export function createSandboxedBashOps(sandbox: Sandbox): BashOperations {
                 options.onData(Buffer.from(combined));
             }
 
-            return { exitCode: result.code ?? null };
+            return { exitCode: result.code };
         },
     };
 }
@@ -179,18 +179,16 @@ export function createSandboxedLsOps(sandbox: Sandbox): LsOperations {
                 .output()
                 .then((r) => r.code === 0);
         },
-        stat(absolutePath: string) {
+        async stat(absolutePath: string) {
             // We need isDirectory — use test -d inside the sandbox
-            return sandbox.exec("test", ["-d", absolutePath]).output().then((r) => {
-                const isDir = r.code === 0;
-                // Also check if path exists at all
-                return sandbox.exec("test", ["-e", absolutePath]).output().then((existsResult) => {
-                    if (existsResult.code !== 0) {
-                        throw new Error(`path does not exist: ${absolutePath}`);
-                    }
-                    return { isDirectory: () => isDir };
-                });
-            });
+            const dirResult = await sandbox.exec("test", ["-d", absolutePath]).output();
+            const isDir = dirResult.code === 0;
+            // Also check if path exists at all
+            const existsResult = await sandbox.exec("test", ["-e", absolutePath]).output();
+            if (existsResult.code !== 0) {
+                throw new Error(`path does not exist: ${absolutePath}`);
+            }
+            return { isDirectory: () => isDir };
         },
         readdir(absolutePath: string): Promise<string[]> | string[] {
             return sandbox

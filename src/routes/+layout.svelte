@@ -8,7 +8,7 @@
     import { Separator } from "$lib/components/ui/separator/index.js";
     import { Spinner } from "$lib/components/ui/spinner/index.js";
     import { onMount } from "svelte";
-    import { page } from "$app/stores";
+    import { page } from "$app/state";
     import { ModeWatcher } from "mode-watcher";
     import { getAuth, checkAuth, initAuth } from "$lib/stores/auth.svelte.js";
     import {
@@ -26,9 +26,9 @@
     const convs = getConversations();
 
     // Use SSR auth data for the initial render — avoids the loading spinner.
-    // $page.data.auth comes from +layout.server.ts (server-side auth check).
+    // page.data.auth comes from +layout.server.ts (server-side auth check).
     // Fall back to the auth store's value (which starts as unauthenticated).
-    let ssrAuth: AuthStatus | undefined = $derived($page.data.auth);
+    let ssrAuth: AuthStatus | undefined = $derived(page.data.auth);
 
     // Derived auth state: either source saying "authenticated" wins.
     // - SSR data (`ssrAuth`) is authoritative for the initial page load.
@@ -40,7 +40,7 @@
     let isAuthenticated = $derived(ssrAuth?.authenticated || auth.isAuthenticated);
 
     // Current route info
-    let currentPath: string = $derived($page.url.pathname);
+    let currentPath: string = $derived(page.url.pathname);
 
     // Check if we're on an auth page (no sidebar needed)
     let isAuthPage = $derived(currentPath === "/login" || currentPath === "/setup");
@@ -52,7 +52,7 @@
 
     // Initialize auth store from SSR data so client-side code sees
     // the correct state immediately (before checkAuth() completes).
-    const initialAuth = $page.data.auth;
+    const initialAuth = page.data.auth;
     if (initialAuth) {
         initAuth(initialAuth);
     }

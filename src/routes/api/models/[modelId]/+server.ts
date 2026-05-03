@@ -1,6 +1,6 @@
 import { json } from "@sveltejs/kit";
-import type { RequestHandler } from "./$types.js";
 import { resolveModel } from "$lib/server/agent/session-store.js";
+import { tryApi } from "$lib/server/api-errors.js";
 
 /**
  * GET /api/models/[modelId]
@@ -11,8 +11,8 @@ import { resolveModel } from "$lib/server/agent/session-store.js";
  *
  * Returns 404 if the model ID is not found.
  */
-export const GET: RequestHandler = async ({ params }) => {
-    const { modelId } = params;
+export const GET = tryApi(({ params }) => {
+    const { modelId } = params as { modelId: string };
 
     const model = resolveModel(modelId);
 
@@ -21,4 +21,4 @@ export const GET: RequestHandler = async ({ params }) => {
     }
 
     return json(model);
-};
+});

@@ -23,6 +23,7 @@ const PostBody = z.object({
  *   { cancelled: boolean }
  */
 export const POST = apiHandler(PostBody, async ({ body, event }) => {
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const id = event.params.id!;
     const result = await editAssistantMessage(id, body.targetEntryId, body.newContent);
     return json(result);
