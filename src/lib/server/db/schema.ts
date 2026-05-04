@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS conversations (
   session_file_path TEXT NOT NULL,
   model_provider TEXT,
   model_id TEXT,
+  pinned INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -88,6 +89,7 @@ export function runMigrations(db: DatabaseType): void {
         "ALTER TABLE providers ADD COLUMN display_name TEXT",
         "ALTER TABLE providers ADD COLUMN models_endpoint TEXT",
         "ALTER TABLE auth ADD COLUMN pronouns TEXT",
+        "ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
     ];
 
     for (const sql of columnMigrations) {

@@ -33,6 +33,7 @@ interface ConversationRow {
     title: string;
     tags: string;
     session_file_path: string;
+    pinned: number;
     created_at: string;
     updated_at: string;
 }
@@ -51,7 +52,7 @@ function fetchAllConversationRows(): ConversationRow[] {
     const db = getDb();
     return db
         .prepare(
-            `SELECT id, title, tags, session_file_path, created_at, updated_at FROM conversations ORDER BY updated_at DESC`
+            `SELECT id, title, tags, session_file_path, pinned, created_at, updated_at FROM conversations ORDER BY updated_at DESC`
         )
         .all() as ConversationRow[];
 }
@@ -64,6 +65,7 @@ export function listConversations(): ConversationListItem[] {
         id: row.id,
         title: row.title,
         tags: safeJsonParse(row.tags, stringArraySchema) ?? [],
+        pinned: Boolean(row.pinned),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
     }));

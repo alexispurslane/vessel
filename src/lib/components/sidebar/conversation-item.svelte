@@ -12,6 +12,8 @@
     import Pencil from "@lucide/svelte/icons/pencil";
     import Tag from "@lucide/svelte/icons/tag";
     import Sparkles from "@lucide/svelte/icons/sparkles";
+    import Pin from "@lucide/svelte/icons/pin";
+    import PinOff from "@lucide/svelte/icons/pin-off";
     import { hashHue } from "$lib/utils.js";
     import { resolve } from "$app/paths";
 
@@ -19,6 +21,7 @@
         id: string;
         title: string;
         tags: string[];
+        pinned: boolean;
     }
 
     let {
@@ -30,6 +33,7 @@
         onRename,
         onTag,
         onGenerateTitle,
+        onPin,
     }: {
         conv: Conversation;
         isActive: boolean;
@@ -39,6 +43,7 @@
         onRename: (id: string) => void;
         onTag: (id: string) => void;
         onGenerateTitle: (id: string) => void;
+        onPin: (id: string, pinned: boolean) => void;
     } = $props();
 </script>
 
@@ -72,18 +77,51 @@
                         </div>
                     {/if}
                 </div>
-                <button
-                    class="ml-auto opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:text-destructive"
-                    onclick={(e) => {
-                        onDelete(conv.id, e);
-                    }}
-                    aria-label="Delete conversation"
+                <div
+                    class="ml-auto flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
                 >
-                    <Trash2 class="h-3.5 w-3.5" />
-                </button>
+                    <button
+                        class="p-0.5 hover:text-foreground"
+                        onclick={(e) => {
+                            e.stopPropagation();
+                            onPin(conv.id, !conv.pinned);
+                        }}
+                        aria-label={conv.pinned ? "Unpin conversation" : "Pin conversation"}
+                        title={conv.pinned ? "Unpin conversation" : "Pin conversation"}
+                    >
+                        {#if conv.pinned}
+                            <Pin class="h-3.5 w-3.5 text-foreground" />
+                        {:else}
+                            <Pin class="h-3.5 w-3.5" />
+                        {/if}
+                    </button>
+                    <button
+                        class="p-0.5 hover:text-destructive"
+                        onclick={(e) => {
+                            onDelete(conv.id, e);
+                        }}
+                        aria-label="Delete conversation"
+                    >
+                        <Trash2 class="h-3.5 w-3.5" />
+                    </button>
+                </div>
             </SidebarMenuButton>
         </ContextMenuTrigger>
         <ContextMenuContent>
+            <ContextMenuItem
+                onclick={() => {
+                    onPin(conv.id, !conv.pinned);
+                }}
+            >
+                {#if conv.pinned}
+                    <PinOff class="mr-2 h-4 w-4" />
+                    Unpin
+                {:else}
+                    <Pin class="mr-2 h-4 w-4" />
+                    Pin
+                {/if}
+            </ContextMenuItem>
+            <ContextMenuSeparator />
             <ContextMenuItem
                 onclick={() => {
                     onRename(conv.id);

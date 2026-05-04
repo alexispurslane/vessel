@@ -38,6 +38,7 @@
         setActiveConversation,
         renameConversation,
         loadConversations,
+        pinConversation,
     } from "$lib/stores/conversations.svelte.js";
     import {
         updateConversation as apiUpdateConversation,
@@ -72,6 +73,9 @@
             .map(([tag, count]) => ({ tag, count }));
     });
 
+    let pinnedConvs = $derived(convs.list.filter((c) => c.pinned));
+    let recentConvs = $derived(convs.list.filter((c) => !c.pinned));
+
     function handleNewChat() {
         setActiveConversation(null);
         clearMessages();
@@ -94,6 +98,10 @@
         if (id === convs.activeId) return;
         switchConversation(id);
         void goto(resolve(`/chat/${id}`));
+    }
+
+    function handlePinConversation(id: string, pinned: boolean) {
+        void pinConversation(id, pinned);
     }
 
     async function handleLogout() {
@@ -359,6 +367,29 @@
                 </SidebarGroup>
             {/if}
 
+            {#if !convs.loading && pinnedConvs.length > 0}
+                <SidebarGroup>
+                    <SidebarGroupLabel>Pinned</SidebarGroupLabel>
+                    <SidebarGroupContent>
+                        <SidebarMenu>
+                            {#each pinnedConvs as conv (conv.id)}
+                                <ConversationItem
+                                    {conv}
+                                    isActive={conv.id === convs.activeId}
+                                    generatingTitle={generatingTitleForId === conv.id}
+                                    onSelect={handleSelectConversation}
+                                    onDelete={handleDeleteConversation}
+                                    onRename={handleRenameConversation}
+                                    onTag={handleTagConversation}
+                                    onGenerateTitle={handleGenerateTitle}
+                                    onPin={handlePinConversation}
+                                />
+                            {/each}
+                        </SidebarMenu>
+                    </SidebarGroupContent>
+                </SidebarGroup>
+            {/if}
+
             <SidebarGroup class="flex-1 min-h-0">
                 <SidebarGroupLabel>Recent</SidebarGroupLabel>
                 <SidebarGroupContent>
@@ -368,12 +399,12 @@
                                 <div class="flex items-center justify-center py-4">
                                     <Spinner class="h-4 w-4" />
                                 </div>
-                            {:else if convs.list.length === 0}
+                            {:else if recentConvs.length === 0}
                                 <p class="px-2 py-4 text-xs text-muted-foreground text-center">
                                     No conversations yet
                                 </p>
                             {:else}
-                                {#each convs.list as conv (conv.id)}
+                                {#each recentConvs as conv (conv.id)}
                                     <ConversationItem
                                         {conv}
                                         isActive={conv.id === convs.activeId}
@@ -383,6 +414,7 @@
                                         onRename={handleRenameConversation}
                                         onTag={handleTagConversation}
                                         onGenerateTitle={handleGenerateTitle}
+                                        onPin={handlePinConversation}
                                     />
                                 {/each}
                             {/if}

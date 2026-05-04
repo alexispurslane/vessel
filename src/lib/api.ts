@@ -128,7 +128,7 @@ export async function getConversation(id: string): Promise<ConversationDetail> {
 
 export async function updateConversation(
     id: string,
-    updates: Partial<Pick<ConversationDetail, "title" | "tags" | "model_id">>
+    updates: Partial<Pick<ConversationDetail, "title" | "tags" | "model_id" | "pinned">>
 ): Promise<{ success: boolean }> {
     return apiFetch<{ success: boolean }>(`/api/sessions/${id}`, {
         method: "PATCH",

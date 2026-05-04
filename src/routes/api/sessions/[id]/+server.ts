@@ -9,8 +9,9 @@ const PatchBody = z.object({
     title: z.string().optional(),
     tags: z.array(z.string()).optional(),
     model_id: z.string().optional(),
+    pinned: z.boolean().optional(),
 }).refine(
-    (data) => data.title !== undefined || data.tags !== undefined || data.model_id !== undefined,
+    (data) => data.title !== undefined || data.tags !== undefined || data.model_id !== undefined || data.pinned !== undefined,
     { message: "No fields to update" }
 );
 
@@ -24,7 +25,7 @@ export const GET = tryApi(({ params }) => {
     const db = getDb();
     const row = db
         .prepare(
-            "SELECT id, title, tags, model_provider, model_id, created_at, updated_at FROM conversations WHERE id = ?"
+            "SELECT id, title, tags, model_provider, model_id, pinned, created_at, updated_at FROM conversations WHERE id = ?"
         )
         .get(id) as
         | {
@@ -33,6 +34,7 @@ export const GET = tryApi(({ params }) => {
             tags: string;
             model_provider: string | null;
             model_id: string | null;
+            pinned: number;
             created_at: string;
             updated_at: string;
         }
@@ -45,6 +47,7 @@ export const GET = tryApi(({ params }) => {
     return json({
         ...row,
         tags: safeJsonParse(row.tags, stringArraySchema) ?? [],
+        pinned: Boolean(row.pinned),
     });
 });
 
@@ -56,7 +59,7 @@ export const GET = tryApi(({ params }) => {
 export const PATCH = apiHandler(PatchBody, ({ body, event }) => {
     const id = event.params.id;
     if (!id) return notFound("Conversation not found");
-    const { title, tags, model_id } = body;
+    const { title, tags, model_id, pinned } = body;
 
     const updates: string[] = [];
     const values: unknown[] = [];
@@ -78,6 +81,10 @@ export const PATCH = apiHandler(PatchBody, ({ body, event }) => {
         const provider = model_id ? resolveModelProvider(model_id) : null;
         updates.push("model_provider = ?");
         values.push(provider);
+    }
+    if (pinned !== undefined) {
+        updates.push("pinned = ?");
+        values.push(pinned ? 1 : 0);
     }
 
     // Safety check — the Zod refine should prevent this, but keep the guard

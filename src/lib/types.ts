@@ -63,6 +63,7 @@ export interface ConversationListItem {
     id: string;
     title: string;
     tags: string[];
+    pinned: boolean;
     createdAt: string;
     updatedAt: string;
 }
@@ -75,6 +76,7 @@ export interface ConversationMeta {
     sessionFilePath: string;
     modelProvider?: string;
     modelId?: string;
+    pinned: boolean;
     createdAt: string;
     updatedAt: string;
 }
@@ -86,6 +88,7 @@ export interface ConversationDetail {
     tags: string[];
     model_provider: string | null;
     model_id: string | null;
+    pinned: boolean;
     created_at: string;
     updated_at: string;
 }

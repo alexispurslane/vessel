@@ -95,6 +95,7 @@ export async function createConversation(title?: string, modelId?: string): Prom
                 id,
                 title: title ?? "New Chat",
                 tags: [],
+                pinned: false,
                 createdAt: isoNow(),
                 updatedAt: isoNow(),
             });
@@ -144,6 +145,19 @@ export function updateConversationTitleAndTags(id: string, title: string, tags: 
     if (conv) {
         conv.title = title;
         conv.tags = tags;
+    }
+}
+
+export async function pinConversation(id: string, pinned: boolean): Promise<boolean> {
+    error = null;
+    try {
+        await apiUpdate(id, { pinned });
+        const conv = conversations.find((c) => c.id === id);
+        if (conv) conv.pinned = pinned;
+        return true;
+    } catch (e) {
+        error = e instanceof Error ? e.message : "Failed to update pin status";
+        return false;
     }
 }
 
