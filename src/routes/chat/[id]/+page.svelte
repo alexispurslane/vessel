@@ -2,7 +2,6 @@
     import { page } from "$app/state";
     import {
         getChat,
-        send,
         abort,
         connectStream,
         disconnectStream,
@@ -26,15 +25,12 @@
         listModels,
         getSessionTree,
         setSessionLeaf,
-        updateConversationSettings,
-        uploadFile,
         deleteWorkspaceFile,
         downloadWorkspaceFile,
         listWorkspaceFiles,
     } from "$lib/api.js";
     import type {
         ChatMessage as ChatMessageType,
-        ConversationSettings,
         ModelInfo,
         RenderItem,
         ThinkingGroup as ThinkingGroupType,
@@ -67,6 +63,8 @@
     import FetchedPagePanel from "$lib/components/chat/fetched-page-panel.svelte";
     import type { SearchResultItem } from "$lib/types.js";
     import type { PageData } from "./$types.js";
+    import { createSendHandlers, createConnectStreamHandler } from "./chat-handlers.svelte.js";
+    import type { PendingFile, UploadProgress } from "./chat-handlers.svelte.js";
 
     const pageData = $derived(page.data as PageData);
 
@@ -142,7 +140,7 @@
 
     let inputText = $state("");
     let inputFullscreen = $state(false);
-    let pendingFiles = $state<{ file: File; id: string }[]>([]);
+    let pendingFiles = $state<PendingFile[]>([]);
     /** Names of files already uploaded to the sandbox (persists across messages) */
     let sandboxFiles = $state<string[]>([]);
 
@@ -169,13 +167,7 @@
      */
     let pendingStatusUpdates = $state<string[]>([]);
     /** Upload progress state: null when idle, object when uploading */
-    let uploadProgress = $state<{
-        currentFile: string;
-        fileIndex: number;
-        totalFiles: number;
-        /** 0-1 fraction of the current file uploaded */
-        fraction: number;
-    } | null>(null);
+    let uploadProgress = $state<UploadProgress>(null);
     let viewportEl = $state<HTMLElement | null>(null);
     let availableModels = $state<ModelInfo[]>([]);
     let selectedModelId = $state(""); // Just the model ID — provider is resolved automatically
@@ -480,90 +472,9 @@
                 sandboxFiles = pageData.sandboxFiles;
                 // Use SSR-provided history if available — avoids a client-side fetch
                 // and renders messages immediately (before SSE connects).
-                void connectStream(currentId, pageData.messageHistory).then(async () => {
-                    console.log(
-                        `[chat-lifecycle] $effect: connectStream resolved, chat.messages.length=${String(chat.messages.length)}, connected=${String(chat.connected)}, generating=${String(chat.generating)}`
-                    );
-                    // The chat store now has messages from the server — switch rendering
-                    // from SSR data ($page.data.messages) to the live store (chat.messages).
-                    hydrated = true;
-                    console.log(
-                        `[chat-lifecycle] $effect: hydrated=true, chat.messages.length=${String(chat.messages.length)}`
-                    );
-
-                    // Scroll to anchored message if hash is present (e.g. from search results)
-                    scrollToHashMessage();
-
-                    // After connecting (which loads history), set model selector to last used model
-                    if (chat.lastModel) {
-                        selectedModelId = chat.lastModel.modelId;
-                        defaultApplied = true; // prevent default from overwriting conversation model
-                    }
-
-                    // Restore in-progress draft from sessionStorage if one exists
-                    const saved = sessionStorage.getItem(draftKey(currentId));
-                    if (saved) {
-                        inputText = saved;
-                    }
-                    // Now that we've attempted the restore, allow the $effect to manage sessionStorage
-                    draftRestored = true;
-
-                    // If an initial message was passed (e.g., from the home page), send it now
-                    const initialMessage = page.url.searchParams.get("initialMessage");
-                    const initialModel = page.url.searchParams.get("initialModel");
-                    if (initialMessage) {
-                        // Use the model ID directly — provider is resolved automatically
-                        const modelId = initialModel || selectedModelId;
-                        if (modelId) {
-                            selectedModelId = modelId;
-                        }
-
-                        // Apply any sandbox quick-toggle settings from the home page before sending.
-                        // Each param is always present (true or false) matching the toggle state.
-                        // We set conversation-level overrides so the session picks them up.
-                        const sandboxSettings: ConversationSettings = {};
-                        const sandboxOnParam = page.url.searchParams.get("sandboxOn");
-                        const netAllDomainsOnParam = page.url.searchParams.get("netAllDomainsOn");
-                        const mcpServersOnParam = page.url.searchParams.get("mcpServersOn");
-                        const agentModeParam = page.url.searchParams.get("agentMode");
-
-                        if (sandboxOnParam !== null)
-                            sandboxSettings.sandboxEnabled = sandboxOnParam === "true";
-                        if (netAllDomainsOnParam === "true") {
-                            sandboxSettings.allowNet = true;
-                            sandboxSettings.allowAllDomains = true;
-                        } else if (netAllDomainsOnParam === "false") {
-                            sandboxSettings.allowNet = false;
-                            sandboxSettings.allowAllDomains = false;
-                        }
-                        // null = use per-server defaultEnabled (effectively "on" for servers not explicitly disabled)
-                        // []  = explicitly no MCP servers
-                        if (mcpServersOnParam === "true") sandboxSettings.enabledMcpServers = null;
-                        else if (mcpServersOnParam === "false")
-                            sandboxSettings.enabledMcpServers = [];
-                        // Agent mode: "agent" = all tools, "chat" = no tools
-                        if (agentModeParam === "agent") sandboxSettings.agentMode = "agent";
-                        else if (agentModeParam === "chat") sandboxSettings.agentMode = "chat";
-
-                        // Apply sandbox settings if any were specified
-                        if (Object.keys(sandboxSettings).length > 0) {
-                            try {
-                                await updateConversationSettings(currentId, sandboxSettings);
-                            } catch {
-                                // Best-effort; don't block sending the message
-                            }
-                        }
-
-                        void send(initialMessage, modelId);
-                        // Clear the draft and the URL params to avoid re-sending on refresh/reconnect
-                        sessionStorage.removeItem(draftKey(currentId));
-                        // Use replaceState instead of goto to avoid triggering a SvelteKit
-                        // navigation that would re-run the $effect, clear messages, and
-                        // cause the just-pushed user message to disappear until reloadMessages()
-                        // runs at agent_end.
-                        window.history.replaceState({}, "", `/chat/${currentId}`);
-                    }
-                });
+                void connectStream(currentId, pageData.messageHistory).then(() =>
+                    onConnectStream(currentId)
+                );
             });
         }
         return () => {
@@ -599,93 +510,37 @@
         });
     });
 
-    async function handleSend() {
-        const text = inputText.trim();
-        const filesToSend = [...pendingFiles];
-        console.log(
-            `[chat-lifecycle] handleSend: text=${String(!!text)}, files=${String(filesToSend.length)}, connected=${String(chat.connected)}, generating=${String(chat.generating)}`
-        );
-        if (
-            (!text && filesToSend.length === 0 && pendingStatusUpdates.length === 0) ||
-            !chat.connected ||
-            chat.generating
-        )
-            return;
-
-        // Snapshot and clear any queued status updates.
-        // New updates (e.g. upload notices) will be appended to this list
-        // so all invisible status text flows through one place.
-        const statusUpdates = [...pendingStatusUpdates];
-        pendingStatusUpdates = [];
-
-        // When files are queued, show the message bubble immediately,
-        // upload files with a progress bar, then send to the AI.
-        if (filesToSend.length > 0) {
-            // Move text into a message bubble right away (just the user's text, not status updates)
-            chat.addLocalUserMessage(text || "📎 Uploading files...");
-            inputText = "";
-            pendingFiles = [];
-            sessionStorage.removeItem(draftKey(id));
-            hideTopBar();
-
-            try {
-                const uploadedNames: string[] = [];
-                for (let i = 0; i < filesToSend.length; i++) {
-                    const pf = filesToSend[i];
-                    uploadProgress = {
-                        currentFile: pf.file.name,
-                        fileIndex: i,
-                        totalFiles: filesToSend.length,
-                        fraction: 0,
-                    };
-                    await uploadFile(id, pf.file, (loaded, total) => {
-                        uploadProgress = {
-                            currentFile: pf.file.name,
-                            fileIndex: i,
-                            totalFiles: filesToSend.length,
-                            fraction: loaded / total,
-                        };
-                    });
-                    uploadedNames.push(pf.file.name);
-                }
-
-                // Add upload notice to the status list
-                const fileList = uploadedNames.join(", ");
-                statusUpdates.push(`Files with names ${fileList} added to your sandbox`);
-
-                // Add uploaded files to the sandbox files list
-                sandboxFiles = [...sandboxFiles, ...uploadedNames];
-
-                // Build the status content (invisible to the user, sent to the AI as context)
-                // and the user's visible text content separately
-                const statusText = statusUpdates.join("\n\n");
-
-                // Clear progress and send to the AI
-                // The user sees just their text; the AI gets status as invisible context
-                uploadProgress = null;
-                void chat.sendToApi(text, selectedModelId || undefined, statusText || undefined);
-            } catch (err) {
-                console.error("[chat] File upload failed:", err);
-                chat.setError(err instanceof Error ? err.message : "File upload failed");
-                uploadProgress = null;
-            }
-        } else {
-            // No files to upload
-            if (statusUpdates.length > 0) {
-                // There are invisible status updates — push a local message with just
-                // the user's text, then send with status content separately to the API
-                chat.addLocalUserMessage(text || "📎 Updated sandbox files");
-                const statusText = statusUpdates.join("\n\n");
-                void chat.sendToApi(text, selectedModelId || undefined, statusText || undefined);
-            } else {
-                // Normal send — no invisible status
-                void send(text, selectedModelId || undefined);
-            }
-            inputText = "";
-            sessionStorage.removeItem(draftKey(id));
-            hideTopBar();
-        }
-    }
+    // --- Extracted handlers (handleSend, onConnectStream) ---
+    // The heavy lifting lives in ./chat-handlers.svelte.ts — this keeps the
+    // page component focused on rendering. We wire page state via getters/setters
+    // so the handlers can read and write reactive state without owning it.
+    const handlerCtx = {
+        getId: () => id,
+        getPageData: () => pageData,
+        getUrl: () => page.url,
+        setInputText: (v: string) => (inputText = v),
+        getInputText: () => inputText,
+        setPendingFiles: (v: PendingFile[]) => (pendingFiles = v),
+        getPendingFiles: () => pendingFiles,
+        setUploadProgress: (v: UploadProgress) => (uploadProgress = v),
+        getUploadProgress: () => uploadProgress,
+        setSandboxFiles: (v: string[]) => (sandboxFiles = v),
+        getSandboxFiles: () => sandboxFiles,
+        setPendingStatusUpdates: (v: string[]) => (pendingStatusUpdates = v),
+        getPendingStatusUpdates: () => pendingStatusUpdates,
+        setSelectedModelId: (v: string) => (selectedModelId = v),
+        getSelectedModelId: () => selectedModelId,
+        setHydrated: (v: boolean) => (hydrated = v),
+        getHydrated: () => hydrated,
+        setDefaultApplied: (v: boolean) => (defaultApplied = v),
+        getDefaultApplied: () => defaultApplied,
+        setDraftRestored: (v: boolean) => (draftRestored = v),
+        scrollToHashMessage,
+        hideTopBar,
+        draftKey,
+    };
+    const { handleSend } = createSendHandlers(handlerCtx);
+    const { onConnectStream } = createConnectStreamHandler(handlerCtx);
 
     function handleAbort() {
         void abort();

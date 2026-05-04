@@ -1,0 +1,324 @@
+/**
+ * Extracted page-level handlers for the chat/[id] route.
+ *
+ */
+
+import {
+    getChat,
+    send,
+} from "$lib/stores/chat.svelte.js";
+import {
+    uploadFile,
+    updateConversationSettings,
+} from "$lib/api.js";
+import type { ConversationSettings } from "$lib/types.js";
+import type { PageData } from "./$types.js";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/** A pending file queued by the user before sending. */
+export interface PendingFile {
+    file: File;
+    id: string;
+}
+
+/** Upload progress state — null when idle. */
+export type UploadProgress = {
+    currentFile: string;
+    fileIndex: number;
+    totalFiles: number;
+    /** 0-1 fraction of the current file uploaded */
+    fraction: number;
+} | null;
+
+/** Arguments passed from the page component into the handler factory. */
+export interface ChatHandlerContext {
+    /** Reactive getter for the current conversation id */
+    getId: () => string;
+    /** Reactive getter for SSR page data */
+    getPageData: () => PageData;
+    /** Reactive getter for the current URL search params */
+    getUrl: () => URL;
+    /** Setter to clear the input text */
+    setInputText: (v: string) => void;
+    /** Getter for the current input text */
+    getInputText: () => string;
+    /** Setter for pending files */
+    setPendingFiles: (v: PendingFile[]) => void;
+    /** Getter for pending files */
+    getPendingFiles: () => PendingFile[];
+    /** Setter for upload progress */
+    setUploadProgress: (v: UploadProgress) => void;
+    /** Getter for upload progress */
+    getUploadProgress: () => UploadProgress;
+    /** Setter for sandbox files */
+    setSandboxFiles: (v: string[]) => void;
+    /** Getter for sandbox files */
+    getSandboxFiles: () => string[];
+    /** Setter for pending status updates */
+    setPendingStatusUpdates: (v: string[]) => void;
+    /** Getter for pending status updates */
+    getPendingStatusUpdates: () => string[];
+    /** Setter for selectedModelId */
+    setSelectedModelId: (v: string) => void;
+    /** Getter for selectedModelId */
+    getSelectedModelId: () => string;
+    /** Setter for hydrated flag */
+    setHydrated: (v: boolean) => void;
+    /** Getter for hydrated flag */
+    getHydrated: () => boolean;
+    /** Setter for defaultApplied flag */
+    setDefaultApplied: (v: boolean) => void;
+    /** Getter for defaultApplied flag */
+    getDefaultApplied: () => boolean;
+    /** Setter for draftRestored flag */
+    setDraftRestored: (v: boolean) => void;
+    /** Callback to scroll to a hash-anchored message */
+    scrollToHashMessage: () => void;
+    /** Callback to hide the top bar */
+    hideTopBar: () => void;
+    /** Draft key helper */
+    draftKey: (conversationId: string) => string;
+}
+
+// ---------------------------------------------------------------------------
+// Factory
+// ---------------------------------------------------------------------------
+
+/**
+ * Create the chat page handlers.
+ *
+ * Returns `handleSend` and `onConnectStream` (the callback invoked after
+ * `connectStream` resolves). Both are extracted here to keep the page
+ * component focused on rendering.
+ */
+/**
+ * Get the shared chat store instance.
+ * Both handler factories need this — extracted to avoid duplication.
+ */
+function getSharedChat() {
+    return getChat();
+}
+
+// ---------------------------------------------------------------------------
+// Send handlers
+// ---------------------------------------------------------------------------
+
+/**
+ * Upload pending files, track progress, and return the uploaded file names.
+ * Throws on upload failure — caller handles cleanup.
+ * Module-level so it doesn't count against factory function length.
+ */
+async function uploadFiles(
+    currentId: string,
+    filesToSend: PendingFile[],
+    ctx: ChatHandlerContext,
+): Promise<string[]> {
+    const uploadedNames: string[] = [];
+    for (let i = 0; i < filesToSend.length; i++) {
+        const pf = filesToSend[i];
+        ctx.setUploadProgress({
+            currentFile: pf.file.name,
+            fileIndex: i,
+            totalFiles: filesToSend.length,
+            fraction: 0,
+        });
+        await uploadFile(currentId, pf.file, (loaded, total) => {
+            ctx.setUploadProgress({
+                currentFile: pf.file.name,
+                fileIndex: i,
+                totalFiles: filesToSend.length,
+                fraction: loaded / total,
+            });
+        });
+        uploadedNames.push(pf.file.name);
+    }
+    return uploadedNames;
+}
+
+/**
+ * Create the send-related handlers: `handleSend` (with file upload support)
+ * and its sub-functions. Extracted from +page.svelte to keep the page focused on rendering.
+ */
+export function createSendHandlers(ctx: ChatHandlerContext) {
+    const chat = getSharedChat();
+
+    /** Send with files: upload first, then send to API with status content. */
+    async function handleSendWithFiles(
+        text: string,
+        filesToSend: PendingFile[],
+        statusUpdates: string[],
+    ) {
+        const currentId = ctx.getId();
+        chat.addLocalUserMessage(text || "📎 Uploading files...");
+        ctx.setInputText("");
+        ctx.setPendingFiles([]);
+        sessionStorage.removeItem(ctx.draftKey(currentId));
+        ctx.hideTopBar();
+
+        try {
+            const uploadedNames = await uploadFiles(currentId, filesToSend, ctx);
+            const fileList = uploadedNames.join(", ");
+            statusUpdates.push(`Files with names ${fileList} added to your sandbox`);
+            ctx.setSandboxFiles([...ctx.getSandboxFiles(), ...uploadedNames]);
+
+            const statusText = statusUpdates.join("\n\n");
+            ctx.setUploadProgress(null);
+            void chat.sendToApi(text, ctx.getSelectedModelId() || undefined, statusText || undefined);
+        } catch (err) {
+            console.error("[chat] File upload failed:", err);
+            chat.setError(err instanceof Error ? err.message : "File upload failed");
+            ctx.setUploadProgress(null);
+        }
+    }
+
+    /** Send without files: may include invisible status updates. */
+    function handleSendWithoutFiles(text: string, statusUpdates: string[]) {
+        const currentId = ctx.getId();
+        if (statusUpdates.length > 0) {
+            chat.addLocalUserMessage(text || "📎 Updated sandbox files");
+            const statusText = statusUpdates.join("\n\n");
+            void chat.sendToApi(text, ctx.getSelectedModelId() || undefined, statusText || undefined);
+        } else {
+            void send(text, ctx.getSelectedModelId() || undefined);
+        }
+        ctx.setInputText("");
+        sessionStorage.removeItem(ctx.draftKey(currentId));
+        ctx.hideTopBar();
+    }
+
+    async function handleSend() {
+        const text = ctx.getInputText().trim();
+        const filesToSend = [...ctx.getPendingFiles()];
+        const hasStatus = ctx.getPendingStatusUpdates().length > 0;
+        console.log(
+            `[chat-lifecycle] handleSend: text=${String(!!text)}, files=${String(filesToSend.length)}, connected=${String(chat.connected)}, generating=${String(chat.generating)}`
+        );
+        if ((!text && filesToSend.length === 0 && !hasStatus) || !chat.connected || chat.generating)
+            return;
+
+        const statusUpdates = [...ctx.getPendingStatusUpdates()];
+        ctx.setPendingStatusUpdates([]);
+
+        if (filesToSend.length > 0) {
+            await handleSendWithFiles(text, filesToSend, statusUpdates);
+        } else {
+            handleSendWithoutFiles(text, statusUpdates);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // onConnectStream — callback after connectStream resolves
+    // -----------------------------------------------------------------------
+
+    return {
+        handleSend,
+        chat,
+    };
+}
+
+// ---------------------------------------------------------------------------
+// ConnectStream handler
+// ---------------------------------------------------------------------------
+
+/**
+ * Create the `onConnectStream` callback invoked after `connectStream` resolves.
+ * Handles hydration, model restoration, draft restoration, and initial messages.
+ */
+export function createConnectStreamHandler(ctx: ChatHandlerContext) {
+    const chat = getSharedChat();
+
+    /**
+     * Apply sandbox quick-toggle settings from URL params and send the initial message.
+     * Called only when `initialMessage` is present in the URL.
+     */
+    async function sendInitialMessage(currentId: string, initialMessage: string, initialModel: string | null) {
+        const modelId = initialModel || ctx.getSelectedModelId();
+        if (modelId) ctx.setSelectedModelId(modelId);
+
+        const url = ctx.getUrl();
+        const sandboxSettings = parseSandboxSettings(url);
+
+        if (Object.keys(sandboxSettings).length > 0) {
+            try {
+                await updateConversationSettings(currentId, sandboxSettings);
+            } catch {
+                // Best-effort; don't block sending the message
+            }
+        }
+
+        void send(initialMessage, modelId);
+        sessionStorage.removeItem(ctx.draftKey(currentId));
+        window.history.replaceState({}, "", `/chat/${currentId}`);
+    }
+
+    /**
+     * Parse sandbox quick-toggle settings from URL search params.
+     */
+    function parseSandboxSettings(url: URL): ConversationSettings {
+        const settings: ConversationSettings = {};
+        const sandboxOnParam = url.searchParams.get("sandboxOn");
+        const netAllDomainsOnParam = url.searchParams.get("netAllDomainsOn");
+        const mcpServersOnParam = url.searchParams.get("mcpServersOn");
+        const agentModeParam = url.searchParams.get("agentMode");
+
+        if (sandboxOnParam !== null)
+            settings.sandboxEnabled = sandboxOnParam === "true";
+        if (netAllDomainsOnParam === "true") {
+            settings.allowNet = true;
+            settings.allowAllDomains = true;
+        } else if (netAllDomainsOnParam === "false") {
+            settings.allowNet = false;
+            settings.allowAllDomains = false;
+        }
+        if (mcpServersOnParam === "true") settings.enabledMcpServers = null;
+        else if (mcpServersOnParam === "false") settings.enabledMcpServers = [];
+        if (agentModeParam === "agent") settings.agentMode = "agent";
+        else if (agentModeParam === "chat") settings.agentMode = "chat";
+
+        return settings;
+    }
+
+    /**
+     * Called after `connectStream` resolves. Handles:
+     * - Setting hydrated flag to switch rendering from SSR to live store
+     * - Scrolling to anchored message if hash is present
+     * - Restoring model selection from the conversation's last model
+     * - Restoring in-progress message draft from sessionStorage
+     * - Sending an initial message if one was passed via URL params
+     */
+    async function onConnectStream(currentId: string) {
+        console.log(
+            `[chat-lifecycle] $effect: connectStream resolved, chat.messages.length=${String(chat.messages.length)}, connected=${String(chat.connected)}, generating=${String(chat.generating)}`
+        );
+        ctx.setHydrated(true);
+        console.log(
+            `[chat-lifecycle] $effect: hydrated=true, chat.messages.length=${String(chat.messages.length)}`
+        );
+
+        ctx.scrollToHashMessage();
+
+        if (chat.lastModel) {
+            ctx.setSelectedModelId(chat.lastModel.modelId);
+            ctx.setDefaultApplied(true);
+        }
+
+        const saved = sessionStorage.getItem(ctx.draftKey(currentId));
+        if (saved) ctx.setInputText(saved);
+        ctx.setDraftRestored(true);
+
+        const url = ctx.getUrl();
+        const initialMessage = url.searchParams.get("initialMessage");
+        const initialModel = url.searchParams.get("initialModel");
+        if (initialMessage) {
+            await sendInitialMessage(currentId, initialMessage, initialModel);
+        }
+    }
+
+    return {
+        onConnectStream,
+        chat,
+    };
+}
