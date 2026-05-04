@@ -426,6 +426,35 @@ export async function deleteMessage(
  * @param abortFn - Callback to abort current generation (from chat.svelte.ts)
  * @param sendFn - Callback to send a message (from chat.svelte.ts)
  */
+/** Abort current generation and finalize any streaming message. */
+async function abortAndFinalize(s: ChatState, abortFn: () => Promise<void>, reason: string): Promise<void> {
+    if (s.generating) await abortFn();
+    if (s.streamingMessageId) {
+        const msg = s.messages.find((m) => m.id === s.streamingMessageId);
+        if (msg) {
+            msg.streaming = false;
+            msg.thinkingStreaming = false;
+        }
+        setStreamingMessageId(s, null, reason);
+    }
+}
+
+/** Send the appropriate message after an edit/navigation. */
+async function sendEditedMessage(
+    role: string,
+    newText: string | undefined,
+    editorText: string | undefined,
+    sendFn: (content: string) => Promise<void>
+): Promise<void> {
+    if (role === "user") {
+        const textToSend = newText || editorText || "";
+        if (textToSend) await sendFn(textToSend);
+    } else if (role === "assistant" && editorText) {
+        // For assistant messages (regenerate), resend the user message text
+        await sendFn(editorText);
+    }
+}
+
 export async function editMessage(
     s: ChatState,
     messageId: string,
@@ -436,40 +465,15 @@ export async function editMessage(
 ): Promise<void> {
     if (!s.currentConversationId) return;
 
-    // If generating, abort first
-    if (s.generating) {
-        await abortFn();
-    }
-
-    // Finalize any streaming message before navigating
-    if (s.streamingMessageId) {
-        const msg = s.messages.find((m) => m.id === s.streamingMessageId);
-        if (msg) {
-            msg.streaming = false;
-            msg.thinkingStreaming = false;
-        }
-        setStreamingMessageId(s, null, "editMessage");
-    }
+    await abortAndFinalize(s, abortFn, "editMessage");
 
     s.navigating = true;
     s.error = null;
 
     try {
         const result = await apiNavigate(s.currentConversationId, messageId);
-        // Reload messages from server to reflect the new session state
         await reloadMessages(s);
-        if (role === "user") {
-            // For user messages, send the edited text (or the original if no edits were made)
-            const textToSend = newText || result.editorText || "";
-            if (textToSend) {
-                await sendFn(textToSend);
-            }
-        } else if (role === "assistant" && result.editorText) {
-            // For assistant messages (regenerate), auto-resend the user message text
-            // The navigateTree went back to the parent (user message), so editorText
-            // contains the user message text — send it to get a fresh response
-            await sendFn(result.editorText);
-        }
+        await sendEditedMessage(role, newText, result.editorText, sendFn);
     } catch (e) {
         s.error = e instanceof Error ? e.message : "Failed to edit message";
     } finally {
@@ -528,109 +532,118 @@ export async function editAssistantMessage(
 
 // --- SSE handlers that modify message state ---
 
+/** Map tool calls from the enriched recovery format. */
+function mapRecoveryToolCalls(tcs: z.infer<typeof toolCallSchema>[] | undefined): ChatMessage["toolCalls"] {
+    return (tcs ?? []).map((tc) => ({
+        toolName: tc.name ?? tc.toolName ?? "unknown",
+        status: (tc.status ?? "running") as "running" | "completed" | "error",
+        arguments: tc.arguments,
+        output: tc.output,
+        isError: tc.isError,
+    }));
+}
+
 /** Handle the 'stream_recovery' SSE event. */
 export function handleStreamRecovery(s: ChatState, e: MessageEvent): void {
     console.log(`[chat] SSE 'stream_recovery' event received`);
     try {
         const data = safeJsonParse(e.data as string, sseStreamRecoverySchema);
-        if (data?.message) {
-            s.generating = true;
-            s.recoveryTurnGeneration = typeof data.turnGeneration === "number" ? data.turnGeneration : null;
+        if (!data?.message) return;
 
-            const id = `assistant-recovered-${String(Date.now())}`;
-            setStreamingMessageId(s, id, "stream_recovery");
+        s.generating = true;
+        s.recoveryTurnGeneration = typeof data.turnGeneration === "number" ? data.turnGeneration : null;
 
-            // Extract text content — serializeMessage returns content as string[]
-            const text = extractTextFromContent(data.message.content) || "";
-            // Thinking is already extracted by serializeMessage into a separate field
-            const thinking = data.message.thinking ?? undefined;
-            // Map tool calls from the enriched recovery format.
-            // serializeStreamingMessageForRecovery adds status/output/isError
-            // by cross-referencing ToolResultMessage entries, so completed
-            // tools show up correctly instead of being stuck as "running".
-            const toolCalls = (data.message.toolCalls ?? []).map((tc) => ({
-                toolName: tc.name ?? tc.toolName ?? "unknown",
-                status: (tc.status ?? "running") as "running" | "completed" | "error",
-                arguments: tc.arguments,
-                output: tc.output,
-                isError: tc.isError,
-            }));
+        const id = `assistant-recovered-${String(Date.now())}`;
+        setStreamingMessageId(s, id, "stream_recovery");
 
-            s.messages.push({
-                id,
-                role: "assistant",
-                content: text,
-                timestamp: data.message.timestamp ?? Date.now(),
-                thinking: thinking,
-                thinkingStreaming: !!thinking,
-                model: data.message.model,
-                modelProvider: data.message.provider,
-                toolCalls,
-                fetchedSources: undefined,
-                streaming: true,
-            });
-            console.log(`[chat-lifecycle] handleStreamRecovery: pushed assistant msg id=${id}, messages.length=${String(s.messages.length)}, contentLen=${String(text.length)}, thinkingLen=${String(thinking?.length ?? 0)}`);
-        }
+        const text = extractTextFromContent(data.message.content) || "";
+        const thinking = data.message.thinking ?? undefined;
+        const toolCalls = mapRecoveryToolCalls(data.message.toolCalls);
+
+        s.messages.push({
+            id,
+            role: "assistant",
+            content: text,
+            timestamp: data.message.timestamp ?? Date.now(),
+            thinking: thinking,
+            thinkingStreaming: !!thinking,
+            model: data.message.model,
+            modelProvider: data.message.provider,
+            toolCalls,
+            fetchedSources: undefined,
+            streaming: true,
+        });
+        console.log(`[chat-lifecycle] handleStreamRecovery: pushed assistant msg id=${id}, messages.length=${String(s.messages.length)}, contentLen=${String(text.length)}, thinkingLen=${String(thinking?.length ?? 0)}`);
     } catch {
         // ignore parse errors
     }
 }
 
-/** Handle the 'message_start' SSE event. */
-export function handleMessageStart(s: ChatState, e: MessageEvent): void {
-    console.log(`[chat] SSE 'message_start': lastEventId=${e.lastEventId}`);
+/** Handle a non-assistant message_start (user messages from external sources). */
+function handleNonAssistantStart(s: ChatState, data: z.infer<typeof sseMessageStartSchema>): void {
+    if (data.message?.role !== "user") return;
+    const content =
+        typeof data.message.content === "string"
+            ? data.message.content
+            : extractTextFromContent(data.message.content);
+    if (!content) return;
+    const alreadyExists = s.messages.some(
+        (m) => m.role === "user" && m.content === content
+    );
+    if (!alreadyExists) {
+        s.messages.push({
+            id: `user-sse-${String(Date.now())}`,
+            role: "user",
+            content,
+            timestamp: Date.now(),
+        });
+    }
+}
+
+/** Finalize a previous streaming message (content cleanup, stop streaming). */
+function finalizePrevStreamingMessage(s: ChatState): void {
+    if (!s.streamingMessageId) return;
+    const prevMsg = s.messages.find((m) => m.id === s.streamingMessageId);
+    if (!prevMsg) return;
+    prevMsg.streaming = false;
+    prevMsg.thinkingStreaming = false;
+    if (prevMsg.content) {
+        prevMsg.content = stripLeadingNewlines(stripThinkingTagsFromText(prevMsg.content));
+    }
+    if (prevMsg.thinking) {
+        prevMsg.thinking = stripLeadingNewlines(prevMsg.thinking);
+    }
+}
+
+/** Apply initial message data (content, thinking, model, usage) to a message from a start/end event. */
+function applyStartMessageData(msg: ChatMessage, message: z.infer<typeof sseMessageSchema>): void {
+    if (message.content) {
+        const text = extractTextFromContent(message.content);
+        if (text) msg.content = text;
+    }
+    const thinking =
+        message.thinking ??
+        (message.content ? extractThinkingFromContent(message.content) : undefined);
+    if (thinking) {
+        msg.thinking = thinking;
+        msg.thinkingStreaming = true;
+    }
+    applyMessageMeta(msg, message);
+}
+
+/** Check if a message_start event is for a non-assistant message. */
+function isNonAssistantStart(e: MessageEvent): boolean {
     try {
         const data = safeJsonParse(e.data as string, sseMessageStartSchema);
-        if (data?.message?.role && data.message.role !== "assistant") {
-            // For user messages: add to the local list if not already present
-            // (handles the case where a message was sent externally, e.g., via the API,
-            // and the SSE stream delivers it before/without history loading it)
-            if (data.message.role === "user") {
-                const content =
-                    typeof data.message.content === "string"
-                        ? data.message.content
-                        : extractTextFromContent(data.message.content);
-                if (content) {
-                    // Check if we already have this user message (from history or local send)
-                    const alreadyExists = s.messages.some(
-                        (m) => m.role === "user" && m.content === content
-                    );
-                    if (!alreadyExists) {
-                        s.messages.push({
-                            id: `user-sse-${String(Date.now())}`,
-                            role: "user",
-                            content,
-                            timestamp: Date.now(),
-                        });
-                    }
-                }
-            }
-            // Skip toolResult/system messages — they're not displayed as chat bubbles
-            return;
-        }
+        if (data?.message?.role && data.message.role !== "assistant") return true;
     } catch {
         // If we can't parse, treat as assistant (best effort)
     }
+    return false;
+}
 
-    // Finalize any previous streaming message before starting a new one
-    // (e.g., a tool-execution message that wasn't closed by message_end)
-    if (s.streamingMessageId) {
-        const prevMsg = s.messages.find((m) => m.id === s.streamingMessageId);
-        if (prevMsg) {
-            prevMsg.streaming = false;
-            prevMsg.thinkingStreaming = false;
-            if (prevMsg.content) {
-                prevMsg.content = stripLeadingNewlines(
-                    stripThinkingTagsFromText(prevMsg.content)
-                );
-            }
-            if (prevMsg.thinking) {
-                prevMsg.thinking = stripLeadingNewlines(prevMsg.thinking);
-            }
-        }
-    }
-
-    // Begin a new assistant message
+/** Create a new streaming assistant message and return its ID. */
+function createAssistantMessage(s: ChatState): string {
     s.generating = true;
     const id = `assistant-${String(Date.now())}`;
     setStreamingMessageId(s, id, "message_start assistant");
@@ -645,39 +658,114 @@ export function handleMessageStart(s: ChatState, e: MessageEvent): void {
         streaming: true,
     });
     console.log(`[chat-lifecycle] handleMessageStart: AFTER push assistant msg id=${id}, messages.length=${String(s.messages.length)}, msg.streaming=${String(s.messages[s.messages.length - 1]?.streaming)}`);
+    return id;
+}
 
-    // message_start data includes { type: "message_start", message: AgentMessage }
+/** Handle the 'message_start' SSE event. */
+export function handleMessageStart(s: ChatState, e: MessageEvent): void {
+    console.log(`[chat] SSE 'message_start': lastEventId=${e.lastEventId}`);
+
+    // Handle non-assistant messages (user, toolResult, etc.)
+    if (isNonAssistantStart(e)) {
+        try {
+            const data = safeJsonParse(e.data as string, sseMessageStartSchema);
+            if (data) handleNonAssistantStart(s, data);
+        } catch {
+            // ignore
+        }
+        return;
+    }
+
+    // Finalize any previous streaming message before starting a new one
+    finalizePrevStreamingMessage(s);
+
+    // Begin a new assistant message
+    const id = createAssistantMessage(s);
+
     // The partial message might already have content, thinking, or model info
     try {
         const data = safeJsonParse(e.data as string, sseMessageStartSchema);
         if (data?.message) {
             const msg = s.messages.find((m) => m.id === id);
-            if (msg) {
-                // Extract text content
-                if (data.message.content) {
-                    const text = extractTextFromContent(data.message.content);
-                    if (text) msg.content = text;
-                }
-                // Extract thinking — either from the serialized "thinking" field or from content array
-                const thinking =
-                    data.message.thinking ??
-                    (data.message.content
-                        ? extractThinkingFromContent(data.message.content)
-                        : undefined);
-                if (thinking) {
-                    msg.thinking = thinking;
-                    msg.thinkingStreaming = true;
-                }
-                // Extract model info
-                if (data.message.model) msg.model = data.message.model;
-                if (data.message.provider) msg.modelProvider = data.message.provider;
-                // Extract usage info
-                if (data.message.usage) msg.usage = data.message.usage;
-            }
+            if (msg) applyStartMessageData(msg, data.message);
         }
     } catch {
         // ignore parse errors
     }
+}
+
+// --- Message update sub-handlers (per event type) ---
+
+function applyTextDelta(s: ChatState, msg: ChatMessage, data: z.infer<typeof sseMessageUpdateSchema>): void {
+    if (!data.delta) return;
+    // Log first content arrival for streaming diagnostics
+    if (!msg.content || msg.content.length < 10) {
+        console.log(`[chat-lifecycle] handleMessageUpdate: first text_delta for msg id=${msg.id}, contentLen=${String(msg.content.length)}, deltaLen=${String(data.delta.length)}`);
+    }
+    // Some providers send thinking as text with <thinking>...</thinking> tags
+    appendTextDelta(s, msg, data.delta);
+}
+
+function applyThinkingStart(msg: ChatMessage): void {
+    msg.thinkingStreaming = true;
+    msg.thinking = "";
+}
+
+function applyThinkingDelta(msg: ChatMessage, data: z.infer<typeof sseMessageUpdateSchema>): void {
+    if (!data.delta) return;
+    msg.thinking = (msg.thinking ?? "") + data.delta;
+    msg.thinkingStreaming = true;
+}
+
+/** Check if any tool calls have output (used to skip content extraction). */
+function hasToolOutput(msg: ChatMessage): boolean {
+    return !!msg.toolCalls && msg.toolCalls.length > 0 && msg.toolCalls.some((tc) => tc.output);
+}
+
+/** Extract missing model/usage info from a final message. */
+function applyMessageMeta(msg: ChatMessage, message: z.infer<typeof sseMessageSchema>): void {
+    if (message.model) msg.model = message.model;
+    if (message.provider) msg.modelProvider = message.provider;
+    if (message.usage) msg.usage = message.usage;
+}
+
+function applyDone(msg: ChatMessage, data: z.infer<typeof sseMessageUpdateSchema>): void {
+    if (data.message?.content && !msg.content && !hasToolOutput(msg)) {
+        msg.content = stripLeadingNewlines(extractTextFromContent(data.message.content));
+    } else if (msg.content) {
+        msg.content = stripLeadingNewlines(stripThinkingTagsFromText(msg.content));
+    }
+    if (data.message) applyMessageMeta(msg, data.message);
+}
+
+function applyError(s: ChatState, msg: ChatMessage, data: z.infer<typeof sseMessageUpdateSchema>): void {
+    console.error(`[chat-lifecycle] handleMessageUpdate ERROR event:`, JSON.stringify(data).substring(0, 1000));
+    msg.streaming = false;
+    msg.thinkingStreaming = false;
+    msg.isError = true;
+    const errorMsg =
+        data.error?.errorMessage ||
+        data.message?.errorMessage ||
+        data.reason ||
+        "An error occurred";
+    msg.errorMessage = errorMsg;
+    msg.content = errorMsg;
+    setStreamingMessageId(s, null, "message_update error");
+    s.generating = false;
+}
+
+/** Dispatch a message_update event by type to the appropriate sub-handler. */
+function dispatchMessageUpdate(s: ChatState, msg: ChatMessage, data: z.infer<typeof sseMessageUpdateSchema>): void {
+    const handlers: Partial<Record<string, () => void>> = {
+        text_delta: () => { applyTextDelta(s, msg, data); },
+        thinking_start: () => { applyThinkingStart(msg); },
+        thinking_delta: () => { applyThinkingDelta(msg, data); },
+        thinking_end: () => { msg.thinkingStreaming = false; },
+        done: () => { applyDone(msg, data); },
+        error: () => { applyError(s, msg, data); },
+    };
+    const handler = handlers[data.type ?? ""];
+    if (handler) handler();
 }
 
 /** Handle the 'message_update' SSE event. */
@@ -692,88 +780,60 @@ export function handleMessageUpdate(s: ChatState, e: MessageEvent): void {
         const data = safeJsonParse(e.data as string, sseMessageUpdateSchema);
 
         if (!data) {
-            // If not valid JSON or doesn't match schema, treat as raw text
             if (e.data && typeof e.data === "string") {
                 msg.content += e.data;
             }
             return;
         }
 
-        // Log first content arrival and every 50th delta for streaming diagnostics
-        if (data.type === "text_delta" && data.delta) {
-            if (!msg.content || msg.content.length < 10) {
-                console.log(`[chat-lifecycle] handleMessageUpdate: first text_delta for msg id=${msg.id}, contentLen=${String(msg.content.length)}, deltaLen=${String(data.delta.length)}`);
-            }
-        }
-
-        // pi's AssistantMessageEvent format:
-        // { type: "text_delta", delta: "chunk", contentIndex: 0, partial: ... }
-        // { type: "text_end", content: "full text", contentIndex: 0, partial: ... }
-        // { type: "thinking_delta", delta: "chunk", contentIndex: 0, partial: ... }
-        // { type: "toolcall_start", contentIndex: 0, partial: ... }
-        // { type: "toolcall_delta", delta: "chunk", contentIndex: 0, partial: ... }
-        // { type: "toolcall_end", toolCall: {...}, contentIndex: 0, partial: ... }
-        // { type: "done", reason: "stop", message: AssistantMessage }
-        // { type: "error", reason: "error", error: AssistantMessage }
-
-        if (data.type === "text_delta" && data.delta) {
-            // Check if the delta starts with or is inside a <thinking> tag
-            // Some providers send thinking as text with <thinking>...</thinking> tags
-            appendTextDelta(s, msg, data.delta);
-        } else if (data.type === "text_end" && data.content) {
-            // text_end includes the full content for this content block — we can ignore
-            // since we've been accumulating deltas, or use it to verify
-        } else if (data.type === "thinking_start") {
-            // Model is starting to think/reason
-            msg.thinkingStreaming = true;
-            msg.thinking = "";
-        } else if (data.type === "thinking_delta" && data.delta) {
-            // Accumulate thinking content
-            msg.thinking = (msg.thinking ?? "") + data.delta;
-            msg.thinkingStreaming = true;
-        } else if (data.type === "thinking_end") {
-            // Thinking complete
-            msg.thinkingStreaming = false;
-        } else if (data.type === "done") {
-            // Message is complete — extract final text and model info from the message if needed
-            // But skip content if tool calls have output (to avoid duplicate bubble)
-            const hasToolOutput =
-                msg.toolCalls &&
-                msg.toolCalls.length > 0 &&
-                msg.toolCalls.some((tc) => tc.output);
-            if (data.message?.content && !msg.content && !hasToolOutput) {
-                msg.content = stripLeadingNewlines(
-                    extractTextFromContent(data.message.content)
-                );
-            } else if (msg.content) {
-                msg.content = stripLeadingNewlines(stripThinkingTagsFromText(msg.content));
-            }
-            // Extract model info from the final message
-            if (data.message?.model) msg.model = data.message.model;
-            if (data.message?.provider) msg.modelProvider = data.message.provider;
-            // Extract usage info from the final message
-            if (data.message?.usage)
-                msg.usage = data.message.usage;
-        } else if (data.type === "error") {
-            // Pi error event (timeout, rate limit, rejection, etc.)
-            console.error(`[chat-lifecycle] handleMessageUpdate ERROR event:`, JSON.stringify(data).substring(0, 1000));
-            msg.streaming = false;
-            msg.thinkingStreaming = false;
-            msg.isError = true;
-            // Try multiple error message sources
-            const errorMsg =
-                data.error?.errorMessage ||
-                data.message?.errorMessage ||
-                data.reason ||
-                "An error occurred";
-            msg.errorMessage = errorMsg;
-            msg.content = errorMsg;
-            // End the message since it errored
-            setStreamingMessageId(s, null, "message_update error");
-            s.generating = false;
-        }
+        dispatchMessageUpdate(s, msg, data);
     } catch {
         // Catch unexpected errors in message processing
+    }
+}
+
+/** Apply error state from a message_end event if the final message indicates an error. */
+function applyEndErrorState(msg: ChatMessage, message: z.infer<typeof sseMessageSchema>): void {
+    if (message.stopReason !== "error" && !message.errorMessage) return;
+    console.error(`[chat-lifecycle] handleMessageEnd: error detected in final message, stopReason=${String(message.stopReason)}, errorMessage=${String(message.errorMessage)}`);
+    if (!msg.isError) msg.isError = true;
+    if (!msg.errorMessage) msg.errorMessage = message.errorMessage || "An error occurred";
+    if (!msg.content) msg.content = message.errorMessage || "An error occurred";
+}
+
+/** Apply final message data (content, thinking, model, usage) from a message_end event. */
+function applyEndMessageData(msg: ChatMessage, message: z.infer<typeof sseMessageSchema>): void {
+    applyEndErrorState(msg, message);
+    if (!msg.content && message.content && !hasToolOutput(msg)) {
+        msg.content = extractTextFromContent(message.content);
+    }
+    if (!msg.thinking) {
+        msg.thinking =
+            message.thinking ??
+            (message.content ? extractThinkingFromContent(message.content) : undefined);
+    }
+    if (!msg.model || !msg.modelProvider || !msg.usage) {
+        applyMessageMeta(msg, message);
+    }
+}
+
+/** Clean up content on a finalized message (strip leading newlines and thinking tags). */
+function finalizeMessageContent(msg: ChatMessage): void {
+    if (msg.content) {
+        msg.content = stripLeadingNewlines(stripThinkingTagsFromText(msg.content));
+    }
+    if (msg.thinking) {
+        msg.thinking = stripLeadingNewlines(msg.thinking);
+    }
+}
+
+/** Check if a message_end event is for a non-assistant message (should be skipped). */
+function isNonAssistantEnd(e: MessageEvent): boolean {
+    try {
+        const data = safeJsonParse(e.data as string, sseMessageEndSchema);
+        return !!(data?.message?.role && data.message.role !== "assistant");
+    } catch {
+        return false;
     }
 }
 
@@ -783,75 +843,21 @@ export function handleMessageEnd(s: ChatState, e: MessageEvent): void {
     // Recovery is no longer relevant — the message is finalized
     s.recoveryTurnGeneration = null;
 
-    // message_end data includes { type: "message_end", message: AgentMessage }
     // pi emits message_end for ALL message types, including toolResult —
-    // we must skip non-assistant messages to avoid treating tool output as chat text
-    try {
-        const data = safeJsonParse(e.data as string, sseMessageEndSchema);
-        if (data?.message?.role && data.message.role !== "assistant") {
-            // This is a toolResult or other non-assistant message — skip it
-            return;
-        }
-    } catch {
-        // If we can't parse, proceed with best-effort handling
-    }
+    // skip non-assistant messages to avoid treating tool output as chat text
+    if (isNonAssistantEnd(e)) return;
 
-    // Try to extract final text and thinking from the complete message
     const msg = getStreamingMsg(s);
     if (msg) {
         msg.streaming = false;
         msg.thinkingStreaming = false;
-        // If we never got any content from deltas, try to extract from the final message
-        // But skip content extraction if the message has tool calls with output —
-        // the tool output is shown in the dropdown, and including it as message content
-        // would create a duplicate bubble
-        const hasToolOutput =
-            msg.toolCalls &&
-            msg.toolCalls.length > 0 &&
-            msg.toolCalls.some((tc) => tc.output);
         try {
             const data = safeJsonParse(e.data as string, sseMessageEndSchema);
-            if (data?.message) {
-                // Check if the final message indicates an error (stopReason "error" or errorMessage)
-                if (data.message.stopReason === "error" || data.message.errorMessage) {
-                    console.error(`[chat-lifecycle] handleMessageEnd: error detected in final message, stopReason=${String(data.message.stopReason)}, errorMessage=${String(data.message.errorMessage)}`);
-                    if (!msg.isError) {
-                        msg.isError = true;
-                    }
-                    if (!msg.errorMessage) {
-                        msg.errorMessage = data.message.errorMessage || "An error occurred";
-                    }
-                    if (!msg.content) {
-                        msg.content = data.message.errorMessage || "An error occurred";
-                    }
-                }
-                if (!msg.content && data.message.content && !hasToolOutput) {
-                    msg.content = extractTextFromContent(data.message.content);
-                }
-                if (!msg.thinking) {
-                    msg.thinking =
-                        data.message.thinking ??
-                        (data.message.content
-                            ? extractThinkingFromContent(data.message.content)
-                            : undefined);
-                }
-                // Extract model info
-                if (!msg.model && data.message.model) msg.model = data.message.model;
-                if (!msg.modelProvider && data.message.provider)
-                    msg.modelProvider = data.message.provider;
-                // Extract usage info
-                if (!msg.usage && data.message.usage) msg.usage = data.message.usage;
-            }
+            if (data?.message) applyEndMessageData(msg, data.message);
         } catch {
             // ignore
         }
-        // Clean up leading newlines and any remaining thinking tags from model response
-        if (msg.content) {
-            msg.content = stripLeadingNewlines(stripThinkingTagsFromText(msg.content));
-        }
-        if (msg.thinking) {
-            msg.thinking = stripLeadingNewlines(msg.thinking);
-        }
+        finalizeMessageContent(msg);
     }
     setStreamingMessageId(s, null, "message_end");
     // Don't set generating = false here — in multi-turn agent loops,
@@ -915,6 +921,25 @@ export function handleToolExecutionUpdate(s: ChatState, e: MessageEvent): void {
     }
 }
 
+type ToolCall = NonNullable<ChatMessage["toolCalls"]>[number];
+
+/** Finalize a completed tool call with status, error, and output. */
+function finalizeToolCall(tool: ToolCall | undefined, data: z.infer<typeof sseToolExecutionEndSchema>): void {
+    if (!tool) return;
+    tool.status = data.isError ? "error" : "completed";
+    tool.isError = data.isError;
+    if (data.result && !tool.output) {
+        tool.output = data.result;
+    }
+}
+
+/** Check if all tool calls on a message are completed. */
+function allToolCallsDone(msg: ChatMessage): boolean {
+    return !!msg.toolCalls && msg.toolCalls.every(
+        (t) => t.status === "completed" || t.status === "error"
+    );
+}
+
 /** Handle the 'tool_execution_end' SSE event. */
 export function handleToolExecutionEnd(s: ChatState, e: MessageEvent): void {
     const msg = getStreamingMsg(s);
@@ -923,25 +948,12 @@ export function handleToolExecutionEnd(s: ChatState, e: MessageEvent): void {
     try {
         const data = safeJsonParse(e.data as string, sseToolExecutionEndSchema);
         if (!data) return;
-        // Find the running tool with this name and mark it completed
         const tool = msg.toolCalls.find(
             (t) => t.toolName === data.toolName && t.status === "running"
         );
-        if (tool) {
-            tool.status = data.isError ? "error" : "completed";
-            tool.isError = data.isError;
-            // Capture final result output if we didn't get it from tool_execution_update events
-            // (e.g., for fast tools that complete without streaming partial results)
-            if (data.result && !tool.output) {
-                tool.output = data.result;
-            }
-        }
+        finalizeToolCall(tool, data);
 
-        // If all tool calls are done, finalize the message
-        const allDone = msg.toolCalls.every(
-            (t) => t.status === "completed" || t.status === "error"
-        );
-        if (allDone) {
+        if (allToolCallsDone(msg)) {
             msg.streaming = false;
             msg.thinkingStreaming = false;
             setStreamingMessageId(s, null, "tool_execution_end all done");
@@ -951,27 +963,26 @@ export function handleToolExecutionEnd(s: ChatState, e: MessageEvent): void {
     }
 }
 
+/** Find an assistant message for attaching sources (streaming first, then last assistant). */
+function findAssistantMessageForSources(s: ChatState): ChatMessage | undefined {
+    const streaming = getStreamingMsg(s);
+    if (streaming?.role === "assistant") return streaming;
+    // Fallback: find the last assistant message (sources flushed after message_end)
+    for (let i = s.messages.length - 1; i >= 0; i--) {
+        if (s.messages[i].role === "assistant") return s.messages[i];
+    }
+    return undefined;
+}
+
 /** Handle the 'fetched_sources' SSE event. */
 export function handleFetchedSources(s: ChatState, e: MessageEvent): void {
     try {
         const data = safeJsonParse(e.data as string, sseFetchedSourcesSchema);
-        if (!data) return;
-        const sources = data.sources;
-        if (!sources || sources.length === 0) return;
-        // Try the streaming message first (sources flushed before message_end)
-        let msg = getStreamingMsg(s);
-        if (!msg || msg.role !== "assistant") {
-            // Fallback: find the last assistant message (sources flushed after message_end)
-            for (let i = s.messages.length - 1; i >= 0; i--) {
-                if (s.messages[i].role === "assistant") {
-                    msg = s.messages[i];
-                    break;
-                }
-            }
-        }
-        if (msg && msg.role === "assistant") {
+        if (!data?.sources?.length) return;
+        const msg = findAssistantMessageForSources(s);
+        if (msg) {
             // Accumulate sources across multiple flushes within one turn
-            msg.fetchedSources = [...(msg.fetchedSources ?? []), ...sources];
+            msg.fetchedSources = [...(msg.fetchedSources ?? []), ...data.sources];
         }
     } catch {
         // ignore parse errors

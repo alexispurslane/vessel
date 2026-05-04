@@ -119,39 +119,84 @@
     }
 
     // --- Keyboard handlers ---
-    function handleEditKeydown(index: number, e: KeyboardEvent) {
-        const completions = editCompletions[index] ?? [];
-        const show = editShowCompletions[index] ?? false;
-        const sel = editSelectedIndex[index] ?? -1;
+    interface AutocompleteKeydownOptions {
+        key: string;
+        show: boolean;
+        completions: string[];
+        selectedIndex: number;
+        setSelectedIndex: (idx: number) => void;
+        setValue: (value: string) => void;
+        setShow: (show: boolean) => void;
+        onConfirm: () => void;
+        onCancel: () => void;
+        preventDefault: () => void;
+        /** Whether to close the completions dropdown on Tab-select; defaults to true */
+        closeOnTab?: boolean;
+    }
 
-        if (e.key === "ArrowDown" && show && completions.length > 0) {
-            e.preventDefault();
-            editSelectedIndex[index] = (sel + 1) % completions.length;
-        } else if (e.key === "ArrowUp" && show && completions.length > 0) {
-            e.preventDefault();
-            editSelectedIndex[index] = sel <= 0 ? completions.length - 1 : sel - 1;
-        } else if (e.key === "Tab" && show && sel >= 0) {
-            e.preventDefault();
-            editValues[index] = completions[sel];
-            editSelectedIndex[index] = -1;
-            editShowCompletions[index] = false;
-        } else if (e.key === "Enter") {
-            e.preventDefault();
-            if (show && sel >= 0) {
-                editValues[index] = completions[sel];
-                editSelectedIndex[index] = -1;
-                editShowCompletions[index] = false;
-            } else {
-                confirmEdit(index);
-            }
-        } else if (e.key === "Escape") {
-            if (show) {
-                editShowCompletions[index] = false;
-                editSelectedIndex[index] = -1;
-            } else {
-                cancelEdit(index);
-            }
-        }
+    function handleAutocompleteKeydown(opts: AutocompleteKeydownOptions) {
+        const handlers: Partial<Record<string, () => void>> = {
+            ArrowDown: () => {
+                if (opts.show && opts.completions.length > 0) {
+                    opts.preventDefault();
+                    opts.setSelectedIndex((opts.selectedIndex + 1) % opts.completions.length);
+                }
+            },
+            ArrowUp: () => {
+                if (opts.show && opts.completions.length > 0) {
+                    opts.preventDefault();
+                    opts.setSelectedIndex(
+                        opts.selectedIndex <= 0
+                            ? opts.completions.length - 1
+                            : opts.selectedIndex - 1
+                    );
+                }
+            },
+            Tab: () => {
+                if (opts.show && opts.selectedIndex >= 0) {
+                    opts.preventDefault();
+                    opts.setValue(opts.completions[opts.selectedIndex]);
+                    opts.setSelectedIndex(-1);
+                    if (opts.closeOnTab !== false) opts.setShow(false);
+                }
+            },
+            Enter: () => {
+                opts.preventDefault();
+                if (opts.show && opts.selectedIndex >= 0) {
+                    opts.setValue(opts.completions[opts.selectedIndex]);
+                    opts.setSelectedIndex(-1);
+                    opts.setShow(false);
+                } else {
+                    opts.onConfirm();
+                }
+            },
+            Escape: () => {
+                if (opts.show) {
+                    opts.setShow(false);
+                    opts.setSelectedIndex(-1);
+                } else {
+                    opts.onCancel();
+                }
+            },
+        };
+
+        const handler = handlers[opts.key];
+        if (handler) handler();
+    }
+
+    function handleEditKeydown(index: number, e: KeyboardEvent) {
+        handleAutocompleteKeydown({
+            key: e.key,
+            show: editShowCompletions[index] ?? false,
+            completions: editCompletions[index] ?? [],
+            selectedIndex: editSelectedIndex[index] ?? -1,
+            setSelectedIndex: (idx) => (editSelectedIndex[index] = idx),
+            setValue: (val) => (editValues[index] = val),
+            setShow: (val) => (editShowCompletions[index] = val),
+            onConfirm: () => confirmEdit(index),
+            onCancel: () => cancelEdit(index),
+            preventDefault: () => e.preventDefault(),
+        });
     }
 
     async function handleEditInput(index: number, value: string) {
@@ -163,34 +208,19 @@
     }
 
     function handleAddKeydown(e: KeyboardEvent) {
-        if (e.key === "ArrowDown" && showAddCompletions && addCompletions.length > 0) {
-            e.preventDefault();
-            addSelectedIndex = (addSelectedIndex + 1) % addCompletions.length;
-        } else if (e.key === "ArrowUp" && showAddCompletions && addCompletions.length > 0) {
-            e.preventDefault();
-            addSelectedIndex =
-                addSelectedIndex <= 0 ? addCompletions.length - 1 : addSelectedIndex - 1;
-        } else if (e.key === "Tab" && showAddCompletions && addSelectedIndex >= 0) {
-            e.preventDefault();
-            newValue = addCompletions[addSelectedIndex];
-            addSelectedIndex = -1;
-        } else if (e.key === "Enter") {
-            e.preventDefault();
-            if (showAddCompletions && addSelectedIndex >= 0) {
-                newValue = addCompletions[addSelectedIndex];
-                addSelectedIndex = -1;
-                showAddCompletions = false;
-            } else {
-                confirmAdd();
-            }
-        } else if (e.key === "Escape") {
-            if (showAddCompletions) {
-                showAddCompletions = false;
-                addSelectedIndex = -1;
-            } else {
-                cancelAdd();
-            }
-        }
+        handleAutocompleteKeydown({
+            key: e.key,
+            show: showAddCompletions,
+            completions: addCompletions,
+            selectedIndex: addSelectedIndex,
+            setSelectedIndex: (idx) => (addSelectedIndex = idx),
+            setValue: (val) => (newValue = val),
+            setShow: (val) => (showAddCompletions = val),
+            onConfirm: confirmAdd,
+            onCancel: cancelAdd,
+            preventDefault: () => e.preventDefault(),
+            closeOnTab: false,
+        });
     }
 
     async function handleAddInput(value: string) {

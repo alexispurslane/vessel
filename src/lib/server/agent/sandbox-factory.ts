@@ -222,6 +222,63 @@ function getJsonSetting<T>(key: string, fallback: T): T {
 }
 
 /**
+ * Resolve a per-conversation override, falling back to the global default.
+ *
+ * Returns the conversation value if it is non-null and non-undefined;
+ * otherwise returns the global value.
+ */
+function resolveOverride<T>(conversationValue: T | null | undefined, globalValue: T): T {
+    return conversationValue !== null && conversationValue !== undefined
+        ? conversationValue
+        : globalValue;
+}
+
+/**
+ * Resolve the `allowNet` policy from conversation overrides and global settings.
+ *
+ * Per-conversation `allowNet` takes precedence; if not set, the global raw
+ * string value ("true"/"false"/undefined) is used.  When network access is
+ * granted and `allowAllDomains` is true the result is `true`; otherwise a
+ * specific domain list is returned (or `true` if no domains are configured,
+ * which effectively means allow-all as a fallback).
+ */
+function resolveAllowNet(
+    conversationAllowNet: boolean | null | undefined,
+    conversationAllowedNetDomains: string[] | null | undefined,
+    globalAllowNetRaw: string | undefined,
+    globalAllowedNetDomains: string[],
+    allowAllDomains: boolean,
+): boolean | string[] {
+    let result: boolean | string[];
+
+    // Per-conversation override takes precedence
+    if (conversationAllowNet !== null && conversationAllowNet !== undefined) {
+        if (!conversationAllowNet) {
+            result = false;
+        } else {
+            result = allowAllDomains
+                ? true
+                : resolveNetDomains(conversationAllowedNetDomains ?? globalAllowedNetDomains);
+        }
+    } else if (globalAllowNetRaw === "true") {
+        result = allowAllDomains
+            ? true
+            : resolveNetDomains(globalAllowedNetDomains);
+    } else {
+        result = false;
+    }
+
+    return result;
+}
+
+/**
+ * Return the net domain list, or `true` (allow-all) as a fallback when empty.
+ */
+function resolveNetDomains(domains: string[]): boolean | string[] {
+    return domains.length > 0 ? domains : true;
+}
+
+/**
  * Load the full sandbox policy from DB settings, with optional per-conversation overrides.
  *
  * Per-conversation settings (from `conversation_settings` table) override global settings.
@@ -261,44 +318,22 @@ export function loadSandboxPolicyFromDb(conversationSettings?: ConversationSetti
     );
 
     // Merge per-conversation overrides with global defaults
-    const extraReadPaths = conversationSettings?.extraReadPaths ?? globalExtraReadPaths;
-    const extraWritePaths = conversationSettings?.extraWritePaths ?? globalExtraWritePaths;
-    const allowEnv = conversationSettings?.allowEnv ?? globalAllowEnv;
-    const secrets = conversationSettings?.secrets ?? globalSecrets;
+    const extraReadPaths = resolveOverride(conversationSettings?.extraReadPaths, globalExtraReadPaths);
+    const extraWritePaths = resolveOverride(conversationSettings?.extraWritePaths, globalExtraWritePaths);
+    const allowEnv = resolveOverride(conversationSettings?.allowEnv, globalAllowEnv);
+    const secrets = resolveOverride(conversationSettings?.secrets, globalSecrets);
 
     // Determine allowAllDomains: conversation override takes precedence
-    const allowAllDomains = conversationSettings?.allowAllDomains ?? globalAllowAllDomains;
+    const allowAllDomains = resolveOverride(conversationSettings?.allowAllDomains, globalAllowAllDomains);
 
     // Determine allowNet: conversation override takes precedence
-    let allowNet: boolean | string[];
-    if (conversationSettings?.allowNet !== null && conversationSettings?.allowNet !== undefined) {
-        // Per-conversation override is set
-        if (!conversationSettings.allowNet) {
-            allowNet = false;
-        } else {
-            // allowNet is true-ish
-            if (allowAllDomains) {
-                // All domains allowed
-                allowNet = true;
-            } else {
-                // Use specific domains: conversation domains if set, else global domains
-                const domains = conversationSettings.allowedNetDomains ?? globalAllowedNetDomains;
-                allowNet = domains.length > 0 ? domains : true;
-            }
-        }
-    } else {
-        // Use global allowNet
-        if (globalAllowNetRaw === "true") {
-            if (allowAllDomains) {
-                // All domains allowed
-                allowNet = true;
-            } else {
-                allowNet = globalAllowedNetDomains.length > 0 ? globalAllowedNetDomains : true;
-            }
-        } else {
-            allowNet = false;
-        }
-    }
+    const allowNet = resolveAllowNet(
+        conversationSettings?.allowNet,
+        conversationSettings?.allowedNetDomains,
+        globalAllowNetRaw,
+        globalAllowedNetDomains,
+        allowAllDomains,
+    );
 
     return {
         extraReadPaths,

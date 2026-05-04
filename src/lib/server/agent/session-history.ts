@@ -6,7 +6,7 @@
  * getting user messages for forking.
  */
 
-import type { AgentSession as PiAgentSession } from "@mariozechner/pi-coding-agent";
+import type { AgentSession as PiAgentSession, SessionEntry } from "@mariozechner/pi-coding-agent";
 import type { ActiveSession } from "./types.js";
 import type { FetchedSource, HistoryMessage, HistoryResult } from "$lib/types.js";
 
@@ -249,6 +249,49 @@ function handleMessage(
     }
 }
 
+/** Process a single branch entry and update the history builder state. */
+function processBranchEntry(state: HistoryBuilderState, entry: SessionEntry): void {
+    if (entry.type === "model_change") {
+        handleModelChange(state, entry);
+        return;
+    }
+
+    if (entry.type === "custom" && (entry as { customType: string }).customType === "fetched_sources") {
+        handleFetchedSources(state, entry);
+        return;
+    }
+
+    if (entry.type !== "message") return;
+
+    const msg = (entry as unknown as { message: Record<string, unknown> | null | undefined }).message;
+    if (!msg || typeof msg !== "object") return;
+
+    const role = msg.role as string;
+
+    if (role === "toolResult") {
+        handleToolResult(state, msg);
+        return;
+    }
+
+    if (role !== "user" && role !== "assistant") return;
+
+    handleMessage(state, entry, msg, role);
+}
+
+/** Resolve model info from builder state or fallback row data. */
+function resolveModel(
+    state: HistoryBuilderState,
+    row: { model_provider: string | null; model_id: string | null }
+): { provider: string; modelId: string } | null {
+    if (state.lastModelProvider && state.lastModelId) {
+        return { provider: state.lastModelProvider, modelId: state.lastModelId };
+    }
+    if (row.model_provider && row.model_id) {
+        return { provider: row.model_provider, modelId: row.model_id };
+    }
+    return null;
+}
+
 /**
  * Build message history from an in-memory session, respecting the
  * current branch/leaf position. Uses the SessionManager's getBranch() method
@@ -262,7 +305,6 @@ export function buildHistoryFromSession(
     row: { session_file_path: string; model_provider: string | null; model_id: string | null }
 ): HistoryResult {
     const sessionManager = activeSession.agentSession.sessionManager;
-    // getBranch() returns entries from root to current leaf
     const branchEntries = sessionManager.getBranch();
 
     const state: HistoryBuilderState = {
@@ -275,47 +317,140 @@ export function buildHistoryFromSession(
     };
 
     for (const entry of branchEntries) {
-        // Track model changes
-        if (entry.type === "model_change") {
-            handleModelChange(state, entry);
-            continue;
-        }
-
-        // Accumulate fetched_sources custom entries — they stay in context forever
-        if (entry.type === "custom" && (entry as { customType: string }).customType === "fetched_sources") {
-            handleFetchedSources(state, entry);
-            continue;
-        }
-
-        if (entry.type !== "message") continue;
-
-        const msg = (entry as unknown as { message: Record<string, unknown> | null | undefined }).message;
-        if (!msg || typeof msg !== "object") continue;
-
-        const role = msg.role as string;
-
-        // Handle tool result messages — attach output to the matching pending tool call
-        if (role === "toolResult") {
-            handleToolResult(state, msg);
-            continue;
-        }
-
-        if (role !== "user" && role !== "assistant") continue;
-
-        handleMessage(state, entry, msg, role);
+        processBranchEntry(state, entry);
     }
 
-    const model =
-        state.lastModelProvider && state.lastModelId
-            ? { provider: state.lastModelProvider, modelId: state.lastModelId }
-            : row.model_provider && row.model_id
-                ? { provider: row.model_provider, modelId: row.model_id }
-                : null;
-
-    return { messages: state.messages, model };
+    return { messages: state.messages, model: resolveModel(state, row) };
 }
 
 // --- Session tree ---
+
+/** Extract content info from a message for tree node display. */
+function processContentBlock(
+    block: Record<string, unknown>,
+    result: { fullContent: string; hasToolCall: boolean; hasThinking: boolean }
+): void {
+    if (block.type === "text" && typeof block.text === "string") {
+        result.fullContent += block.text;
+    } else if (block.type === "thinking") {
+        result.hasThinking = true;
+    } else if (block.type === "toolCall") {
+        result.hasToolCall = true;
+    }
+}
+
+/** Extract content info from a message for tree node display. */
+function extractTreeContent(msg: Record<string, unknown>): {
+    fullContent: string;
+    hasToolCall: boolean;
+    hasThinking: boolean;
+} {
+    const result = { fullContent: "", hasToolCall: false, hasThinking: false };
+
+    if (Array.isArray(msg.content)) {
+        for (const block of msg.content as Record<string, unknown>[]) {
+            processContentBlock(block, result);
+        }
+    } else if (typeof msg.content === "string") {
+        result.fullContent = msg.content;
+    }
+
+    return result;
+}
+
+/** Whether a tree node with the given role and content should be skipped. */
+function shouldSkipTreeNode(
+    role: string | undefined,
+    fullContent: string,
+    hasToolCall: boolean,
+    hasThinking: boolean
+): boolean {
+    if (role === "assistant" && (hasToolCall || (hasThinking && !fullContent.trim()))) return true;
+    if (role === "user" && !fullContent.trim()) return true;
+    return false;
+}
+
+/** Build a preview string from full content (first ~40 chars or first line). */
+function buildPreview(fullContent: string): string {
+    const firstLine = fullContent.split('\n')[0] || '';
+    return firstLine.length > 40 ? firstLine.slice(0, 40) + '…' : firstLine;
+}
+
+/**
+ * Build a session tree node from an entry, or return null if it should be skipped.
+ * Filters by entry type, role, content, and tool-call/thinking presence.
+ */
+function buildNodeFromEntry(
+    entry: SessionEntry,
+    activeBranchIds: Set<string>,
+    leafId: string | null
+): SessionTreeNodeData | null {
+    if (entry.type !== "message") return null;
+
+    const msg = (entry as unknown as { message: Record<string, unknown> | null | undefined }).message;
+    if (!msg || typeof msg !== "object") return null;
+
+    const role = msg.role as string | undefined;
+    if (role !== "user" && role !== "assistant") return null;
+
+    const { fullContent: rawContent, hasToolCall, hasThinking } = extractTreeContent(msg);
+    if (shouldSkipTreeNode(role, rawContent, hasToolCall, hasThinking)) return null;
+
+    const fullContent = rawContent.replace(/^\n+/, "");
+    return {
+        id: entry.id,
+        parentId: entry.parentId,
+        type: entry.type,
+        role,
+        preview: buildPreview(fullContent),
+        fullContent,
+        onActiveBranch: activeBranchIds.has(entry.id),
+        isCurrentLeaf: entry.id === leafId,
+    };
+}
+
+/** Walk up the entry tree from a hidden parent to find the closest visible ancestor. */
+function findClosestVisibleAncestor(
+    startId: string,
+    visibleById: Set<string>,
+    fullEntryById: Map<string, SessionEntry>
+): string | null {
+    let ancestorId: string | null = startId;
+    while (ancestorId) {
+        if (visibleById.has(ancestorId)) return ancestorId;
+        const ancestor = fullEntryById.get(ancestorId);
+        ancestorId = ancestor?.parentId ?? null;
+    }
+    return null;
+}
+
+/**
+ * Repair parent IDs on visible nodes: since we filtered out non-message nodes,
+ * some parentIds point to hidden entries. Walk up the entry tree to find
+ * the closest visible ancestor.
+ */
+function repairParentIds(
+    nodes: SessionTreeNodeData[],
+    relations: SessionTreeRelation[],
+    allEntries: SessionEntry[]
+): void {
+    const visibleById = new Set(nodes.map((n) => n.id));
+    const fullEntryById = new Map(allEntries.map((e) => [e.id, e]));
+
+    for (let i = 0; i < nodes.length; i++) {
+        const rawParentId = nodes[i].parentId;
+        if (rawParentId === null) continue;
+        if (visibleById.has(rawParentId)) continue;
+
+        const repaired = findClosestVisibleAncestor(rawParentId, visibleById, fullEntryById);
+        nodes[i].parentId = repaired;
+
+        const rel = relations.find((r) => r.childId === nodes[i].id);
+        if (rel) {
+            rel.parentId = repaired ?? "";
+        }
+    }
+}
 
 /**
  * Get the full session tree as nodes and relations for DAG visualization.
@@ -333,7 +468,6 @@ export function getSessionTreeFromAgent(
     const allEntries = sessionManager.getEntries();
     const leafId = sessionManager.getLeafId();
 
-    // Get the set of entry IDs on the current active branch
     const activeBranch = sessionManager.getBranch();
     const activeBranchIds = new Set(activeBranch.map((e) => e.id));
 
@@ -341,101 +475,19 @@ export function getSessionTreeFromAgent(
     const relations: SessionTreeRelation[] = [];
 
     for (const entry of allEntries) {
-        // Only include message entries — skip model_change, compaction, branch_summary, etc.
-        if (entry.type !== "message") continue;
-
-        const msg = (entry as unknown as { message: Record<string, unknown> | null | undefined }).message;
-        if (!msg || typeof msg !== "object") continue;
-
-        const role = msg.role as string | undefined;
-
-        // Only include user and assistant messages — skip toolResult, etc.
-        if (role !== "user" && role !== "assistant") continue;
-
-        // Extract text content and check for tool calls / thinking blocks
-        let fullContent = "";
-        let hasToolCall = false;
-        let hasThinking = false;
-
-        if (Array.isArray(msg.content)) {
-            for (const block of msg.content as Record<string, unknown>[]) {
-                if (block.type === "text" && typeof block.text === "string") {
-                    fullContent += block.text;
-                } else if (block.type === "thinking") {
-                    hasThinking = true;
-                } else if (block.type === "toolCall") {
-                    hasToolCall = true;
-                }
-            }
-        } else if (typeof msg.content === "string") {
-            fullContent = msg.content;
-        }
-
-        // Skip assistant messages that contain tool calls or thinking blocks.
-        // In the DAG we only show complete conversation turns
-        // (user messages and final assistant text responses),
-        // not intermediate reasoning/tool-use steps.
-        if (role === "assistant" && (hasToolCall || (hasThinking && !fullContent.trim()))) continue;
-
-        // Skip empty user messages that pi sometimes adds
-        if (role === "user" && !fullContent.trim()) continue;
-
-        fullContent = fullContent.replace(/^\n+/, "");
-        // Preview: first ~40 characters or first line, whichever is shorter
-        const firstLine = fullContent.split('\n')[0] || '';
-        const preview = firstLine.length > 40 ? firstLine.slice(0, 40) + '…' : firstLine;
-
-        nodes.push({
-            id: entry.id,
-            parentId: entry.parentId,
-            type: entry.type,
-            role,
-            preview,
-            fullContent,
-            onActiveBranch: activeBranchIds.has(entry.id),
-            isCurrentLeaf: entry.id === leafId,
-        });
-
-        // Add a relation for the parent-child link
-        if (entry.parentId !== null) {
+        const node = buildNodeFromEntry(entry, activeBranchIds, leafId);
+        if (!node) continue;
+        nodes.push(node);
+        if (node.parentId !== null) {
             relations.push({
-                id: `rel-${entry.id}`,
-                parentId: entry.parentId,
-                childId: entry.id,
+                id: `rel-${node.id}`,
+                parentId: node.parentId,
+                childId: node.id,
             });
         }
     }
 
-    // Repair parent IDs: since we filtered out non-message nodes, some visible nodes'
-    // parentIds point to hidden entries (model_change, compaction, etc.). Walk up
-    // through the full entry tree to find the closest visible ancestor.
-    const visibleById = new Set(nodes.map((n) => n.id));
-    const fullEntryById = new Map(allEntries.map((e) => [e.id, e]));
-
-    for (let i = 0; i < nodes.length; i++) {
-        const rawParentId = nodes[i].parentId;
-        if (rawParentId === null) continue;
-        // If the parent is visible, no repair needed
-        if (visibleById.has(rawParentId)) continue;
-        // Walk up through hidden entries until we find a visible ancestor (or nothing)
-        let ancestorId: string | null = rawParentId;
-        let repaired: string | null = null;
-        while (ancestorId) {
-            if (visibleById.has(ancestorId)) {
-                repaired = ancestorId;
-                break;
-            }
-            const ancestor = fullEntryById.get(ancestorId);
-            ancestorId = ancestor?.parentId ?? null;
-        }
-        nodes[i].parentId = repaired;
-
-        // Also repair the corresponding relation if it exists
-        const rel = relations.find((r) => r.childId === nodes[i].id);
-        if (rel) {
-            rel.parentId = repaired ?? "";
-        }
-    }
+    repairParentIds(nodes, relations, allEntries);
 
     return Promise.resolve({ nodes, relations, leafId });
 }
@@ -506,6 +558,59 @@ export async function navigateMessage(
  *
  * @param agentSession - The PiAgentSession to edit (caller passes it in)
  */
+type SessionManager = PiAgentSession["sessionManager"];
+
+/** Replay a single entry onto the session manager (append to current branch). */
+function replayEntry(
+    sessionManager: SessionManager,
+    entry: SessionEntry
+): void {
+    switch (entry.type) {
+        case "message":
+            // The SessionMessageEntry.message type is AgentMessage which includes custom
+            // message types (BranchSummaryMessage, etc.) via declaration merging, but
+            // appendMessage only accepts the base LLM-compatible message types. Since
+            // we're replaying entries from the current branch, all message entries
+            // will be standard LLM-compatible messages — safe to cast.
+            sessionManager.appendMessage(entry.message as Parameters<typeof sessionManager.appendMessage>[0]);
+            break;
+        case "model_change":
+            sessionManager.appendModelChange(entry.provider, entry.modelId);
+            break;
+        case "thinking_level_change":
+            sessionManager.appendThinkingLevelChange(entry.thinkingLevel);
+            break;
+        case "custom":
+            sessionManager.appendCustomEntry(entry.customType, entry.data);
+            break;
+        case "custom_message":
+            sessionManager.appendCustomMessageEntry(
+                entry.customType,
+                entry.content,
+                entry.display,
+                entry.details
+            );
+            break;
+        case "label": {
+            // entry.label is string | undefined on LabelEntry; appendLabelChange
+            // accepts string | undefined per the .d.ts, but TS narrowing through
+            // the SessionEntry union doesn't cooperate. Force-cast to satisfy TS.
+            const labelEntry = entry as { targetId: string; label: string | undefined };
+            sessionManager.appendLabelChange(labelEntry.targetId, labelEntry.label);
+            break;
+        }
+        case "session_info":
+            if (entry.name) {
+                sessionManager.appendSessionInfo(entry.name);
+            }
+            break;
+        // Skip compaction/branch_summary entries — they belong to the old branch
+        // and will be regenerated if needed.
+        default:
+            break;
+    }
+}
+
 export async function editAssistantMessage(
     agentSession: PiAgentSession,
     targetEntryId: string,
@@ -521,30 +626,22 @@ export async function editAssistantMessage(
     }
 
     // 1. Collect entries on the current branch after the target assistant message.
-    //    These are the entries we'll need to replay after appending the edited version.
     const currentBranch = sessionManager.getBranch();
     const targetIdx = currentBranch.findIndex((e) => e.id === targetEntryId);
     if (targetIdx === -1) {
         throw new Error(`Entry ${targetEntryId} is not on the current branch`);
     }
-    // Entries after the target (chronological order, root → leaf)
     const entriesToReplay = currentBranch.slice(targetIdx + 1);
 
     // 2. Navigate back to before the target assistant message.
-    //    For assistant messages, navigateTree with the parent moves the leaf
-    //    to the parent, returning the parent's editorText (user msg text)
-    //    which we don't need here.
     const navigateResult = await agentSession.navigateTree(targetEntryId, {
         summarize: false,
     });
-
     if (navigateResult.cancelled) {
         return { cancelled: true };
     }
 
     // 3. Append the edited assistant message as a child of the new leaf.
-    //    We reconstruct an AssistantMessage with the new text content,
-    //    preserving the original model/provider/usage metadata.
     const originalMsg = targetEntry.message;
     const editedAssistantMessage = {
         ...originalMsg,
@@ -553,53 +650,8 @@ export async function editAssistantMessage(
     sessionManager.appendMessage(editedAssistantMessage);
 
     // 4. Replay all subsequent entries from the abandoned branch.
-    //    Each entry is appended as a child of the current leaf, so the
-    //    tree structure is preserved on the new branch.
     for (const entry of entriesToReplay) {
-        switch (entry.type) {
-            case "message":
-                // The SessionMessageEntry.message type is AgentMessage which includes custom
-                // message types (BranchSummaryMessage, etc.) via declaration merging, but
-                // appendMessage only accepts the base LLM-compatible message types. Since
-                // we're replaying entries from the current branch, all message entries
-                // will be standard LLM-compatible messages — safe to cast.
-                sessionManager.appendMessage(entry.message as Parameters<typeof sessionManager.appendMessage>[0]);
-                break;
-            case "model_change":
-                sessionManager.appendModelChange(entry.provider, entry.modelId);
-                break;
-            case "thinking_level_change":
-                sessionManager.appendThinkingLevelChange(entry.thinkingLevel);
-                break;
-            case "custom":
-                sessionManager.appendCustomEntry(entry.customType, entry.data);
-                break;
-            case "custom_message":
-                sessionManager.appendCustomMessageEntry(
-                    entry.customType,
-                    entry.content,
-                    entry.display,
-                    entry.details
-                );
-                break;
-            case "label": {
-                // entry.label is string | undefined on LabelEntry; appendLabelChange
-                // accepts string | undefined per the .d.ts, but TS narrowing through
-                // the SessionEntry union doesn't cooperate. Force-cast to satisfy TS.
-                const labelEntry = entry as { targetId: string; label: string | undefined };
-                sessionManager.appendLabelChange(labelEntry.targetId, labelEntry.label);
-                break;
-            }
-            case "session_info":
-                if (entry.name) {
-                    sessionManager.appendSessionInfo(entry.name);
-                }
-                break;
-            // Skip compaction/branch_summary entries — they belong to the old branch
-            // and will be regenerated if needed.
-            default:
-                break;
-        }
+        replayEntry(sessionManager, entry);
     }
 
     // 5. Update agent state to reflect the new session context

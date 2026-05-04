@@ -68,6 +68,93 @@ export function extractToolOutput(partialResult: unknown): string | undefined {
 }
 
 /**
+ * Extract and categorize content blocks from an AssistantMessage content array.
+ * Returns text parts, thinking parts, and tool call stubs.
+ */
+function extractContentBlocks(content: Record<string, unknown>[]): {
+    textParts: string[];
+    thinkingParts: string[];
+    toolCalls: unknown[];
+} {
+    const textParts: string[] = [];
+    const thinkingParts: string[] = [];
+    const toolCalls: unknown[] = [];
+
+    for (const block of content) {
+        if (block.type === "text" && typeof block.text === "string") {
+            textParts.push(block.text);
+        } else if (block.type === "thinking" && typeof block.thinking === "string") {
+            thinkingParts.push(block.thinking);
+        } else if (block.type === "toolCall") {
+            toolCalls.push({
+                id: block.id,
+                name: block.name,
+                arguments: block.arguments,
+            });
+        }
+    }
+
+    return { textParts, thinkingParts, toolCalls };
+}
+
+/**
+ * Serialize an AssistantMessage for SSE transmission.
+ * Extracts text content from the content array and strips non-serializable fields.
+ */
+function serializeAssistantMessage(msg: Record<string, unknown>): unknown {
+    const content = msg.content as Record<string, unknown>[] | undefined;
+    if (!Array.isArray(content)) {
+        return msg;
+    }
+
+    const { textParts, thinkingParts, toolCalls } = extractContentBlocks(content);
+
+    return {
+        role: msg.role,
+        content: textParts.length > 0 ? textParts : undefined,
+        thinking: thinkingParts.length > 0 ? thinkingParts.join("") : undefined,
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+        provider: msg.provider,
+        model: msg.model,
+        stopReason: msg.stopReason,
+        errorMessage: msg.errorMessage,
+        usage: msg.usage ?? undefined,
+        timestamp: msg.timestamp,
+    };
+}
+
+/**
+ * Serialize a UserMessage for SSE transmission.
+ */
+function serializeUserMessage(msg: Record<string, unknown>): unknown {
+    return {
+        role: msg.role,
+        content: msg.content,
+        timestamp: msg.timestamp,
+    };
+}
+
+/**
+ * Serialize a pi AgentMessage for SSE transmission.
+ * Extracts text content from the content array and strips non-serializable fields.
+ */
+export function serializeMessage(message: unknown): unknown {
+    if (!message || typeof message !== "object") return message;
+    const msg = message as Record<string, unknown>;
+
+    if (msg.role === "assistant") {
+        return serializeAssistantMessage(msg);
+    }
+
+    if (msg.role === "user") {
+        return serializeUserMessage(msg);
+    }
+
+    // For other message types, return as-is
+    return msg;
+}
+
+/**
  * Serialize the streaming assistant message for a stream_recovery event.
  *
  * Unlike `serializeMessage`, this enriches tool calls with execution results
@@ -140,125 +227,105 @@ export function serializeStreamingMessageForRecovery(
     };
 }
 
+// --- Event formatting ---
+
 /**
- * Serialize a pi AgentMessage for SSE transmission.
- * Extracts text content from the content array and strips non-serializable fields.
+ * Format a message_update event for SSE.
+ * Handles error logging and serialization for error-type assistant message events.
  */
-export function serializeMessage(message: unknown): unknown {
-    if (!message || typeof message !== "object") return message;
-    const msg = message as Record<string, unknown>;
-
-    // For AssistantMessage, extract text and thinking from content array
-    if (msg.role === "assistant" && Array.isArray(msg.content)) {
-        const textParts: string[] = [];
-        const thinkingParts: string[] = [];
-        const toolCalls: unknown[] = [];
-
-        for (const block of msg.content as Record<string, unknown>[]) {
-            if (block.type === "text" && typeof block.text === "string") {
-                textParts.push(block.text);
-            } else if (block.type === "thinking" && typeof block.thinking === "string") {
-                thinkingParts.push(block.thinking);
-            } else if (block.type === "toolCall") {
-                toolCalls.push({
-                    id: block.id,
-                    name: block.name,
-                    arguments: block.arguments,
-                });
-            }
-        }
-
-        return {
-            role: msg.role,
-            content: textParts.length > 0 ? textParts : undefined,
-            thinking: thinkingParts.length > 0 ? thinkingParts.join("") : undefined,
-            toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-            provider: msg.provider,
-            model: msg.model,
-            stopReason: msg.stopReason,
-            errorMessage: msg.errorMessage,
-            usage: msg.usage ?? undefined,
-            timestamp: msg.timestamp,
-        };
+function formatMessageUpdate(event: PiAgentSessionEvent): unknown {
+    const e = event as Record<string, unknown>;
+    const amo = e.assistantMessageEvent as Record<string, unknown>;
+    if (amo.type === "error") {
+        const errObj = amo.error as Record<string, unknown> | undefined;
+        const errKeys = errObj ? Object.keys(errObj) : [];
+        const errMsg = typeof errObj?.errorMessage === "string" ? errObj.errorMessage : undefined;
+        log.error("session-events", `message_update ERROR event: type=${amo.type as string}, reason=${String(amo.reason)}, error keys=${JSON.stringify(errKeys)}, errorMessage=${JSON.stringify(errMsg)}`);
+        // Serialize the AssistantMessage in the error field so the client
+        // can extract errorMessage and other fields properly
+        return { ...amo, error: serializeMessage(amo.error) };
     }
-
-    // For UserMessage, content is a string or array
-    if (msg.role === "user") {
-        return {
-            role: msg.role,
-            content: msg.content,
-            timestamp: msg.timestamp,
-        };
-    }
-
-    // For other message types, return as-is
-    return msg;
+    return e.assistantMessageEvent;
 }
 
-// --- Event formatting ---
+/**
+ * Format a message_start or message_end event for SSE.
+ */
+function formatMessageStartOrEnd(event: PiAgentSessionEvent): unknown {
+    const e = event as Record<string, unknown>;
+    return { type: event.type, message: serializeMessage(e.message) };
+}
+
+/**
+ * Format an agent_start or agent_end event for SSE.
+ * Serializes the messages array if present.
+ */
+function formatAgentStartOrEnd(event: PiAgentSessionEvent): unknown {
+    const messages = "messages" in event && Array.isArray(event.messages)
+        ? event.messages.map(serializeMessage)
+        : undefined;
+    return { type: event.type, messages };
+}
+
+/**
+ * Format a turn_start or turn_end event for SSE.
+ * Includes optional message and toolResults fields.
+ */
+function formatTurnStartOrEnd(event: PiAgentSessionEvent): unknown {
+    return {
+        type: event.type,
+        message: "message" in event ? serializeMessage(event.message) : undefined,
+        toolResults: "toolResults" in event ? event.toolResults : undefined,
+    };
+}
+
+/**
+ * Format a tool_execution_start, tool_execution_update, or tool_execution_end event for SSE.
+ */
+function formatToolExecution(event: PiAgentSessionEvent): unknown {
+    switch (event.type) {
+        case "tool_execution_start":
+            return { type: event.type, toolName: event.toolName, toolCallId: event.toolCallId, args: event.args as Record<string, unknown> };
+        case "tool_execution_update":
+            return { type: event.type, toolName: event.toolName, toolCallId: event.toolCallId, args: event.args as Record<string, unknown>, output: extractToolOutput(event.partialResult) };
+        case "tool_execution_end":
+            return { type: event.type, toolName: event.toolName, toolCallId: event.toolCallId, isError: event.isError, result: extractToolOutput(event.result) };
+        default:
+            return event;
+    }
+}
+
+/**
+ * Format a queue_update event for SSE.
+ */
+function formatQueueUpdate(event: PiAgentSessionEvent): unknown {
+    const e = event as Record<string, unknown>;
+    return { type: event.type, steering: e.steering, followUp: e.followUp };
+}
+
+type EventFormatter = (event: PiAgentSessionEvent) => unknown;
+
+const EVENT_FORMATTERS: Record<string, EventFormatter> = {
+    message_update: formatMessageUpdate,
+    message_start: formatMessageStartOrEnd,
+    message_end: formatMessageStartOrEnd,
+    agent_start: formatAgentStartOrEnd,
+    agent_end: formatAgentStartOrEnd,
+    turn_start: formatTurnStartOrEnd,
+    turn_end: formatTurnStartOrEnd,
+    tool_execution_start: formatToolExecution,
+    tool_execution_update: formatToolExecution,
+    tool_execution_end: formatToolExecution,
+    queue_update: formatQueueUpdate,
+};
 
 /**
  * Format pi AgentSessionEvent into a serializable payload for SSE.
  * Maps pi's generic event types to our chat-specific format.
  */
 export function formatEventPayload(event: PiAgentSessionEvent): unknown {
-    switch (event.type) {
-        case "message_update": {
-            const ame = event.assistantMessageEvent as Record<string, unknown>;
-            if (ame.type === "error") {
-                const errObj = ame.error as Record<string, unknown> | undefined;
-                const errKeys = errObj ? Object.keys(errObj) : [];
-                const errMsg = typeof errObj?.errorMessage === "string" ? errObj.errorMessage : undefined;
-                log.error("session-events", `message_update ERROR event: type=${ame.type as string}, reason=${String(ame.reason)}, error keys=${JSON.stringify(errKeys)}, errorMessage=${JSON.stringify(errMsg)}`);
-                // Serialize the AssistantMessage in the error field so the client
-                // can extract errorMessage and other fields properly
-                return { ...ame, error: serializeMessage(ame.error) };
-            }
-            return event.assistantMessageEvent;
-        }
-        case "message_start":
-            return { type: event.type, message: serializeMessage(event.message) };
-        case "message_end":
-            return { type: event.type, message: serializeMessage(event.message) };
-        case "agent_start":
-        case "agent_end":
-            return {
-                type: event.type,
-                messages:
-                    "messages" in event
-                        ? Array.isArray(event.messages)
-                            ? event.messages.map(serializeMessage)
-                            : undefined
-                        : undefined,
-            };
-        case "turn_start":
-        case "turn_end":
-            return {
-                type: event.type,
-                message: "message" in event ? serializeMessage(event.message) : undefined,
-                toolResults: "toolResults" in event ? event.toolResults : undefined,
-            };
-        case "tool_execution_start":
-            return { type: event.type, toolName: event.toolName, toolCallId: event.toolCallId, args: event.args as Record<string, unknown> };
-        case "tool_execution_update":
-            return {
-                type: event.type,
-                toolName: event.toolName,
-                toolCallId: event.toolCallId,
-                args: event.args as Record<string, unknown>,
-                output: extractToolOutput(event.partialResult),
-            };
-        case "tool_execution_end":
-            return {
-                type: event.type,
-                toolName: event.toolName,
-                toolCallId: event.toolCallId,
-                isError: event.isError,
-                result: extractToolOutput(event.result),
-            };
-        case "queue_update":
-            return { type: event.type, steering: event.steering, followUp: event.followUp };
-        default:
-            return event;
+    if (Object.hasOwn(EVENT_FORMATTERS, event.type)) {
+        return EVENT_FORMATTERS[event.type](event);
     }
+    return event;
 }

@@ -2,144 +2,119 @@ import type { Handle } from "@sveltejs/kit";
 import { validateSessionToken, SESSION_COOKIE_NAME, sessionCookie } from "$lib/server/auth/index.js";
 import { parse } from "cookie";
 
-// Legacy cookie name from before the TalkAI → Vessel rename.
-// Kept temporarily so existing sessions survive the rename.
+// Legacy cookie name kept temporarily so existing sessions survive the TalkAI → Vessel rename.
 const LEGACY_SESSION_COOKIE_NAME = "talkai_session";
 
-// --- Rate limiting (unauthenticated only) ---
-interface RateLimitEntry {
-    count: number;
-    resetAt: number;
+// --- Helpers ---
+
+const AUTH_PATHS = ["/api/auth/", "/login", "/setup"];
+const STATIC_EXTENSIONS = [".css", ".js", ".woff2"];
+
+function isAuthRoute(pathname: string): boolean {
+    return AUTH_PATHS.some((p) => pathname.startsWith(p) || pathname === p);
 }
 
-const rateLimitStore = new Map<string, RateLimitEntry>();
+function isStaticAsset(pathname: string): boolean {
+    return pathname.startsWith("/_app/") || STATIC_EXTENSIONS.some((ext) => pathname.endsWith(ext));
+}
 
-// Periodic cleanup of stale entries every 5 minutes
+function jsonError(error: string, status: number): Response {
+    return new Response(JSON.stringify({ error }), {
+        status,
+        headers: { "Content-Type": "application/json" },
+    });
+}
+
+function redirect(to: string): Response {
+    return new Response(null, { status: 302, headers: { Location: to } });
+}
+
+// --- Rate limiting (unauthenticated only) ---
+
+const rateLimits = new Map<string, { count: number; resetAt: number }>();
+
 setInterval(() => {
     const now = Date.now();
-    for (const [key, entry] of rateLimitStore) {
-        if (now >= entry.resetAt) {
-            rateLimitStore.delete(key);
-        }
+    for (const [key, entry] of rateLimits) {
+        if (now >= entry.resetAt) rateLimits.delete(key);
     }
 }, 5 * 60 * 1000);
 
-function checkRateLimit(
-    ip: string,
-    maxRequests: number,
-    windowMs: number
-): { allowed: boolean; retryAfterMs: number } {
+const RATE_LIMIT_CONFIGS = {
+    auth: { max: 10, windowMs: 60_000 },   // 10 req/min on login/auth
+    general: { max: 60, windowMs: 60_000 }, // 60 req/min elsewhere
+} as const;
+
+function rateLimitResponse(ip: string, max: number, windowMs: number): Response | null {
     const now = Date.now();
-    let entry = rateLimitStore.get(ip);
+    let entry = rateLimits.get(ip);
 
     if (!entry || now >= entry.resetAt) {
         entry = { count: 0, resetAt: now + windowMs };
-        rateLimitStore.set(ip, entry);
+        rateLimits.set(ip, entry);
     }
 
     entry.count++;
 
-    if (entry.count > maxRequests && !import.meta.env.DEV) {
-        return { allowed: false, retryAfterMs: entry.resetAt - now };
+    if (entry.count > max && !import.meta.env.DEV) {
+        return new Response(JSON.stringify({ error: "Too many requests" }), {
+            status: 429,
+            headers: {
+                "Content-Type": "application/json",
+                "Retry-After": String(Math.ceil((entry.resetAt - now) / 1000)),
+            },
+        });
     }
-
-    return { allowed: true, retryAfterMs: 0 };
+    return null;
 }
 
-// Rate limit config: login/auth endpoints get stricter limits
-const LOGIN_RATE_LIMIT = { max: 10, windowMs: 60_000 };   // 10 req/min on login
-const GENERAL_RATE_LIMIT = { max: 60, windowMs: 60_000 }; // 60 req/min on other unauthenticated routes
+// --- Main hook ---
 
 export const handle: Handle = async ({ event, resolve }) => {
-    // Check session cookie (support both new and legacy names)
-    const cookieHeader = event.request.headers.get("cookie");
-    const cookies = cookieHeader ? parse(cookieHeader) : {};
-    let token = cookies[SESSION_COOKIE_NAME];
-    const hasLegacyCookie = !token && !!cookies[LEGACY_SESSION_COOKIE_NAME];
+    const { url } = event;
 
-    // Fall back to legacy cookie name if new one isn't present
-    if (!token) {
-        token = cookies[LEGACY_SESSION_COOKIE_NAME];
-    }
+    // 1. Resolve session
+    const cookies = parse(event.request.headers.get("cookie") ?? "");
+    const token = cookies[SESSION_COOKIE_NAME] ?? cookies[LEGACY_SESSION_COOKIE_NAME];
+    const hasLegacyCookie = !cookies[SESSION_COOKIE_NAME] && !!cookies[LEGACY_SESSION_COOKIE_NAME];
 
-    let authenticated = false;
-    let username: string | undefined;
     if (token) {
         const payload = await validateSessionToken(token);
         if (payload) {
-            authenticated = true;
-            username = payload.username;
-        }
-    }
-    event.locals.authenticated = authenticated;
-    event.locals.username = username;
-
-    // Rate limit unauthenticated users
-    if (!authenticated) {
-        const ip = event.getClientAddress();
-        const isAuthRoute =
-            event.url.pathname.startsWith("/api/auth/") ||
-            event.url.pathname === "/login";
-        const limit = isAuthRoute ? LOGIN_RATE_LIMIT : GENERAL_RATE_LIMIT;
-        const result = checkRateLimit(ip, limit.max, limit.windowMs);
-
-        if (!result.allowed) {
-            return new Response(JSON.stringify({ error: "Too many requests" }), {
-                status: 429,
-                headers: {
-                    "Content-Type": "application/json",
-                    "Retry-After": String(Math.ceil(result.retryAfterMs / 1000)),
-                },
-            });
+            event.locals.authenticated = true;
+            event.locals.username = payload.username;
         }
     }
 
-    const url = event.url;
-
-    // Allow auth routes through without authentication
-    const isAuthRoute =
-        url.pathname.startsWith("/api/auth/") ||
-        url.pathname === "/login" ||
-        url.pathname === "/setup";
-
-    if (isAuthRoute) {
-        return resolve(event);
+    if (!event.locals.authenticated) {
+        event.locals.authenticated = false;
     }
 
-    // Protect API routes
-    if (url.pathname.startsWith("/api/") && !event.locals.authenticated) {
-        return new Response(JSON.stringify({ error: "Unauthorized" }), {
-            status: 401,
-            headers: { "Content-Type": "application/json" },
-        });
+    // 2. Rate limit unauthenticated users
+    if (!event.locals.authenticated) {
+        const config = isAuthRoute(url.pathname) ? RATE_LIMIT_CONFIGS.auth : RATE_LIMIT_CONFIGS.general;
+        const blocked = rateLimitResponse(event.getClientAddress(), config.max, config.windowMs);
+        if (blocked) return blocked;
     }
 
-    // Protect page routes (redirect to login)
-    if (!url.pathname.startsWith("/api/") && !event.locals.authenticated) {
-        // Let static assets through
-        if (
-            url.pathname.startsWith("/_app/") ||
-            url.pathname.endsWith(".css") ||
-            url.pathname.endsWith(".js") ||
-            url.pathname.endsWith(".woff2")
-        ) {
-            return resolve(event);
-        }
+    // 3. Auth routes always pass through
+    if (isAuthRoute(url.pathname)) return resolve(event);
 
-        return new Response(null, {
-            status: 302,
-            headers: { Location: "/login" },
-        });
+    // 4. Protect routes
+    if (!event.locals.authenticated) {
+        if (url.pathname.startsWith("/api/")) return jsonError("Unauthorized", 401);
+        if (isStaticAsset(url.pathname)) return resolve(event);
+        return redirect("/login");
     }
 
+    // 5. Resolve and migrate legacy cookie
     const response = await resolve(event);
 
-    // Migrate legacy cookie to new name: set the new cookie and clear the old one
-    if (hasLegacyCookie && token && authenticated) {
+    if (hasLegacyCookie && token) {
         response.headers.append("set-cookie", sessionCookie(token));
         response.headers.append(
             "set-cookie",
-            `${LEGACY_SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=0`
+            `${LEGACY_SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=0`,
         );
     }
 
