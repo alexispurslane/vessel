@@ -237,6 +237,29 @@
         return String(n);
     }
 
+    /** Scroll to a message anchor in the URL hash (e.g. #msg-abc123) and clear the hash.
+     *  Called after messages are hydrated so the DOM elements exist. */
+    function scrollToHashMessage() {
+        const hash = window.location.hash;
+        if (!hash.startsWith("#msg-")) return;
+        requestAnimationFrame(() => {
+            const el = document.getElementById(hash.slice(1));
+            if (el) {
+                el.scrollIntoView({ behavior: "smooth", block: "center" });
+                el.classList.add("ring-2", "ring-ring", "ring-offset-2", "ring-offset-background");
+                setTimeout(() => {
+                    el.classList.remove(
+                        "ring-2",
+                        "ring-ring",
+                        "ring-offset-2",
+                        "ring-offset-background"
+                    );
+                }, 2000);
+            }
+            window.history.replaceState({}, "", window.location.pathname + window.location.search);
+        });
+    }
+
     // Whether we're waiting for the model to start responding
     // (generating is true but no assistant message has visible content yet,
     //  or we just sent/regenerated but the SSE stream hasn't started yet)
@@ -467,6 +490,9 @@
                     console.log(
                         `[chat-lifecycle] $effect: hydrated=true, chat.messages.length=${String(chat.messages.length)}`
                     );
+
+                    // Scroll to anchored message if hash is present (e.g. from search results)
+                    scrollToHashMessage();
 
                     // After connecting (which loads history), set model selector to last used model
                     if (chat.lastModel) {

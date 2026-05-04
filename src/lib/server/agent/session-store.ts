@@ -16,8 +16,9 @@
  * existing imports from other files continue to work unchanged.
  */
 
-import { mkdirSync, rmSync, existsSync } from "fs";
+import { mkdirSync } from "fs";
 import { resolve } from "path";
+import { safeDeleteFile, safeDeleteDir } from "../fs-utils.js";
 import { randomUUID } from "crypto";
 import { log } from "$lib/server/logger.js";
 import { safeJsonParse, stringArraySchema, recordSchema, tryJsonParse } from "$lib/utils.js";
@@ -41,7 +42,7 @@ import { createSessionSandbox, getSessionWorkDir, loadConversationSettingsFromDb
 import type { Model as PiModel, Api } from "@mariozechner/pi-ai";
 import { getDb } from "../db/index.js";
 import { getUsername, getPronouns } from "../auth/index.js";
-import type { ChatSSEEvent, ActiveSession, ConversationListItem, CustomModelDef } from "./types.js";
+import type { ChatSSEEvent, ActiveSession, CustomModelDef } from "./types.js";
 import type { ConversationSettings } from "$lib/types.js";
 import type { Sandbox } from "zerobox";
 import { getToolRegistry, getToolDefinitions, getBaseToolDefinitions, getResourceLoaderAdapter } from "./pi-adapter.js";
@@ -110,7 +111,13 @@ export {
     type McpServerStatus,
 } from "./session-tools.js";
 
-// Conversation CRUD and custom model management are defined inline below.
+// Conversation listing, search, and custom model management.
+// Listing and search are in conversation-queries.ts — re-exported here for backward compatibility.
+export {
+    listConversations,
+    searchConversations,
+    type ConversationSearchResult,
+} from "./conversation-queries.js";
 export type { CustomModelDef } from "./types.js";
 export type { ConversationListItem } from "./types.js";
 export type { ChatSSEEvent } from "./types.js";
@@ -213,86 +220,35 @@ export function createConversation(title?: string, modelId?: string): string {
 }
 
 /**
- * List all conversations from our DB (for sidebar).
- */
-export function listConversations(): ConversationListItem[] {
-    const db = getDb();
-    const rows = db
-        .prepare(
-            "SELECT id, title, tags, created_at, updated_at FROM conversations ORDER BY updated_at DESC"
-        )
-        .all() as {
-            id: string;
-            title: string;
-            tags: string;
-            created_at: string;
-            updated_at: string;
-        }[];
-
-    return rows.map((row) => ({
-        id: row.id,
-        title: row.title,
-        tags: safeJsonParse(row.tags, stringArraySchema) ?? [],
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-    }));
-}
-
-/**
  * Fully destroy a conversation: dispose in-memory session, delete the
  * pi session file, delete the workspace directory (if configured), and remove the DB row.
  * Only called when the user explicitly hits the trash icon.
  */
 export function destroyConversation(conversationId: string): void {
-    // 1. Dispose in-memory session if loaded (force: the user explicitly deleted the conversation)
+    // 1. Dispose in-memory session if loaded
     disposeSession(conversationId, { force: true });
 
-    // Load per-conversation settings before deleting DB rows
+    // 2. Load settings to check workspace deletion preference
     const convSettings = loadConversationSettingsFromDb(conversationId);
-    const deleteWorkspace = convSettings?.deleteWorkspaceWithConversation !== false; // default true
+    const deleteWorkspace = convSettings?.deleteWorkspaceWithConversation !== false;
 
-    // 2. Delete the pi session .jsonl file
+    // 3. Delete the pi session .jsonl file
     const db = getDb();
     const row = db
         .prepare("SELECT session_file_path FROM conversations WHERE id = ?")
         .get(conversationId) as { session_file_path: string } | undefined;
 
-    if (row?.session_file_path && existsSync(row.session_file_path)) {
-        try {
-            rmSync(row.session_file_path);
-            log.info("session-store", `Deleted pi session file: ${row.session_file_path}`);
-        } catch (err) {
-            log.error("session-store", `Failed to delete pi session file ${row.session_file_path}`, err);
-        }
-    }
+    if (row?.session_file_path) safeDeleteFile(row.session_file_path, "pi session file");
 
-    // 3. Delete the conversation's workspace directory (if setting allows)
+    // 4. Delete workspace and session directories (if setting allows)
     if (deleteWorkspace) {
-        const workspaceDir = getSessionWorkDir(conversationId);
-        if (existsSync(workspaceDir)) {
-            try {
-                rmSync(workspaceDir, { recursive: true });
-                log.info("session-store", `Deleted workspace directory: ${workspaceDir}`);
-            } catch (err) {
-                log.error("session-store", `Failed to delete workspace directory ${workspaceDir}`, err);
-            }
-        }
-
-        // Also clean up the parent session directory if it's now empty
-        const sessionDir = resolve(SESSIONS_DIR, conversationId);
-        if (existsSync(sessionDir)) {
-            try {
-                rmSync(sessionDir, { recursive: true });
-                log.info("session-store", `Deleted session directory: ${sessionDir}`);
-            } catch (err) {
-                log.error("session-store", `Failed to delete session directory ${sessionDir}`, err);
-            }
-        }
+        safeDeleteDir(getSessionWorkDir(conversationId), "workspace directory");
+        safeDeleteDir(resolve(SESSIONS_DIR, conversationId), "session directory");
     } else {
         log.info("session-store", `Keeping workspace for conversation ${conversationId} (deleteWorkspaceWithConversation = false)`);
     }
 
-    // 4. Delete the DB rows (conversation_settings is ON DELETE CASCADE)
+    // 5. Delete the DB rows (conversation_settings is ON DELETE CASCADE)
     db.prepare("DELETE FROM conversations WHERE id = ?").run(conversationId);
     log.info("session-store", `Destroyed conversation ${conversationId} (explicit user delete)`);
 }

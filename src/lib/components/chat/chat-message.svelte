@@ -271,7 +271,8 @@
     {#if msg.isError || msg.content || msg.streaming}
         <div class="group/msg w-full" bind:this={msgEl}>
             <div
-                class="rounded-2xl px-4 py-2.5 text-sm leading-relaxed {msg.isError
+                id="msg-{msg.id}"
+                class="rounded-2xl px-4 py-2.5 text-sm leading-relaxed transition-shadow duration-500 {msg.isError
                     ? 'bg-destructive/10 text-destructive border border-destructive/30 rounded-bl-sm'
                     : msg.role === 'user'
                       ? 'bg-primary text-primary-foreground rounded-br-sm'

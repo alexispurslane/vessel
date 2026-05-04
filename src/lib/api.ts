@@ -142,6 +142,23 @@ export async function deleteConversation(id: string): Promise<{ success: boolean
     });
 }
 
+// --- Search ---
+
+export interface ConversationSearchResult {
+    id: string;
+    title: string;
+    tags: string[];
+    updatedAt: string;
+    matchSource: "title" | "content" | "both";
+    snippets: Array<{ text: string; messageId: string | null }>;
+}
+
+export async function searchConversations(query: string, limit?: number): Promise<ConversationSearchResult[]> {
+    const params = new URLSearchParams({ q: query });
+    if (limit) params.set("limit", String(limit));
+    return apiFetch<ConversationSearchResult[]>(`/api/sessions/search?${params}`);
+}
+
 /**
  * Release the in-memory copy of a conversation's session on the server.
  * Does NOT delete any data on disk — the conversation can be rehydrated later.
