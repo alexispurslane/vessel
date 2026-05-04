@@ -21,8 +21,8 @@ export const GET = tryApi(() => {
  * Create a new conversation.
  * Only requires model_id — provider is resolved automatically.
  */
-export const POST = apiHandler(PostBody, ({ body }) => {
+export const POST = apiHandler(PostBody, async ({ body }) => {
     const { title, model_id } = body;
-    const id = createConversation(title, model_id);
+    const id = await createConversation(title, model_id);
     return json({ id }, { status: 201 });
 });

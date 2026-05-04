@@ -100,6 +100,9 @@ export default ts.config(
             ".svelte-kit/",
             // shadcn-svelte UI components are vendored — don't lint them
             "src/lib/components/ui/**",
+            // Config files — not worth linting
+            "eslint.config.js",
+            "svelte.config.js",
         ],
     },
 );

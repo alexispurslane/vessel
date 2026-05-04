@@ -7,7 +7,7 @@
  */
 
 import { resolve } from "path";
-import { writeFileSync, mkdirSync } from "fs";
+import { writeFileSync, mkdirSync } from "node:fs";
 import {
     AuthStorage,
     ModelRegistry,

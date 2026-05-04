@@ -21,13 +21,13 @@
         "@fontsource-variable/merriweather": "^5.2.6",
         "@internationalized/date": "^3.12.1",
         "@lucide/svelte": "^1.8.0",
-        "@sveltejs/adapter-auto": "^7.0.1",
         "@sveltejs/kit": "^2.57.0",
         "@sveltejs/vite-plugin-svelte": "^7.0.0",
         "@tailwindcss/vite": "^4.2.2",
         "@types/bcrypt": "^6.0.0",
         "@types/bcryptjs": "^2.4.6",
         "@types/better-sqlite3": "^7.6.13",
+        "@types/bun": "^1.3.13",
         "@types/cookie": "^0.6.0",
         "bits-ui": "^2.18.0",
         "clsx": "^2.1.1",
@@ -41,6 +41,7 @@
         "shadcn-svelte": "^1.2.7",
         "simple-git-hooks": "^2.13.1",
         "svelte": "^5.55.2",
+        "svelte-adapter-bun": "^1.0.1",
         "svelte-check": "^4.4.6",
         "svelte-eslint-parser": "^1.6.0",
         "svelte-sonner": "^1.1.0",
@@ -53,7 +54,7 @@
         "vite": "^8.0.7"
     },
     "simple-git-hooks": {
-        "pre-push": "npx eslint --no-cache ."
+        "pre-push": "bunx eslint --no-cache ."
     },
     "dependencies": {
         "@mariozechner/pi-agent-core": "^0.67.68",

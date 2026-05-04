@@ -14,13 +14,13 @@ const QuerySchema = z.object({
     limit: z.coerce.number().int().min(1).max(50).optional().default(20),
 });
 
-export const GET = tryApi(({ url }) => {
+export const GET = tryApi(async ({ url }) => {
     const parsed = QuerySchema.safeParse(Object.fromEntries(url.searchParams));
     if (!parsed.success) {
         return json({ error: "Invalid query parameters" }, { status: 400 });
     }
 
     const { q, limit } = parsed.data;
-    const results = searchConversations(q, limit);
+    const results = await searchConversations(q, limit);
     return json(results);
 });

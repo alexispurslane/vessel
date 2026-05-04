@@ -492,7 +492,6 @@
     $effect(() => {
         const count = displayMessages.length;
         const lastMsg = displayMessages[count - 1];
-        if (!lastMsg) return;
         // Track all reactive content so we re-scroll as deltas arrive
         const _content = lastMsg.content;
         const _thinking = lastMsg.thinking;

@@ -1,7 +1,6 @@
 import { tryApi, badRequest, notFound } from "$lib/server/api-errors.js";
 import { getSessionWorkDir } from "$lib/server/agent/sandbox-factory.js";
 import { sanitizeAndResolvePath } from "$lib/server/fs-security.js";
-import { existsSync, statSync, createReadStream } from "fs";
 import { basename, extname } from "path";
 
 /**
@@ -45,14 +44,12 @@ const MIME_TYPES: Record<string, string> = {
  * Returns the file contents as a binary stream with appropriate
  * Content-Disposition header to trigger a browser download.
  *
- * The workspace directory on disk IS the sandbox filesystem — zerobox
- * enforces access at the OS level, but the actual file bytes are the same
- * whether read through the sandbox or directly. So we read directly from
- * disk for simplicity and correctness with binary files.
+ * Uses Bun.file() for efficient zero-copy file serving — Bun
+ * automatically handles streaming and backpressure.
  *
  * Security: the resolved path is validated to stay within the workspace.
  */
-export const GET = tryApi(({ params, url }) => {
+export const GET = tryApi(async ({ params, url }) => {
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const id = params.id!;
     const workDir = getSessionWorkDir(id);
@@ -70,12 +67,13 @@ export const GET = tryApi(({ params, url }) => {
         return badRequest("Invalid file path");
     }
 
-    if (!existsSync(filePath)) {
+    const file = Bun.file(filePath);
+    if (!(await file.exists())) {
         return notFound("File not found");
     }
 
-    const stat = statSync(filePath);
-    if (!stat.isFile()) {
+    const stat = await file.stat();
+    if (stat.isDirectory()) {
         return badRequest("Path is not a file");
     }
 
@@ -83,38 +81,18 @@ export const GET = tryApi(({ params, url }) => {
     const ext = extname(filePath).toLowerCase();
     const mimeType = MIME_TYPES[ext] || "application/octet-stream";
 
-    // Stream the file directly from disk
-    const fileStream = createReadStream(filePath);
-
     // Use RFC 5987 to encode the filename, avoiding header injection
     // from double-quote characters in filenames. The filename* parameter
     // with UTF-8 encoding is supported by all modern browsers.
     const encodedFileName = encodeURIComponent(fileName);
 
-    return new Response(
-        new ReadableStream({
-            start(controller) {
-                fileStream.on("data", (chunk: Buffer) => {
-                    controller.enqueue(chunk);
-                });
-                fileStream.on("end", () => {
-                    controller.close();
-                });
-                fileStream.on("error", (err) => {
-                    console.error(`[workspace/download] Error streaming file:`, err);
-                    controller.error(err);
-                });
-            },
-            cancel() {
-                fileStream.destroy();
-            },
-        }),
-        {
-            status: 200,
-            headers: {
-                "Content-Type": mimeType,
-                "Content-Disposition": `attachment; filename="${encodedFileName}"; filename*=UTF-8''${encodedFileName}`,
-            },
-        }
-    );
+    // Bun.file() creates an efficient Response that streams the file
+    // with zero-copy semantics — no need for createReadStream
+    return new Response(file, {
+        status: 200,
+        headers: {
+            "Content-Type": mimeType,
+            "Content-Disposition": `attachment; filename="${encodedFileName}"; filename*=UTF-8''${encodedFileName}`,
+        },
+    });
 });

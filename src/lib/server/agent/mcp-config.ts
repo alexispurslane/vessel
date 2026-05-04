@@ -10,7 +10,7 @@
  */
 
 import { resolve } from "path";
-import { writeFileSync, mkdirSync, existsSync, renameSync } from "fs";
+import { mkdir, rename } from "node:fs/promises";
 import { z } from "zod";
 import { getDb } from "../db/index.js";
 import { tryJsonParse } from "$lib/utils.js";
@@ -97,23 +97,23 @@ export function listMcpServers(): McpServerInfo[] {
 /**
  * Add or update a single MCP server.
  */
-export function upsertMcpServer(name: string, config: McpServerEntry): void {
+export async function upsertMcpServer(name: string, config: McpServerEntry): Promise<void> {
     const servers = getMcpServersFromDb();
     servers[name] = config;
     setMcpServersToDb(servers);
-    writeMcpConfigFile(servers);
+    await writeMcpConfigFile(servers);
 }
 
 /**
  * Delete a single MCP server by name.
  * Returns true if the server existed and was deleted.
  */
-export function deleteMcpServer(name: string): boolean {
+export async function deleteMcpServer(name: string): Promise<boolean> {
     const servers = getMcpServersFromDb();
     if (!(name in servers)) return false;
     Reflect.deleteProperty(servers, name);
     setMcpServersToDb(servers);
-    writeMcpConfigFile(servers);
+    await writeMcpConfigFile(servers);
     return true;
 }
 
@@ -125,7 +125,7 @@ export function deleteMcpServer(name: string): boolean {
  * since this is what new conversation sessions (with no per-conversation override)
  * will use. Per-conversation filtering is handled separately by filterMcpServers().
  */
-export function writeMcpConfigFile(servers?: Record<string, McpServerEntry>): void {
+export async function writeMcpConfigFile(servers?: Record<string, McpServerEntry>): Promise<void> {
     const allServers = servers ?? getMcpServersFromDb();
 
     // Only include servers enabled by default in the global config file
@@ -144,21 +144,21 @@ export function writeMcpConfigFile(servers?: Record<string, McpServerEntry>): vo
         },
     };
 
-    mkdirSync(AGENT_DIR, { recursive: true });
+    await mkdir(AGENT_DIR, { recursive: true });
 
     // Atomic write: write to temp file then rename
     const tmpPath = `${MCP_CONFIG_PATH}.${String(process.pid)}.tmp`;
-    writeFileSync(tmpPath, JSON.stringify(mcpJson, null, 2) + "\n", "utf-8");
-    renameSync(tmpPath, MCP_CONFIG_PATH);
+    await Bun.write(tmpPath, JSON.stringify(mcpJson, null, 2) + "\n");
+    await rename(tmpPath, MCP_CONFIG_PATH);
 }
 
 /**
  * Ensure the MCP config file exists on disk, writing it if necessary.
  * Called at startup and before session creation.
  */
-export function ensureMcpConfigFile(): void {
-    if (!existsSync(MCP_CONFIG_PATH)) {
-        writeMcpConfigFile();
+export async function ensureMcpConfigFile(): Promise<void> {
+    if (!(await Bun.file(MCP_CONFIG_PATH).exists())) {
+        await writeMcpConfigFile();
     }
 }
 
@@ -200,10 +200,10 @@ export function filterMcpServers(
  * Write a per-conversation MCP config file and return its path.
  * This is used when a conversation only enables a subset of MCP servers.
  */
-export function writeConversationMcpConfig(
+export async function writeConversationMcpConfig(
     conversationId: string,
     enabledMcpServers: string[] | null | undefined
-): string {
+): Promise<string> {
     const filtered = filterMcpServers(enabledMcpServers);
 
     const mcpJson = {
@@ -215,12 +215,12 @@ export function writeConversationMcpConfig(
     };
 
     const convDir = resolve(AGENT_DIR, "conversations", conversationId);
-    mkdirSync(convDir, { recursive: true });
+    await mkdir(convDir, { recursive: true });
 
     const configPath = resolve(convDir, "mcp.json");
     const tmpPath = `${configPath}.${String(process.pid)}.tmp`;
-    writeFileSync(tmpPath, JSON.stringify(mcpJson, null, 2) + "\n", "utf-8");
-    renameSync(tmpPath, configPath);
+    await Bun.write(tmpPath, JSON.stringify(mcpJson, null, 2) + "\n");
+    await rename(tmpPath, configPath);
 
     return configPath;
 }

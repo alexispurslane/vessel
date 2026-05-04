@@ -16,8 +16,8 @@
  * existing imports from other files continue to work unchanged.
  */
 
-import { mkdirSync } from "fs";
 import { resolve } from "path";
+import { mkdir } from "node:fs/promises";
 import { safeDeleteFile, safeDeleteDir } from "../fs-utils.js";
 import { randomUUID } from "crypto";
 import { log } from "$lib/server/logger.js";
@@ -195,11 +195,11 @@ function disposeIfIdle(conversationId: string): void {
  * Create a new conversation (both in our DB and as a pi session file).
  * Returns the conversation ID.
  */
-export function createConversation(title?: string, modelId?: string): string {
+export async function createConversation(title?: string, modelId?: string): Promise<string> {
     const id = randomUUID();
 
     // Create pi session file
-    mkdirSync(SESSIONS_DIR, { recursive: true });
+    await mkdir(SESSIONS_DIR, { recursive: true });
     const sessionManager = SessionManager.create(process.cwd(), SESSIONS_DIR);
     sessionManager.newSession({ id });
     const sessionFilePath = sessionManager.getSessionFile();
@@ -224,7 +224,7 @@ export function createConversation(title?: string, modelId?: string): string {
  * pi session file, delete the workspace directory (if configured), and remove the DB row.
  * Only called when the user explicitly hits the trash icon.
  */
-export function destroyConversation(conversationId: string): void {
+export async function destroyConversation(conversationId: string): Promise<void> {
     // 1. Dispose in-memory session if loaded
     disposeSession(conversationId, { force: true });
 
@@ -238,12 +238,12 @@ export function destroyConversation(conversationId: string): void {
         .prepare("SELECT session_file_path FROM conversations WHERE id = ?")
         .get(conversationId) as { session_file_path: string } | undefined;
 
-    if (row?.session_file_path) safeDeleteFile(row.session_file_path, "pi session file");
+    if (row?.session_file_path) await safeDeleteFile(row.session_file_path, "pi session file");
 
     // 4. Delete workspace and session directories (if setting allows)
     if (deleteWorkspace) {
-        safeDeleteDir(getSessionWorkDir(conversationId), "workspace directory");
-        safeDeleteDir(resolve(SESSIONS_DIR, conversationId), "session directory");
+        await safeDeleteDir(getSessionWorkDir(conversationId), "workspace directory");
+        await safeDeleteDir(resolve(SESSIONS_DIR, conversationId), "session directory");
     } else {
         log.info("session-store", `Keeping workspace for conversation ${conversationId} (deleteWorkspaceWithConversation = false)`);
     }
@@ -259,15 +259,15 @@ function openSessionManager(row: { session_file_path: string }, sessionWorkDir: 
 }
 
 /** Resolve MCP config: write per-conversation or use global, return flags and whether MCP is active. */
-function resolveMcpConfig(conversationId: string, conversationSettings: ConversationSettings | null): {
+async function resolveMcpConfig(conversationId: string, conversationSettings: ConversationSettings | null): Promise<{
     mcpFlagValues: Map<string, boolean | string>;
     hasMcpServers: boolean;
-} {
-    ensureMcpConfigFile();
+}> {
+    await ensureMcpConfigFile();
     const mcpFlagValues = new Map<string, boolean | string>();
     const enabledMcpServers = conversationSettings?.enabledMcpServers ?? null;
     if (enabledMcpServers !== null) {
-        const convConfigPath = writeConversationMcpConfig(conversationId, enabledMcpServers);
+        const convConfigPath = await writeConversationMcpConfig(conversationId, enabledMcpServers);
         mcpFlagValues.set("mcp-config", convConfigPath);
     } else {
         mcpFlagValues.set("mcp-config", MCP_CONFIG_PATH);
@@ -613,10 +613,10 @@ export async function getOrHydrateSession(conversationId: string): Promise<PiAge
     const settingsManager = SettingsManager.inMemory();
     const model = resolveSessionModel(row, settingsManager, modelRegistry);
 
-    mkdirSync(AGENT_DIR, { recursive: true });
+    await mkdir(AGENT_DIR, { recursive: true });
 
     // Resolve MCP config
-    const { mcpFlagValues, hasMcpServers } = resolveMcpConfig(conversationId, conversationSettings);
+    const { mcpFlagValues, hasMcpServers } = await resolveMcpConfig(conversationId, conversationSettings);
 
     // Create the agent session with extensions and resource loader
     const eventBus = createEventBus();

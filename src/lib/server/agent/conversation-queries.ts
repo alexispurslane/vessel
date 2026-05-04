@@ -5,7 +5,6 @@
  * via the pi-coding-agent SDK to match against message content.
  */
 
-import { existsSync } from "fs";
 import { SessionManager } from "@mariozechner/pi-coding-agent";
 import { getDb } from "../db/index.js";
 import { safeJsonParse, stringArraySchema } from "$lib/utils.js";
@@ -148,13 +147,13 @@ function scanBranchForSnippets(
  * Collect search snippets from a session file's message content.
  * Opens the session via the SDK and scans user/assistant messages for the query.
  */
-function collectSnippetsFromSession(
+async function collectSnippetsFromSession(
     sessionFilePath: string | null | undefined,
     query: string,
     lowerQuery: string,
     maxSnippets: number,
-): Array<{ text: string; messageId: string | null }> {
-    if (!sessionFilePath || !existsSync(sessionFilePath)) return [];
+): Promise<Array<{ text: string; messageId: string | null }>> {
+    if (!sessionFilePath || !(await Bun.file(sessionFilePath).exists())) return [];
 
     try {
         const sessionManager = SessionManager.open(sessionFilePath, SESSIONS_DIR);
@@ -208,7 +207,7 @@ function buildSearchResult(
  * Fetches all conversations once, then does a single pass checking both
  * title and content for each conversation, marking the match source.
  */
-export function searchConversations(query: string, limit = 20): ConversationSearchResult[] {
+export async function searchConversations(query: string, limit = 20): Promise<ConversationSearchResult[]> {
     const lowerQuery = query.toLowerCase();
     const rows = fetchAllConversationRows();
     const results: ConversationSearchResult[] = [];
@@ -217,7 +216,7 @@ export function searchConversations(query: string, limit = 20): ConversationSear
         if (results.length >= limit) break;
 
         const titleMatch = row.title.toLowerCase().includes(lowerQuery);
-        const contentSnippets = collectSnippetsFromSession(row.session_file_path, query, lowerQuery, MAX_SNIPPETS_PER_CONVERSATION);
+        const contentSnippets = await collectSnippetsFromSession(row.session_file_path, query, lowerQuery, MAX_SNIPPETS_PER_CONVERSATION);
 
         if (!titleMatch && contentSnippets.length === 0) continue;
 

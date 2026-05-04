@@ -3,21 +3,21 @@ import { z } from "zod";
 import { apiHandler, tryApi, badRequest, notFound } from "$lib/server/api-errors.js";
 import { getSessionWorkDir, createFileManagementSandbox } from "$lib/server/agent/sandbox-factory.js";
 import { sanitizeAndResolvePath } from "$lib/server/fs-security.js";
-import { existsSync, readdirSync, statSync, unlinkSync, rmdirSync } from "fs";
 import { resolve, relative, dirname } from "path";
+import { readdir, rm } from "node:fs/promises";
 
 /**
  * Recursively list files in a directory, returning paths relative to the base.
  */
-function listFilesRecursive(dir: string, base: string): string[] {
+async function listFilesRecursive(dir: string, base: string): Promise<string[]> {
     const results: string[] = [];
-    if (!existsSync(dir)) return results;
+    if (!(await Bun.file(dir).exists())) return results;
 
-    for (const entry of readdirSync(dir)) {
-        const fullPath = resolve(dir, entry);
-        const stat = statSync(fullPath);
-        if (stat.isDirectory()) {
-            results.push(...listFilesRecursive(fullPath, base));
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+        const fullPath = resolve(dir, entry.name);
+        if (entry.isDirectory()) {
+            results.push(...await listFilesRecursive(fullPath, base));
         } else {
             results.push(relative(base, fullPath));
         }
@@ -29,13 +29,13 @@ function listFilesRecursive(dir: string, base: string): string[] {
  * Remove empty parent directories up to the workspace root.
  * This keeps the workspace tidy after deleting nested files.
  */
-function removeEmptyParents(filePath: string, rootDir: string) {
+async function removeEmptyParents(filePath: string, rootDir: string) {
     let dir = dirname(filePath);
     while (dir !== rootDir && dir.startsWith(rootDir)) {
         try {
-            const entries = readdirSync(dir);
+            const entries = await readdir(dir);
             if (entries.length === 0) {
-                rmdirSync(dir);
+                await rm(dir, { recursive: false });
                 dir = dirname(dir);
             } else {
                 break;
@@ -56,15 +56,15 @@ const DeleteBody = z.object({
  * List files in the agent's sandbox workspace.
  * Returns an array of file paths relative to the workspace root.
  */
-export const GET = tryApi(({ params }) => {
+export const GET = tryApi(async ({ params }) => {
     const id = params.id;
     if (!id) return badRequest("Missing session id");
     const workDir = getSessionWorkDir(id);
-    if (!existsSync(workDir)) {
+    if (!(await Bun.file(workDir).exists())) {
         return json({ files: [] });
     }
 
-    const files = listFilesRecursive(workDir, workDir);
+    const files = await listFilesRecursive(workDir, workDir);
     return json({ files });
 });
 
@@ -81,7 +81,7 @@ export const DELETE = apiHandler(DeleteBody, async ({ body, event }) => {
     const id = event.params.id;
     if (!id) return badRequest("Missing session id");
     const workDir = getSessionWorkDir(id);
-    const sandbox = createFileManagementSandbox(id);
+    const sandbox = await createFileManagementSandbox(id);
 
     // Resolve and validate the path stays within the workspace
     let filePath: string;
@@ -93,7 +93,7 @@ export const DELETE = apiHandler(DeleteBody, async ({ body, event }) => {
 
     const resolvedWorkDir = resolve(workDir);
 
-    if (!existsSync(filePath)) {
+    if (!(await Bun.file(filePath).exists())) {
         return notFound("File not found");
     }
 
@@ -113,11 +113,11 @@ export const DELETE = apiHandler(DeleteBody, async ({ body, event }) => {
         }
         // Clean up any empty parent directories left behind (done on host since
         // rmdir on empty dirs doesn't need snapshot tracking)
-        removeEmptyParents(filePath, resolvedWorkDir);
+        await removeEmptyParents(filePath, resolvedWorkDir);
     } else {
         // No sandbox — delete directly
-        unlinkSync(filePath);
-        removeEmptyParents(filePath, resolvedWorkDir);
+        await Bun.file(filePath).unlink();
+        await removeEmptyParents(filePath, resolvedWorkDir);
     }
 
     return json({ success: true });

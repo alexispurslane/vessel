@@ -1,8 +1,8 @@
 import { json } from "@sveltejs/kit";
 import { z } from "zod";
 import { apiHandler } from "$lib/server/api-errors.js";
-import { readdir, stat } from "fs/promises";
 import { resolve, dirname, basename, join } from "path";
+import { readdir } from "node:fs/promises";
 
 const FsCompleteBody = z.object({
     partial: z.string(),
@@ -23,6 +23,56 @@ const PATH_BLACKLIST = [
 
 function isBlacklistedPath(resolvedPath: string): boolean {
     return PATH_BLACKLIST.some(prefix => resolvedPath === prefix || resolvedPath.startsWith(prefix + "/"));
+}
+
+interface CompletionPathOptions {
+    name: string;
+    isDir: boolean;
+    partial: string;
+    searchPath: string;
+    prefix: string;
+}
+
+/** Build the completion path for a directory entry. */
+function buildCompletionPath(opts: CompletionPathOptions): string {
+    const { name, isDir, partial, searchPath, prefix } = opts;
+    const parentDir = dirname(partial);
+    let completionPath: string;
+
+    if (partial.endsWith("/")) {
+        completionPath = partial + name;
+    } else if (prefix === "") {
+        completionPath = searchPath + "/" + name;
+    } else if (parentDir === ".") {
+        completionPath = name;
+    } else if (parentDir === "/") {
+        completionPath = "/" + name;
+    } else {
+        completionPath = parentDir + "/" + name;
+    }
+
+    if (isDir) {
+        completionPath += "/";
+    }
+
+    // Preserve ~ prefix if original used it
+    if (partial.startsWith("~")) {
+        const home = process.env.HOME || "";
+        if (completionPath.startsWith(home)) {
+            completionPath = "~" + completionPath.slice(home.length);
+        }
+    }
+
+    return completionPath;
+}
+
+/** Sort completions: directories first, then alphabetically. */
+function sortCompletions(a: string, b: string): number {
+    const aIsDir = a.endsWith("/");
+    const bIsDir = b.endsWith("/");
+    if (aIsDir && !bIsDir) return -1;
+    if (!aIsDir && bIsDir) return 1;
+    return a.localeCompare(b);
 }
 
 /**
@@ -51,18 +101,16 @@ export const POST = apiHandler(FsCompleteBody, async ({ body }) => {
     let prefix: string;
 
     try {
-        const pathStat = await stat(searchPath);
+        const pathFile = Bun.file(searchPath);
+        const pathStat = await pathFile.stat();
         if (pathStat.isDirectory()) {
-            // If the path is a complete directory, list its contents
             dirPath = searchPath;
             prefix = "";
         } else {
-            // It's a file - return completions based on its directory
             dirPath = dirname(searchPath);
             prefix = basename(searchPath);
         }
     } catch {
-        // Path doesn't exist or is incomplete - treat as partial
         dirPath = dirname(searchPath);
         prefix = basename(searchPath);
     }
@@ -97,52 +145,11 @@ export const POST = apiHandler(FsCompleteBody, async ({ body }) => {
             if (type === "directory" && !isDir) continue;
             if (type === "file" && isDir) continue;
 
-            // Build the completion path
-            let completionPath: string;
-            const parentDir = dirname(partial);
-
-            if (partial.endsWith("/")) {
-                completionPath = partial + name;
-            } else if (prefix === "") {
-                // The partial was a complete directory path
-                completionPath = searchPath + "/" + name;
-            } else if (parentDir === ".") {
-                // User just typed a name without any path separator - don't add leading slash
-                completionPath = name;
-            } else if (parentDir === "/") {
-                // Parent is root - don't add extra slash
-                completionPath = "/" + name;
-            } else {
-                // Normal path - join with slash
-                completionPath = parentDir + "/" + name;
-            }
-
-            // Add trailing slash for directories
-            if (isDir) {
-                completionPath += "/";
-            }
-
-            // Preserve ~ prefix if original used it
-            if (partial.startsWith("~")) {
-                const home = process.env.HOME || "";
-                if (completionPath.startsWith(home)) {
-                    completionPath = "~" + completionPath.slice(home.length);
-                }
-            }
-
-            completions.push(completionPath);
+            completions.push(buildCompletionPath({ name, isDir, partial, searchPath, prefix }));
         }
 
-        // Sort: directories first, then alphabetically
-        completions.sort((a, b) => {
-            const aIsDir = a.endsWith("/");
-            const bIsDir = b.endsWith("/");
-            if (aIsDir && !bIsDir) return -1;
-            if (!aIsDir && bIsDir) return 1;
-            return a.localeCompare(b);
-        });
-
-        return json({ completions: completions.slice(0, 50) }); // Limit to 50 results
+        completions.sort(sortCompletions);
+        return json({ completions: completions.slice(0, 50) });
     } catch {
         return json({ completions: [] });
     }

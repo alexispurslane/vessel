@@ -2,21 +2,21 @@ import type { PageServerLoad } from "./$types.js";
 import { getSessionHistory } from "$lib/server/agent/session-store.js";
 import { getSessionWorkDir } from "$lib/server/agent/sandbox-factory.js";
 import { messageHistoryToChatMessages } from "$lib/chat-history.js";
-import { existsSync, readdirSync, statSync } from "fs";
 import { resolve, relative } from "path";
+import { readdir } from "node:fs/promises";
 
 /**
  * Recursively list files in a directory, returning paths relative to the base.
  */
-function listFilesRecursive(dir: string, base: string): string[] {
+async function listFilesRecursive(dir: string, base: string): Promise<string[]> {
     const results: string[] = [];
-    if (!existsSync(dir)) return results;
+    if (!(await Bun.file(dir).exists())) return results;
 
-    for (const entry of readdirSync(dir)) {
-        const fullPath = resolve(dir, entry);
-        const stat = statSync(fullPath);
-        if (stat.isDirectory()) {
-            results.push(...listFilesRecursive(fullPath, base));
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+        const fullPath = resolve(dir, entry.name);
+        if (entry.isDirectory()) {
+            results.push(...await listFilesRecursive(fullPath, base));
         } else {
             results.push(relative(base, fullPath));
         }
@@ -33,7 +33,7 @@ export const load: PageServerLoad = async ({ params }) => {
         // List files in the sandbox workspace so the UI can show
         // what's already been uploaded when the conversation loads.
         const workDir = getSessionWorkDir(conversationId);
-        const sandboxFiles = existsSync(workDir) ? listFilesRecursive(workDir, workDir) : [];
+        const sandboxFiles = (await Bun.file(workDir).exists()) ? await listFilesRecursive(workDir, workDir) : [];
 
         return {
             messageHistory: history,

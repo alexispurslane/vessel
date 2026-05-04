@@ -29,15 +29,11 @@
 
 import { Sandbox, type SecretConfig } from "zerobox";
 import { resolve } from "path";
-import { mkdirSync, existsSync, readFileSync, writeFileSync } from "fs";
-import { execFile } from "child_process";
-import { promisify } from "util";
+import { mkdir } from "node:fs/promises";
 import { getDb } from "../db/index.js";
 import { tryJsonParse } from "$lib/utils.js";
 import { type ConversationSettings, conversationSettingsSchema } from "$lib/types.js";
 import { log } from "$lib/server/logger.js";
-
-const execFileAsync = promisify(execFile);
 
 // --- Constants ---
 
@@ -67,7 +63,7 @@ const SANDBOX_DEPS_LOCKFILE = resolve(SANDBOX_DEPS_DIR, ".installed-deps.json");
  * When a sandboxed tool runs `require("happy-dom")` or similar, it resolves
  * from SANDBOX_DEPS_DIR/node_modules/.
  *
- * Add new entries here when sandboxed tools need additional npm packages.
+ * Add new entries here when sandboxed tools need additional packages.
  * After changing this list, existing sandboxes will pick up the new deps
  * on the next `ensureSandboxDeps()` call (triggered at sandbox creation).
  */
@@ -136,12 +132,12 @@ export async function ensureSandboxDeps(): Promise<void> {
     const nodeModulesDir = resolve(SANDBOX_DEPS_DIR, "node_modules");
 
     // Check if we need to install/update deps
-    const needsInstall = !existsSync(nodeModulesDir) || !existsSync(SANDBOX_DEPS_LOCKFILE);
+    const needsInstall = !(await Bun.file(nodeModulesDir).exists()) || !(await Bun.file(SANDBOX_DEPS_LOCKFILE).exists());
 
     if (!needsInstall) {
         // Compare installed deps against the current spec
         try {
-            const installed = JSON.parse(readFileSync(SANDBOX_DEPS_LOCKFILE, "utf-8")) as Record<string, string>;
+            const installed = await Bun.file(SANDBOX_DEPS_LOCKFILE).json() as Record<string, string>;
             const specKeys = Object.keys(SANDBOX_DEPS_PACKAGES).sort((a, b) => a.localeCompare(b)).join(",");
             const installedKeys = Object.keys(installed).sort((a, b) => a.localeCompare(b)).join(",");
             if (specKeys !== installedKeys) {
@@ -162,31 +158,38 @@ export async function ensureSandboxDeps(): Promise<void> {
 }
 
 /**
- * Run npm install for sandbox dependencies and write the lockfile.
+ * Run bun install for sandbox dependencies and write the lockfile.
  */
 async function installSandboxDeps(): Promise<void> {
     // Ensure the directory exists
-    mkdirSync(SANDBOX_DEPS_DIR, { recursive: true });
+    await mkdir(SANDBOX_DEPS_DIR, { recursive: true });
 
-    // Write a minimal package.json for npm install
+    // Write a minimal package.json for bun install
     const packageJson = {
         name: "vessel-sandbox-deps",
         private: true,
         description: "Dependencies for Vessel's sandbox tool execution. Managed by ensureSandboxDeps() — do not edit.",
         dependencies: { ...SANDBOX_DEPS_PACKAGES },
     };
-    writeFileSync(
+    await Bun.write(
         resolve(SANDBOX_DEPS_DIR, "package.json"),
         JSON.stringify(packageJson, null, 2)
     );
 
-    // Install deps — async so it doesn't block the event loop
-    await execFileAsync("npm", ["install", "--omit=dev", "--no-audit", "--no-fund"], {
+    // Install deps using Bun.spawn
+    const proc = Bun.spawn(["bun", "install", "--production"], {
         cwd: SANDBOX_DEPS_DIR,
+        stdout: "pipe",
+        stderr: "pipe",
     });
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) {
+        const stderr = await new Response(proc.stderr).text();
+        throw new Error(`bun install failed (exit ${exitCode}): ${stderr}`);
+    }
 
     // Write the lockfile so we can detect stale installs
-    writeFileSync(
+    await Bun.write(
         SANDBOX_DEPS_LOCKFILE,
         JSON.stringify(SANDBOX_DEPS_PACKAGES)
     );
@@ -375,7 +378,7 @@ export async function createSessionSandbox(
     await ensureSandboxDeps();
 
     const sessionWorkDir = resolve(SESSIONS_DIR, conversationId, "workspace");
-    mkdirSync(sessionWorkDir, { recursive: true });
+    await mkdir(sessionWorkDir, { recursive: true });
 
     const sandbox = Sandbox.create({
         cwd: sessionWorkDir,
@@ -419,17 +422,17 @@ export async function createSessionSandbox(
  *
  * Returns null if sandboxing is disabled in settings.
  */
-export function createFileManagementSandbox(
+export async function createFileManagementSandbox(
     conversationId: string,
     conversationSettings?: ConversationSettings | null
-): Sandbox | null {
+): Promise<Sandbox | null> {
     const policy = loadSandboxPolicyFromDb(conversationSettings);
 
     // If policy is null, sandboxing is disabled
     if (policy === null) return null;
 
     const sessionWorkDir = resolve(SESSIONS_DIR, conversationId, "workspace");
-    mkdirSync(sessionWorkDir, { recursive: true });
+    await mkdir(sessionWorkDir, { recursive: true });
 
     return Sandbox.create({
         cwd: sessionWorkDir,

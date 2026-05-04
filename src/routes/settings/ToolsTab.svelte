@@ -105,7 +105,7 @@
     }
 
     const mcpConfigExample =
-        '{ "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"] }';
+        '{ "command": "bunx", "args": ["@modelcontextprotocol/server-filesystem", "/path"] }';
 
     async function removeMcpServer(name: string) {
         try {

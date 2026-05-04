@@ -4,8 +4,26 @@ import { getSessionWorkDir, createFileManagementSandbox } from "$lib/server/agen
 import { getOrHydrateSession } from "$lib/server/agent/session-store.js";
 import { sanitizeFilename, sanitizeAndResolvePath } from "$lib/server/fs-security.js";
 import { badRequest, notFound, internalError } from "$lib/server/api-errors.js";
-import { mkdirSync, createWriteStream, unlinkSync } from "fs";
 import { resolve, dirname, join } from "path";
+import { mkdir, rename } from "node:fs/promises";
+
+/** Read all chunks from a ReadableStreamBody and return them as a Blob. */
+async function readBodyAsBlob(body: ReadableStream<Uint8Array>): Promise<Blob> {
+    const chunks: ArrayBuffer[] = [];
+    const reader = body.getReader();
+    try {
+        /* eslint-disable @typescript-eslint/no-unnecessary-condition */
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            /* eslint-enable @typescript-eslint/no-unnecessary-condition */
+            chunks.push(value.buffer as ArrayBuffer);
+        }
+    } finally {
+        reader.releaseLock();
+    }
+    return new Blob(chunks);
+}
 
 /**
  * POST /api/sessions/[id]/upload
@@ -16,7 +34,7 @@ import { resolve, dirname, join } from "path";
  * - `X-Filename`: the original filename (required)
  * - `Content-Type`: the file's MIME type
  *
- * The body streams directly to disk with backpressure handling —
+ * The body streams directly to disk via Bun.write() —
  * no size limits, no encoding overhead.
  *
  * Files are written to `data/sessions/<id>/workspace/<filename>`,
@@ -65,7 +83,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
         return badRequest("Invalid file path");
     }
 
-    const sandbox = createFileManagementSandbox(conversationId);
+    const sandbox = await createFileManagementSandbox(conversationId);
 
     // When the sandbox is active, we need to route the file write through
     // it so zerobox's snapshot records the change. Each sandbox.exec() call
@@ -88,29 +106,13 @@ export const POST: RequestHandler = async ({ params, request }) => {
     const tmpSuffix = `${String(Date.now())}.${crypto.randomUUID().slice(0, 8)}`;
     const tmpRelPath = join(UPLOAD_TMP_DIR, `${filename}.tmp.${tmpSuffix}`);
     const tmpAbsPath = resolve(workDir, tmpRelPath);
-    mkdirSync(dirname(tmpAbsPath), { recursive: true });
+    await mkdir(dirname(tmpAbsPath), { recursive: true });
 
     try {
         // Stream the request body to the temp file (inside workspace but excluded from snapshots)
         if (request.body) {
-            const fileStream = createWriteStream(tmpAbsPath);
-            const reader = request.body.getReader();
-
-            try {
-                /* eslint-disable @typescript-eslint/no-unnecessary-condition */
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    /* eslint-enable @typescript-eslint/no-unnecessary-condition */
-                    if (!fileStream.write(value)) {
-                        // Handle backpressure
-                        await new Promise<void>((resolve) => fileStream.once("drain", resolve));
-                    }
-                }
-            } finally {
-                fileStream.end();
-                await new Promise<void>((resolve) => fileStream.on("finish", resolve));
-            }
+            const combined = await readBodyAsBlob(request.body);
+            await Bun.write(tmpAbsPath, combined);
         }
 
         if (sandbox) {
@@ -118,7 +120,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
             // The .upload-tmp directory is excluded from snapshots, so the temp file
             // won't appear in the baseline — only the final destination will show up
             // as a new file in the incremental diff.
-            mkdirSync(dir, { recursive: true });
+            await mkdir(dir, { recursive: true });
             const result = await sandbox
                 .exec("mv", [tmpAbsPath, filePath])
                 .output();
@@ -127,15 +129,13 @@ export const POST: RequestHandler = async ({ params, request }) => {
             }
         } else {
             // No sandbox — move the temp file directly into the workspace
-            mkdirSync(dir, { recursive: true });
+            await mkdir(dir, { recursive: true });
             try {
-                const { renameSync } = await import("fs");
-                renameSync(tmpAbsPath, filePath);
+                await rename(tmpAbsPath, filePath);
             } catch {
                 // rename can fail across mount points; fall back to copy + delete
-                const { copyFileSync } = await import("fs");
-                copyFileSync(tmpAbsPath, filePath);
-                try { unlinkSync(tmpAbsPath); } catch { /* ignore cleanup errors */ }
+                await Bun.write(filePath, Bun.file(tmpAbsPath));
+                try { await Bun.file(tmpAbsPath).unlink(); } catch { /* ignore cleanup errors */ }
             }
         }
 

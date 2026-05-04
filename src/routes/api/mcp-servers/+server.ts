@@ -36,8 +36,8 @@ export const GET = tryApi(() => {
  * Add or update an MCP server configuration.
  * Body: { name: string, config: ServerEntry }
  */
-export const PUT = apiHandler(PutBody, ({ body }) => {
-    upsertMcpServer(body.name, body.config);
+export const PUT = apiHandler(PutBody, async ({ body }) => {
+    await upsertMcpServer(body.name, body.config);
     return json({ success: true });
 });
 
@@ -46,8 +46,8 @@ export const PUT = apiHandler(PutBody, ({ body }) => {
  * Remove an MCP server configuration.
  * Body: { name: string }
  */
-export const DELETE = apiHandler(DeleteBody, ({ body }) => {
-    const deleted = deleteMcpServer(body.name);
+export const DELETE = apiHandler(DeleteBody, async ({ body }) => {
+    const deleted = await deleteMcpServer(body.name);
     if (!deleted) {
         return notFound(`MCP server "${body.name}" not found`);
     }

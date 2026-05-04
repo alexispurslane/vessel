@@ -1,5 +1,5 @@
 import { basename, resolve, sep } from "path";
-import { realpathSync } from "fs";
+import { realpathSync } from "node:fs";
 
 /**
  * Characters that are never valid in a filename regardless of platform.
@@ -44,6 +44,10 @@ export function sanitizeFilename(filename: string): string {
  *
  * Use this when you expect a relative path within a directory tree,
  * e.g., for workspace file operations.
+ *
+ * Note: Uses node:fs realpathSync for symlink resolution since Bun
+ * does not expose a native realpath API. This is the only remaining
+ * node:fs import in this module and is required for security.
  *
  * @param basePath - The allowed base directory (resolved with realpath)
  * @param relativePath - The user-supplied relative path to sanitize

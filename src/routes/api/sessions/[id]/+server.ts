@@ -107,7 +107,7 @@ export const PATCH = apiHandler(PatchBody, ({ body, event }) => {
  * workspace directory, and DB row. Only triggered when the user
  * explicitly hits the trash icon on a conversation.
  */
-export const DELETE = tryApi(({ params }) => {
+export const DELETE = tryApi(async ({ params }) => {
     const id = params.id;
     if (!id) return notFound("Conversation not found");
     // Check the conversation exists before destroying
@@ -118,7 +118,7 @@ export const DELETE = tryApi(({ params }) => {
         return notFound("Conversation not found");
     }
 
-    destroyConversation(id);
+    await destroyConversation(id);
 
     return json({ success: true });
 });
