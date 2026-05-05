@@ -65,8 +65,12 @@
     import FetchedPagePanel from "$lib/components/chat/fetched-page-panel.svelte";
     import type { SearchResultItem } from "$lib/types.js";
     import type { PageData } from "./$types.js";
-    import { createSendHandlers, createConnectStreamHandler } from "./chat-handlers.svelte.js";
-    import type { PendingFile, UploadProgress } from "./chat-handlers.svelte.js";
+    import {
+        createSendHandlers,
+        createConnectStreamHandler,
+        applyInitialSettings,
+    } from "./chat-handlers.svelte.ts";
+    import type { PendingFile, UploadProgress } from "./chat-handlers.svelte.ts";
 
     const pageData = $derived(page.data as PageData);
 
@@ -432,11 +436,18 @@
     // load with inputText="" and deletes the saved draft before connectStream
     // can restore it.
     let draftRestored = $state(false);
+    // Track which conversation ID the draft was restored for, to avoid
+    // persisting stale text under a new conversation's key during navigation.
+    let draftRestoredForId = $state<string | null>(null);
     let showDraftBanner = $state(false);
     let draftBannerTimer: ReturnType<typeof setTimeout> | undefined;
 
     $effect(() => {
-        if (id && draftRestored) {
+        // Only persist when the draft has been restored for THIS conversation.
+        // Without the draftRestoredForId check, switching conversations would
+        // momentarily persist the old conversation's text under the new ID
+        // before draftRestored is reset.
+        if (id && draftRestored && draftRestoredForId === id) {
             const key = draftKey(id);
             if (inputText.trim()) {
                 sessionStorage.setItem(key, inputText);
@@ -465,7 +476,7 @@
     // Show the draft-restored banner when a draft with content is loaded.
     // This fires once after connectStream restores the draft (draftRestored=true + inputText non-empty).
     $effect(() => {
-        if (draftRestored && inputText.trim()) {
+        if (draftRestored && draftRestoredForId === id && inputText.trim()) {
             showDraftBanner = true;
             dismissDraftBanner(); // clear any previous timer
             draftBannerTimer = setTimeout(() => {
@@ -493,7 +504,11 @@
         );
         // Reset the draft-restored flag and banner — the new conversation's draft hasn't been restored yet
         draftRestored = false;
+        draftRestoredForId = null;
         dismissDraftBanner();
+        // Clear the input so the old conversation's draft text doesn't leak into the new one.
+        // The correct draft (if any) will be restored by onConnectStream after connectStream resolves.
+        inputText = "";
         // Reset hydrated — we want to render from SSR data for the new conversation first,
         // then transition to the live store once connectStream completes.
         hydrated = false;
@@ -504,10 +519,14 @@
                 // of this $effect, causing it to re-run (disconnecting/reconnecting the
                 // SSE stream and clearing messages) whenever $page.data changes.
                 sandboxFiles = pageData.sandboxFiles;
-                // Use SSR-provided history if available — avoids a client-side fetch
-                // and renders messages immediately (before SSE connects).
-                void connectStream(currentId, pageData.messageHistory).then(() =>
-                    onConnectStream(currentId)
+                // Apply initial conversation settings (sandbox toggles from URL params)
+                // BEFORE connecting the SSE stream. If we wait until after the stream
+                // is connected, the settings update can restart the server-side session,
+                // silently detaching the SSE subscriber and losing all events.
+                void applyInitialSettings(currentId, page.url).then(() =>
+                    connectStream(currentId, pageData.messageHistory).then(() =>
+                        onConnectStream(currentId)
+                    )
                 );
             });
         }
@@ -570,6 +589,7 @@
         setDefaultApplied: (v: boolean) => (defaultApplied = v),
         getDefaultApplied: () => defaultApplied,
         setDraftRestored: (v: boolean) => (draftRestored = v),
+        setDraftRestoredForId: (v: string | null) => (draftRestoredForId = v),
         scrollToHashMessage,
         hideTopBar,
         draftKey,

@@ -75,6 +75,8 @@ export interface ChatHandlerContext {
     getDefaultApplied: () => boolean;
     /** Setter for draftRestored flag */
     setDraftRestored: (v: boolean) => void;
+    /** Setter for the conversation ID the draft was restored for */
+    setDraftRestoredForId: (v: string | null) => void;
     /** Callback to scroll to a hash-anchored message */
     scrollToHashMessage: () => void;
     /** Callback to hide the top bar */
@@ -100,6 +102,63 @@ export interface ChatHandlerContext {
  */
 function getSharedChat() {
     return getChat();
+}
+
+// ---------------------------------------------------------------------------
+// Sandbox settings parser (shared between pre-connect and sendInitialMessage)
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse sandbox quick-toggle settings from URL search params.
+ */
+export function parseSandboxSettings(url: URL): ConversationSettings {
+    const settings: ConversationSettings = {};
+    const sandboxOnParam = url.searchParams.get("sandboxOn");
+    const netAllDomainsOnParam = url.searchParams.get("netAllDomainsOn");
+    const mcpServersOnParam = url.searchParams.get("mcpServersOn");
+    const agentModeParam = url.searchParams.get("agentMode");
+
+    if (sandboxOnParam !== null)
+        settings.sandboxEnabled = sandboxOnParam === "true";
+    if (netAllDomainsOnParam === "true") {
+        settings.allowNet = true;
+        settings.allowAllDomains = true;
+    } else if (netAllDomainsOnParam === "false") {
+        settings.allowNet = false;
+        settings.allowAllDomains = false;
+    }
+    if (mcpServersOnParam === "true") settings.enabledMcpServers = null;
+    else if (mcpServersOnParam === "false") settings.enabledMcpServers = [];
+    if (agentModeParam === "agent") settings.agentMode = "agent";
+    else if (agentModeParam === "chat") settings.agentMode = "chat";
+
+    return settings;
+}
+
+/**
+ * Apply sandbox settings from URL params *before* connecting the SSE stream.
+ *
+ * This must happen before connectStream because updateConversationSettings
+ * can restart the server-side agent session (when sandbox-affecting settings
+ * change). If the restart happens after the SSE subscription is established,
+ * the subscriber is detached from the new session and all subsequent SSE
+ * events are silently lost — the user sees no messages until they reload.
+ *
+ * By applying settings first, the session is in its final state before the
+ * SSE stream subscribes, so no restart is needed.
+ */
+export async function applyInitialSettings(
+    conversationId: string,
+    url: URL,
+): Promise<void> {
+    const settings = parseSandboxSettings(url);
+    if (Object.keys(settings).length > 0) {
+        try {
+            await updateConversationSettings(conversationId, settings);
+        } catch {
+            // Best-effort — the conversation will use defaults
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -231,54 +290,19 @@ export function createConnectStreamHandler(ctx: ChatHandlerContext) {
     const chat = getSharedChat();
 
     /**
-     * Apply sandbox quick-toggle settings from URL params and send the initial message.
-     * Called only when `initialMessage` is present in the URL.
+     * Send the initial message passed via URL params.
+     * Waits for the SSE stream to be connected first — the server can't deliver
+     * events until the subscriber is registered, so sending before the stream
+     * is up means all SSE events are silently lost.
      */
     async function sendInitialMessage(currentId: string, initialMessage: string, initialModel: string | null) {
         const modelId = initialModel || ctx.getSelectedModelId();
         if (modelId) ctx.setSelectedModelId(modelId);
 
-        const url = ctx.getUrl();
-        const sandboxSettings = parseSandboxSettings(url);
-
-        if (Object.keys(sandboxSettings).length > 0) {
-            try {
-                await updateConversationSettings(currentId, sandboxSettings);
-            } catch {
-                // Best-effort; don't block sending the message
-            }
-        }
-
+        await chat.waitForConnected();
         void send(initialMessage, modelId);
         sessionStorage.removeItem(ctx.draftKey(currentId));
         window.history.replaceState({}, "", `/chat/${currentId}`);
-    }
-
-    /**
-     * Parse sandbox quick-toggle settings from URL search params.
-     */
-    function parseSandboxSettings(url: URL): ConversationSettings {
-        const settings: ConversationSettings = {};
-        const sandboxOnParam = url.searchParams.get("sandboxOn");
-        const netAllDomainsOnParam = url.searchParams.get("netAllDomainsOn");
-        const mcpServersOnParam = url.searchParams.get("mcpServersOn");
-        const agentModeParam = url.searchParams.get("agentMode");
-
-        if (sandboxOnParam !== null)
-            settings.sandboxEnabled = sandboxOnParam === "true";
-        if (netAllDomainsOnParam === "true") {
-            settings.allowNet = true;
-            settings.allowAllDomains = true;
-        } else if (netAllDomainsOnParam === "false") {
-            settings.allowNet = false;
-            settings.allowAllDomains = false;
-        }
-        if (mcpServersOnParam === "true") settings.enabledMcpServers = null;
-        else if (mcpServersOnParam === "false") settings.enabledMcpServers = [];
-        if (agentModeParam === "agent") settings.agentMode = "agent";
-        else if (agentModeParam === "chat") settings.agentMode = "chat";
-
-        return settings;
     }
 
     /**
@@ -289,7 +313,7 @@ export function createConnectStreamHandler(ctx: ChatHandlerContext) {
      * - Restoring in-progress message draft from sessionStorage
      * - Sending an initial message if one was passed via URL params
      */
-    async function onConnectStream(currentId: string) {
+    function onConnectStream(currentId: string) {
         console.log(
             `[chat-lifecycle] $effect: connectStream resolved, chat.messages.length=${String(chat.messages.length)}, connected=${String(chat.connected)}, generating=${String(chat.generating)}`
         );
@@ -308,12 +332,13 @@ export function createConnectStreamHandler(ctx: ChatHandlerContext) {
         const saved = sessionStorage.getItem(ctx.draftKey(currentId));
         if (saved) ctx.setInputText(saved);
         ctx.setDraftRestored(true);
+        ctx.setDraftRestoredForId(currentId);
 
         const url = ctx.getUrl();
         const initialMessage = url.searchParams.get("initialMessage");
         const initialModel = url.searchParams.get("initialModel");
         if (initialMessage) {
-            await sendInitialMessage(currentId, initialMessage, initialModel);
+            void sendInitialMessage(currentId, initialMessage, initialModel);
         }
     }
 

@@ -3,6 +3,7 @@
     import Globe from "@lucide/svelte/icons/globe";
     import Search from "@lucide/svelte/icons/search";
     import { SvelteMap, SvelteSet } from "svelte/reactivity";
+    import { onMount } from "svelte";
     import type { FetchedSource } from "$lib/types.js";
 
     interface OgMetadata {
@@ -28,11 +29,28 @@
     let ogData = $state<Record<number, OgMetadata>>({});
     let loadingUrls = new SvelteSet<string>();
 
+    // Concurrency control: only 3 OG requests in flight at a time
+    const MAX_CONCURRENT = 3;
+    let activeRequests = 0;
+    const pendingQueue: Array<{ url: string; index: number }> = [];
+
+    // AbortController for cancelling in-flight requests on unmount
+    let abortController = new AbortController();
+
     function extractDomain(url: string): string {
         try {
             return new URL(url).hostname.replace(/^www\./, "");
         } catch {
             return "";
+        }
+    }
+
+    function processQueue() {
+        while (activeRequests < MAX_CONCURRENT && pendingQueue.length > 0) {
+            const item = pendingQueue.shift();
+            if (item) {
+                void fetchOgMetadata(item.url, item.index);
+            }
         }
     }
 
@@ -43,9 +61,18 @@
         }
         if (loadingUrls.has(url)) return;
 
+        // If at concurrency limit, queue the request
+        if (activeRequests >= MAX_CONCURRENT) {
+            pendingQueue.push({ url, index });
+            return;
+        }
+
         loadingUrls.add(url);
+        activeRequests++;
         try {
-            const resp = await fetch(`/api/og-metadata?url=${encodeURIComponent(url)}`);
+            const resp = await fetch(`/api/og-metadata?url=${encodeURIComponent(url)}`, {
+                signal: abortController.signal,
+            });
             if (resp.ok) {
                 const data = (await resp.json()) as OgMetadata;
                 ogCache.set(url, data);
@@ -61,7 +88,9 @@
                 ogCache.set(url, fallback);
                 ogData[index] = fallback;
             }
-        } catch {
+        } catch (e) {
+            // Don't cache on abort — the component is being destroyed
+            if (e instanceof DOMException && e.name === "AbortError") return;
             const fallback: OgMetadata = {
                 title: extractDomain(url),
                 siteName: "",
@@ -73,6 +102,8 @@
             ogData[index] = fallback;
         } finally {
             loadingUrls.delete(url);
+            activeRequests--;
+            processQueue();
         }
     }
 
@@ -81,9 +112,16 @@
         sources.map((s, i) => (s.type === "page" ? i : -1)).filter((i) => i >= 0)
     );
 
-    // Fetch OG metadata for all page sources when they change
+    // Determine the latest turn so we can dim sources from earlier turns
+    const maxTurn = $derived(Math.max(...sources.map((s) => s.turn)));
+
+    // Only fetch OG metadata for the current (latest) turn's sources.
+    // Previous-turn sources are already dimmed and don't need the overhead.
+    const currentPageIndices = $derived(pageIndices.filter((i) => sources[i].turn === maxTurn));
+
+    // Fetch OG metadata for current-turn page sources when they change
     $effect(() => {
-        for (const i of pageIndices) {
+        for (const i of currentPageIndices) {
             const source = sources[i];
             if (source.type !== "page") continue;
             if (!(i in ogData) && !ogCache.has(source.url)) {
@@ -94,6 +132,13 @@
         }
     });
 
+    // Cancel all in-flight OG requests on unmount
+    onMount(() => {
+        return () => {
+            abortController.abort();
+        };
+    });
+
     function getOg(index: number): OgMetadata | undefined {
         return ogData[index] ?? ogCache.get((sources[index] as { url: string }).url);
     }
@@ -102,9 +147,6 @@
         if (title.length <= 50) return title;
         return title.slice(0, 50) + "…";
     }
-
-    // Determine the latest turn so we can dim sources from earlier turns
-    const maxTurn = $derived(Math.max(...sources.map((s) => s.turn)));
 </script>
 
 <details class="group rounded-lg border bg-background text-sm w-full overflow-hidden" open>

@@ -10,7 +10,7 @@ import { json } from "@sveltejs/kit";
 import { badRequest, tryApi } from "$lib/server/api-errors.js";
 
 // Timeout for fetching external pages (ms)
-const FETCH_TIMEOUT = 8000;
+const FETCH_TIMEOUT = 3000;
 
 // Cache OG metadata for 10 minutes to avoid re-fetching the same URL
 const CACHE_TTL = 10 * 60 * 1000;

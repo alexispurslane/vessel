@@ -61,6 +61,10 @@ export interface ChatState {
     titleGenerationRequested: boolean;
     insideThinkingTag: boolean;
     lastModel: { provider: string; modelId: string } | null;
+    /** Resolves when the SSE 'connected' event arrives. Reset on each connectStream. */
+    connectPromise: Promise<void> | null;
+    /** Resolver for connectPromise — called from handleConnected. */
+    resolveConnect: (() => void) | null;
 }
 
 /** Single reactive state object for the chat store. */
@@ -78,6 +82,8 @@ const state = $state<ChatState>({
     titleGenerationRequested: false,
     insideThinkingTag: false,
     lastModel: null,
+    connectPromise: null,
+    resolveConnect: null,
 });
 
 // --- Helper functions that stay in this module ---
@@ -109,6 +115,11 @@ function handleConnected(s: ChatState): void {
     console.log(`[chat-lifecycle] handleConnected: SSE connected, messages.length=${s.messages.length}, generating=${s.generating}`);
     s.connected = true;
     s.error = null;
+    // Resolve the one-shot promise so callers waiting for connection can proceed
+    if (s.resolveConnect) {
+        s.resolveConnect();
+        s.resolveConnect = null;
+    }
 }
 
 /** Handle the 'agent_start' SSE event. */
@@ -300,6 +311,11 @@ function resetChatState(s: ChatState, conversationId: string): number {
     s.recoveryTurnGeneration = null;
     s.currentConversationId = conversationId;
     setActiveConversation(conversationId);
+    // Create a one-shot promise that resolves when the SSE 'connected' event fires.
+    // This lets callers (e.g. sendInitialMessage) await the connection before sending.
+    s.connectPromise = new Promise<void>((resolve) => {
+        s.resolveConnect = resolve;
+    });
     return thisGeneration;
 }
 
@@ -325,6 +341,12 @@ export function getChat() {
         },
         get conversationId() {
             return state.currentConversationId;
+        },
+        /** Wait for the SSE stream to be connected before sending messages.
+         *  Returns immediately if already connected. */
+        async waitForConnected(): Promise<void> {
+            if (state.connected) return;
+            await state.connectPromise;
         },
         get lastModel() {
             return state.lastModel;
