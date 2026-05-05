@@ -24,7 +24,7 @@ export const GET = tryApi(({ params }) => {
     if (!id) return notFound("Conversation not found");
     const db = getDb();
     const row = db
-        .prepare(
+        .query(
             "SELECT id, title, tags, model_provider, model_id, pinned, created_at, updated_at FROM conversations WHERE id = ?"
         )
         .get(id) as
@@ -62,7 +62,7 @@ export const PATCH = apiHandler(PatchBody, ({ body, event }) => {
     const { title, tags, model_id, pinned } = body;
 
     const updates: string[] = [];
-    const values: unknown[] = [];
+    const values: (string | number | null)[] = [];
 
     if (title !== undefined) {
         updates.push("title = ?");
@@ -112,7 +112,7 @@ export const DELETE = tryApi(async ({ params }) => {
     if (!id) return notFound("Conversation not found");
     // Check the conversation exists before destroying
     const db = getDb();
-    const row = db.prepare("SELECT id FROM conversations WHERE id = ?").get(id);
+    const row = db.query("SELECT id FROM conversations WHERE id = ?").get(id);
 
     if (!row) {
         return notFound("Conversation not found");

@@ -31,7 +31,7 @@ export const POST = apiHandler(PostBody, async ({ body, event }) => {
     // No first user message found, or no model configured
     const db = getDb();
     const row = db
-        .prepare("SELECT title, tags FROM conversations WHERE id = ?")
+        .query("SELECT title, tags FROM conversations WHERE id = ?")
         .get(id) as { title: string; tags: string } | undefined;
 
     if (row) {

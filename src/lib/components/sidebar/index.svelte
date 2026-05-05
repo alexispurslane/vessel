@@ -15,6 +15,7 @@
     import { Button } from "$lib/components/ui/button/index.js";
     import { ScrollArea } from "$lib/components/ui/scroll-area/index.js";
     import { Spinner } from "$lib/components/ui/spinner/index.js";
+    import { Badge } from "$lib/components/ui/badge/index.js";
     import MessageSquarePlus from "@lucide/svelte/icons/message-square-plus";
     import Settings from "@lucide/svelte/icons/settings";
     import LogOut from "@lucide/svelte/icons/log-out";
@@ -31,7 +32,7 @@
     import { goto } from "$app/navigation";
     import { resolve } from "$app/paths";
     import { SvelteMap } from "svelte/reactivity";
-    import { hashHue } from "$lib/utils.js";
+    import { hashHue, getDraftConversationIds } from "$lib/utils.js";
     import {
         getConversations,
         deleteConversation,
@@ -53,12 +54,31 @@
     } from "$lib/stores/chat.svelte.js";
     import { getAuth, doLogout } from "$lib/stores/auth.svelte.js";
     import ConversationItem from "./conversation-item.svelte";
-    import { onMount } from "svelte";
+    import { onMount, onDestroy } from "svelte";
 
     let { currentPath }: { currentPath: string } = $props();
 
     const _auth = getAuth();
     const convs = getConversations();
+
+    // Track which conversations have unsent drafts (client-side only)
+    let draftIds = $state<Set<string>>(new Set());
+    let draftPollInterval: ReturnType<typeof setInterval> | undefined;
+
+    function refreshDraftIds() {
+        draftIds = getDraftConversationIds();
+    }
+
+    onMount(() => {
+        refreshDraftIds();
+        // Poll sessionStorage for draft changes every 2 seconds.
+        // This catches drafts saved from the chat page and browser-tab crashes.
+        draftPollInterval = setInterval(refreshDraftIds, 2000);
+    });
+
+    onDestroy(() => {
+        if (draftPollInterval !== undefined) clearInterval(draftPollInterval);
+    });
 
     let allTags = $derived.by(() => {
         const tagCounts = new SvelteMap<string, number>();
@@ -315,7 +335,16 @@
                                         >
                                             <MessageSquare class="shrink-0" />
                                             <div class="flex-1 min-w-0 flex flex-col gap-0.5">
-                                                <span class="truncate">{result.title}</span>
+                                                <div class="flex items-center gap-1.5 min-w-0">
+                                                    <span class="truncate">{result.title}</span>
+                                                    {#if draftIds.has(result.id)}
+                                                        <Badge
+                                                            variant="outline"
+                                                            class="shrink-0 text-[9px] h-4 px-1 leading-none gap-0.5"
+                                                            >Draft</Badge
+                                                        >
+                                                    {/if}
+                                                </div>
                                                 {#if result.snippets.length > 0}
                                                     {#each result.snippets as snippet (snippet.messageId ?? snippet.text)}
                                                         <p
@@ -377,6 +406,7 @@
                                     {conv}
                                     isActive={conv.id === convs.activeId}
                                     generatingTitle={generatingTitleForId === conv.id}
+                                    hasDraft={draftIds.has(conv.id)}
                                     onSelect={handleSelectConversation}
                                     onDelete={handleDeleteConversation}
                                     onRename={handleRenameConversation}
@@ -409,6 +439,7 @@
                                         {conv}
                                         isActive={conv.id === convs.activeId}
                                         generatingTitle={generatingTitleForId === conv.id}
+                                        hasDraft={draftIds.has(conv.id)}
                                         onSelect={handleSelectConversation}
                                         onDelete={handleDeleteConversation}
                                         onRename={handleRenameConversation}

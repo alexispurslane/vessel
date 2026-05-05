@@ -50,7 +50,7 @@ const MAX_SNIPPETS_PER_CONVERSATION = 3;
 function fetchAllConversationRows(): ConversationRow[] {
     const db = getDb();
     return db
-        .prepare(
+        .query(
             `SELECT id, title, tags, session_file_path, pinned, created_at, updated_at FROM conversations ORDER BY updated_at DESC`
         )
         .all() as ConversationRow[];

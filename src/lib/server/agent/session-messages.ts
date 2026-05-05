@@ -158,7 +158,7 @@ export function getConversationDbRow(conversationId: string): {
 } | undefined {
     const db = getDb();
     return db
-        .prepare(
+        .query(
             "SELECT session_file_path, model_provider, model_id FROM conversations WHERE id = ?"
         )
         .get(conversationId) as

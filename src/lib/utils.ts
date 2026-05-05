@@ -121,6 +121,36 @@ export type WithoutChildren<T> = T extends { children?: any } ? Omit<T, "childre
 export type WithoutChildrenOrChild<T> = WithoutChildren<WithoutChild<T>>;
 export type WithElementRef<T, U extends HTMLElement = HTMLElement> = T & { ref?: U | null };
 
+// --- Draft persistence utilities ---
+
+/** The sessionStorage key prefix used for per-conversation message drafts. */
+export const DRAFT_KEY_PREFIX = "chat-draft:";
+
+/** Check whether a specific conversation has an unsent draft in sessionStorage. */
+export function hasDraft(conversationId: string): boolean {
+    try {
+        return sessionStorage.getItem(`${DRAFT_KEY_PREFIX}${conversationId}`) !== null;
+    } catch {
+        return false;
+    }
+}
+
+/** Return the set of conversation IDs that currently have unsent drafts. */
+export function getDraftConversationIds(): Set<string> {
+    const ids = new Set<string>();
+    try {
+        for (let i = 0; i < sessionStorage.length; i++) {
+            const key = sessionStorage.key(i);
+            if (key?.startsWith(DRAFT_KEY_PREFIX)) {
+                ids.add(key.slice(DRAFT_KEY_PREFIX.length));
+            }
+        }
+    } catch {
+        // sessionStorage may be unavailable
+    }
+    return ids;
+}
+
 /**
  * Format a tool argument value into a compact display string.
  * Strips escape characters from strings, replaces newlines with spaces,

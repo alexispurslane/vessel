@@ -23,7 +23,7 @@ const DeleteBody = z.object({
 export const GET = tryApi(() => {
     const db = getDb();
     const rows = db
-        .prepare("SELECT provider, base_url, display_name, models_endpoint FROM providers")
+        .query("SELECT provider, base_url, display_name, models_endpoint FROM providers")
         .all() as {
             provider: string;
             base_url: string | null;

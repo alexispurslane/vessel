@@ -50,6 +50,8 @@
     import { ContextUsageRing } from "$lib/components/ui/context-usage-ring";
     import ArrowUp from "@lucide/svelte/icons/arrow-up";
     import ArrowDown from "@lucide/svelte/icons/arrow-down";
+    import Undo2 from "@lucide/svelte/icons/undo-2";
+    import X from "@lucide/svelte/icons/x";
     import {
         Tooltip,
         TooltipContent,
@@ -430,6 +432,8 @@
     // load with inputText="" and deletes the saved draft before connectStream
     // can restore it.
     let draftRestored = $state(false);
+    let showDraftBanner = $state(false);
+    let draftBannerTimer: ReturnType<typeof setTimeout> | undefined;
 
     $effect(() => {
         if (id && draftRestored) {
@@ -439,6 +443,35 @@
             } else {
                 sessionStorage.removeItem(key);
             }
+        }
+    });
+
+    function dismissDraftBanner() {
+        showDraftBanner = false;
+        if (draftBannerTimer !== undefined) {
+            clearTimeout(draftBannerTimer);
+            draftBannerTimer = undefined;
+        }
+    }
+
+    function clearDraft() {
+        inputText = "";
+        if (id) {
+            sessionStorage.removeItem(draftKey(id));
+        }
+        dismissDraftBanner();
+    }
+
+    // Show the draft-restored banner when a draft with content is loaded.
+    // This fires once after connectStream restores the draft (draftRestored=true + inputText non-empty).
+    $effect(() => {
+        if (draftRestored && inputText.trim()) {
+            showDraftBanner = true;
+            dismissDraftBanner(); // clear any previous timer
+            draftBannerTimer = setTimeout(() => {
+                showDraftBanner = false;
+                draftBannerTimer = undefined;
+            }, 5000);
         }
     });
 
@@ -458,8 +491,9 @@
         console.log(
             `[chat-lifecycle] $effect: running for id=${currentId}, prev hydrated=${String(untrack(() => hydrated))}`
         );
-        // Reset the draft-restored flag — the new conversation's draft hasn't been restored yet
+        // Reset the draft-restored flag and banner — the new conversation's draft hasn't been restored yet
         draftRestored = false;
+        dismissDraftBanner();
         // Reset hydrated — we want to render from SSR data for the new conversation first,
         // then transition to the live store once connectStream completes.
         hydrated = false;
@@ -491,6 +525,7 @@
     let scrollRaf: number | undefined;
     $effect(() => {
         const count = displayMessages.length;
+        if (count === 0) return;
         const lastMsg = displayMessages[count - 1];
         // Track all reactive content so we re-scroll as deltas arrive
         const _content = lastMsg.content;
@@ -1002,6 +1037,29 @@
                             ? 'flex-1 min-h-0 pt-12 flex flex-col'
                             : 'shrink-0'}"
                     >
+                        {#if showDraftBanner}
+                            <div
+                                class="flex items-center gap-2 mb-2 px-3 py-1.5 rounded-md bg-muted/50 text-xs text-muted-foreground border border-muted/50"
+                                transition:fade={{ duration: 150 }}
+                            >
+                                <Undo2 class="size-3 shrink-0" />
+                                <span class="flex-1">Restored unsent message</span>
+                                <button
+                                    class="hover:text-foreground transition-colors cursor-pointer"
+                                    onclick={clearDraft}
+                                    aria-label="Clear draft"
+                                >
+                                    Clear
+                                </button>
+                                <button
+                                    class="hover:text-foreground transition-colors cursor-pointer"
+                                    onclick={dismissDraftBanner}
+                                    aria-label="Dismiss"
+                                >
+                                    <X class="size-3" />
+                                </button>
+                            </div>
+                        {/if}
                         <ChatInput
                             bind:value={inputText}
                             bind:pendingFiles

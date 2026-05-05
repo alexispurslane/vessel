@@ -288,7 +288,7 @@ function resolveSessionModel(
 ): PiModel<Api> | undefined {
     // Apply default model settings from our DB settings table
     const db = getDb();
-    const settingsRows = db.prepare("SELECT key, value FROM settings").all() as {
+    const settingsRows = db.query("SELECT key, value FROM settings").all() as {
         key: string;
         value: string;
     }[];
@@ -428,11 +428,11 @@ function registerVesselTools(
     baseToolDefinitions.set(fetchTool.name, fetchTool);
 
     const searchBaseUrl = (() => {
-        const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(SEARCH_SETTINGS_KEYS.BASE_URL) as { value: string } | undefined;
+        const row = db.query("SELECT value FROM settings WHERE key = ?").get(SEARCH_SETTINGS_KEYS.BASE_URL) as { value: string } | undefined;
         return row?.value || undefined;
     })();
     const searchApiKey = (() => {
-        const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(SEARCH_SETTINGS_KEYS.API_KEY) as { value: string } | undefined;
+        const row = db.query("SELECT value FROM settings WHERE key = ?").get(SEARCH_SETTINGS_KEYS.API_KEY) as { value: string } | undefined;
         return row?.value || undefined;
     })();
     const searchTool = createSearchTool({ baseUrl: searchBaseUrl, apiKey: searchApiKey, searchResultUrls });
@@ -462,7 +462,7 @@ function registerVesselTools(
 /** Read a global setting from the DB by key, returning its string value or null. */
 function readGlobalSetting(key: string): string | null {
     const db = getDb();
-    const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined;
+    const row = db.query("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined;
     return row?.value ?? null;
 }
 
@@ -590,7 +590,7 @@ export async function getOrHydrateSession(conversationId: string): Promise<PiAge
     // Look up our metadata including model selection
     const db = getDb();
     const row = db
-        .prepare(
+        .query(
             "SELECT session_file_path, model_provider, model_id FROM conversations WHERE id = ?"
         )
         .get(conversationId) as
@@ -1117,7 +1117,7 @@ export async function setSessionLeaf(conversationId: string, targetEntryId: stri
  */
 export function listCustomModels(): CustomModelDef[] {
     const db = getDb();
-    const rows = db.prepare("SELECT * FROM custom_models").all() as Record<string, unknown>[];
+    const rows = db.query("SELECT * FROM custom_models").all() as Record<string, unknown>[];
 
     return rows.map((m) => ({
         id: m.id as string,

@@ -36,7 +36,7 @@ export const GET = tryApi(({ params }) => {
     const db = getDb();
 
     // Verify conversation exists
-    const row = db.prepare("SELECT id FROM conversations WHERE id = ?").get(id);
+    const row = db.query("SELECT id FROM conversations WHERE id = ?").get(id);
     if (!row) {
         return notFound("Conversation not found");
     }
@@ -77,7 +77,7 @@ export const PUT = apiHandler(PutBody, ({ body, event }) => {
     const db = getDb();
 
     // Verify conversation exists
-    const row = db.prepare("SELECT id FROM conversations WHERE id = ?").get(id);
+    const row = db.query("SELECT id FROM conversations WHERE id = ?").get(id);
     if (!row) {
         return notFound("Conversation not found");
     }

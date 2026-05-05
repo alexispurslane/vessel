@@ -13,12 +13,14 @@ import { badRequest, notFound, apiError, tryApi } from "$lib/server/api-errors.j
  * { data: [{ id: "model-name", object: "model", ... }, ...] }
  */
 export const GET = tryApi(async ({ params }) => {
+    const provider = params.provider;
+    if (!provider) return notFound("Provider not found");
     const db = getDb();
     const row = db
-        .prepare(
+        .query(
             "SELECT api_key, base_url, models_endpoint FROM providers WHERE provider = ?"
         )
-        .get(params.provider) as
+        .get(provider) as
         | {
             api_key: string;
             base_url: string | null;

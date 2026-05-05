@@ -204,7 +204,7 @@ async function installSandboxDeps(): Promise<void> {
  */
 function getSetting(key: string): string | undefined {
     const db = getDb();
-    const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
+    const row = db.query("SELECT value FROM settings WHERE key = ?").get(key) as
         | { value: string }
         | undefined;
     return row?.value;
@@ -465,7 +465,7 @@ export function getSessionWorkDir(conversationId: string): string {
 export function loadConversationSettingsFromDb(conversationId: string): ConversationSettings | null {
     const db = getDb();
     const row = db
-        .prepare("SELECT settings FROM conversation_settings WHERE conversation_id = ?")
+        .query("SELECT settings FROM conversation_settings WHERE conversation_id = ?")
         .get(conversationId) as { settings: string } | undefined;
     if (!row) return null;
     try {

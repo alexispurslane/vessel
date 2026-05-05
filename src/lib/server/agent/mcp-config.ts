@@ -62,7 +62,7 @@ export interface McpServerInfo {
 export function getMcpServersFromDb(): Record<string, McpServerEntry> {
     const db = getDb();
     const row = db
-        .prepare("SELECT value FROM settings WHERE key = ?")
+        .query("SELECT value FROM settings WHERE key = ?")
         .get(MCP_SETTINGS_KEY) as { value: string } | undefined;
 
     if (!row?.value) return {};

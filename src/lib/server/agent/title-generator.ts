@@ -57,7 +57,7 @@ export async function generateTitleAndTags(
 
     // Check if this conversation already has a non-default title
     const conv = db
-        .prepare("SELECT title FROM conversations WHERE id = ?")
+        .query("SELECT title FROM conversations WHERE id = ?")
         .get(conversationId) as { title: string } | undefined;
 
     if (!conv) return null;
@@ -133,7 +133,7 @@ async function extractFirstUserMessage(conversationId: string): Promise<string |
  */
 function resolveTitleModel(): Model<Api> | null {
     const db = getDb();
-    const settingsRows = db.prepare("SELECT key, value FROM settings").all() as {
+    const settingsRows = db.query("SELECT key, value FROM settings").all() as {
         key: string;
         value: string;
     }[];

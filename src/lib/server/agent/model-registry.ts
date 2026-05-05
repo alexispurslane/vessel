@@ -65,7 +65,7 @@ export function refreshAuthStorageKeys(): void {
     _authStorage = AuthStorage.create();
     const db = getDb();
     const providers = db
-        .prepare("SELECT provider, api_key FROM providers")
+        .query("SELECT provider, api_key FROM providers")
         .all() as { provider: string; api_key: string }[];
 
     for (const row of providers) {
@@ -85,7 +85,7 @@ export function refreshAuthStorageKeys(): void {
 function filterModelsToVesselProviders(registry: ModelRegistry): void {
     const db = getDb();
     const vesselProviders = new Set(
-        (db.prepare("SELECT provider FROM providers").all() as { provider: string }[]).map(r => r.provider)
+        (db.query("SELECT provider FROM providers").all() as { provider: string }[]).map(r => r.provider)
     );
     const models = getModelList(registry);
     setModelList(registry, models.filter(m => vesselProviders.has(m.provider)));
@@ -188,10 +188,10 @@ export function generateModelsJson(): void {
     const db = getDb();
 
     const providers = db
-        .prepare("SELECT provider, api_key, base_url FROM providers")
+        .query("SELECT provider, api_key, base_url FROM providers")
         .all() as { provider: string; api_key: string; base_url: string | null }[];
 
-    const customModels = db.prepare("SELECT * FROM custom_models").all() as Record<
+    const customModels = db.query("SELECT * FROM custom_models").all() as Record<
         string,
         unknown
     >[];

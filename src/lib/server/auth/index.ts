@@ -30,13 +30,13 @@ function getJwtSecret(): Uint8Array {
 
 export function userExists(): boolean {
     const db = getDb();
-    const row = db.prepare("SELECT id FROM auth LIMIT 1").get();
+    const row = db.query("SELECT id FROM auth LIMIT 1").get();
     return !!row;
 }
 
 export function getUsername(): string | null {
     const db = getDb();
-    const row = db.prepare("SELECT username FROM auth WHERE id = 1").get() as
+    const row = db.query("SELECT username FROM auth WHERE id = 1").get() as
         | { username: string }
         | undefined;
     return row?.username ?? null;
@@ -59,7 +59,7 @@ export function createUser(username: string, password: string): void {
 
 export function verifyUser(username: string, password: string): boolean {
     const db = getDb();
-    const row = db.prepare("SELECT username, password_hash FROM auth WHERE id = 1").get() as
+    const row = db.query("SELECT username, password_hash FROM auth WHERE id = 1").get() as
         | { username: string; password_hash: string }
         | undefined;
 
@@ -75,7 +75,7 @@ export function verifyUser(username: string, password: string): boolean {
  */
 export function verifyPassword(password: string): boolean {
     const db = getDb();
-    const row = db.prepare("SELECT password_hash FROM auth WHERE id = 1").get() as
+    const row = db.query("SELECT password_hash FROM auth WHERE id = 1").get() as
         | { password_hash: string }
         | undefined;
 
@@ -85,7 +85,7 @@ export function verifyPassword(password: string): boolean {
 
 export function getPronouns(): string | null {
     const db = getDb();
-    const row = db.prepare("SELECT pronouns FROM auth WHERE id = 1").get() as
+    const row = db.query("SELECT pronouns FROM auth WHERE id = 1").get() as
         | { pronouns: string | null }
         | undefined;
     return row?.pronouns ?? null;

@@ -11,7 +11,7 @@ const PutBody = z.record(z.string(), z.string());
  */
 export const GET = tryApi(() => {
     const db = getDb();
-    const rows = db.prepare("SELECT key, value FROM settings").all() as {
+    const rows = db.query("SELECT key, value FROM settings").all() as {
         key: string;
         value: string;
     }[];

@@ -5,7 +5,7 @@
  * This DB only stores: auth, web sessions, provider config, custom models, settings, and conversation metadata.
  */
 
-import type { Database as DatabaseType } from "better-sqlite3";
+import type { Database as DatabaseType } from "bun:sqlite";
 import { tryJsonParse, stringArraySchema } from "$lib/utils.js";
 
 export const SCHEMA = `
@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS conversation_settings (
 export function runMigrations(db: DatabaseType): void {
     // Drop deprecated web_sessions table (auth now uses JWTs, not DB-stored tokens)
     try {
-        db.exec("DROP TABLE IF EXISTS web_sessions");
+        db.run("DROP TABLE IF EXISTS web_sessions");
     } catch {
         // Table doesn't exist — ignore
     }
@@ -94,7 +94,7 @@ export function runMigrations(db: DatabaseType): void {
 
     for (const sql of columnMigrations) {
         try {
-            db.exec(sql);
+            db.run(sql);
         } catch {
             // Column already exists — ignore
         }
@@ -103,7 +103,7 @@ export function runMigrations(db: DatabaseType): void {
     // Rename encrypted_key → api_key (the column was misleadingly named;
     // keys have never been encrypted, just stored as-is).
     try {
-        db.exec("ALTER TABLE providers RENAME COLUMN encrypted_key TO api_key");
+        db.run("ALTER TABLE providers RENAME COLUMN encrypted_key TO api_key");
     } catch {
         // Column already renamed — ignore
     }
@@ -131,7 +131,7 @@ export function runMigrations(db: DatabaseType): void {
                 );
             }
 
-            db.exec(`
+            db.run(`
         CREATE TABLE IF NOT EXISTS custom_models_new (
           id TEXT NOT NULL PRIMARY KEY,
           provider TEXT NOT NULL,
@@ -151,7 +151,7 @@ export function runMigrations(db: DatabaseType): void {
       `);
 
             // INSERT OR REPLACE keeps the last row for duplicate IDs
-            db.exec(`
+            db.run(`
         INSERT OR REPLACE INTO custom_models_new
         SELECT id, provider, name, api, base_url, reasoning, input_types,
                context_window, max_tokens, cost_input, cost_output,
@@ -159,8 +159,8 @@ export function runMigrations(db: DatabaseType): void {
         FROM custom_models;
       `);
 
-            db.exec("DROP TABLE custom_models;");
-            db.exec("ALTER TABLE custom_models_new RENAME TO custom_models;");
+            db.run("DROP TABLE custom_models;");
+            db.run("ALTER TABLE custom_models_new RENAME TO custom_models;");
         }
     } catch (e) {
         console.error("[migration] Failed to migrate custom_models to unique model IDs:", e);

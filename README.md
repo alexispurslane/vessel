@@ -29,6 +29,8 @@ bun run dev
 bun run dev -- --open
 ```
 
+> **Note:** The `dev` script uses `bun --bun vite dev` to run Vite with Bun's runtime instead of Node.js. This is required because the project uses `bun:sqlite` for the database, which is only available in Bun's runtime.
+
 ## Building
 
 To create a production version of your app:

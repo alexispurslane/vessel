@@ -7,6 +7,7 @@
         ContextMenuTrigger,
         ContextMenuSeparator,
     } from "$lib/components/ui/context-menu";
+    import { Badge } from "$lib/components/ui/badge/index.js";
     import MessageSquare from "@lucide/svelte/icons/message-square";
     import Trash2 from "@lucide/svelte/icons/trash-2";
     import Pencil from "@lucide/svelte/icons/pencil";
@@ -28,6 +29,7 @@
         conv,
         isActive,
         generatingTitle,
+        hasDraft = false,
         onSelect,
         onDelete,
         onRename,
@@ -38,6 +40,7 @@
         conv: Conversation;
         isActive: boolean;
         generatingTitle: boolean;
+        hasDraft?: boolean;
         onSelect: (id: string) => void;
         onDelete: (id: string, e: MouseEvent) => void;
         onRename: (id: string) => void;
@@ -59,7 +62,16 @@
             >
                 <MessageSquare class="shrink-0" />
                 <div class="flex-1 min-w-0 flex flex-col">
-                    <span class="truncate">{conv.title}</span>
+                    <div class="flex items-center gap-1.5 min-w-0">
+                        <span class="truncate">{conv.title}</span>
+                        {#if hasDraft}
+                            <Badge
+                                variant="outline"
+                                class="shrink-0 text-[9px] h-4 px-1 leading-none gap-0.5"
+                                >Draft</Badge
+                            >
+                        {/if}
+                    </div>
                     {#if conv.tags.length > 0}
                         <div class="flex gap-1 mt-1 pb-1 overflow-x-auto no-scrollbar">
                             {#each conv.tags as tag (tag)}
