@@ -71,6 +71,10 @@
         applyInitialSettings,
     } from "./chat-handlers.svelte.ts";
     import type { PendingFile, UploadProgress } from "./chat-handlers.svelte.ts";
+    import {
+        notifyCompletion,
+        clearTabTitleNotification,
+    } from "$lib/stores/notifications.svelte.js";
 
     const pageData = $derived(page.data as PageData);
 
@@ -163,6 +167,13 @@
                 .catch(() => {
                     // Non-critical — the file list just won't update
                 });
+
+            // Send completion notifications (browser, sound, tab title)
+            notifyCompletion(conversationTitle);
+        }
+        // Clear the tab title notification when generation starts again
+        if (!wasGenerating && isGenerating) {
+            clearTabTitleNotification();
         }
         wasGenerating = isGenerating;
     });

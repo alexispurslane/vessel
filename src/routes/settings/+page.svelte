@@ -5,6 +5,7 @@
     import Plug from "@lucide/svelte/icons/plug";
     import Shield from "@lucide/svelte/icons/shield";
     import FileText from "@lucide/svelte/icons/file-text";
+    import Bell from "@lucide/svelte/icons/bell";
     import PageLayout from "$lib/components/page-layout/index.svelte";
     import { goto } from "$app/navigation";
     import { resolve } from "$app/paths";
@@ -14,6 +15,7 @@
     import SandboxTab from "./SandboxTab.svelte";
     import AgentTab from "./AgentTab.svelte";
     import ToolsTab from "./ToolsTab.svelte";
+    import NotificationsTab from "./NotificationsTab.svelte";
 
     let activeTab = $state("models");
 
@@ -36,6 +38,9 @@
             <TabsTrigger value="tools"><Plug class="mr-1.5 h-4 w-4" /> Tools</TabsTrigger>
             <TabsTrigger value="sandbox"><Shield class="mr-1.5 h-4 w-4" /> Sandbox</TabsTrigger>
             <TabsTrigger value="agent"><FileText class="mr-1.5 h-4 w-4" /> Agent</TabsTrigger>
+            <TabsTrigger value="notifications"
+                ><Bell class="mr-1.5 h-4 w-4" /> Notifications</TabsTrigger
+            >
         </TabsList>
 
         <!-- User Tab -->
@@ -61,6 +66,11 @@
         <!-- Tools Tab -->
         <TabsContent value="tools">
             <ToolsTab />
+        </TabsContent>
+
+        <!-- Notifications Tab -->
+        <TabsContent value="notifications">
+            <NotificationsTab />
         </TabsContent>
     </Tabs>
 </PageLayout>

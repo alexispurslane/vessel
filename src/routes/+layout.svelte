@@ -18,6 +18,10 @@
     } from "$lib/stores/conversations.svelte.js";
     import { getChat } from "$lib/stores/chat.svelte.js";
     import { loadSettings } from "$lib/stores/settings.svelte.js";
+    import {
+        syncNotificationSettings,
+        clearTabTitleNotification,
+    } from "$lib/stores/notifications.svelte.js";
     import { hashHue } from "$lib/utils.js";
     import { resolve } from "$app/paths";
     import AppSidebar from "$lib/components/sidebar/index.svelte";
@@ -61,7 +65,9 @@
     $effect(() => {
         if (isAuthenticated) {
             void loadConversations();
-            void loadSettings();
+            void loadSettings().then(() => {
+                syncNotificationSettings();
+            });
         }
     });
 
@@ -80,6 +86,14 @@
         // that the server might not know about yet. The SSR data already
         // initialized the store, so the user sees content immediately.
         void checkAuth();
+
+        // When the user returns to the tab, clear any tab title notification
+        function handleVisibilityChange() {
+            if (document.visibilityState === "visible") {
+                clearTabTitleNotification();
+            }
+        }
+        document.addEventListener("visibilitychange", handleVisibilityChange);
 
         // When the user closes the tab or navigates away, release the
         // in-memory session on the server. We use sendBeacon because
@@ -102,6 +116,7 @@
 
         return () => {
             window.removeEventListener("beforeunload", handleBeforeUnload);
+            document.removeEventListener("visibilitychange", handleVisibilityChange);
         };
     });
 
