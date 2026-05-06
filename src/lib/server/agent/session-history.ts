@@ -1,5 +1,5 @@
 /**
- * History building and session tree navigation.
+ * @file Session history reconstruction, tree navigation, and message editing from JSONL session files.
  *
  * Functions for building message history from in-memory sessions,
  * navigating the session tree, editing assistant messages, and
@@ -54,13 +54,23 @@ interface HistoryBuilderState {
     accumulatedSources: FetchedSource[];
 }
 
-/** Track model changes from `model_change` entries. */
+/**
+ * Track model changes from `model_change` entries.
+ * @param state - Mutable history builder state
+ * @param entry - The model change entry
+ * @param entry.provider - The model provider name
+ * @param entry.modelId - The model identifier
+ */
 function handleModelChange(state: HistoryBuilderState, entry: { provider: string; modelId: string }): void {
     state.lastModelProvider = entry.provider;
     state.lastModelId = entry.modelId;
 }
 
-/** Accumulate fetched_sources custom entries and retroactively attach them. */
+/**
+ * Accumulate fetched_sources custom entries and retroactively attach them.
+ * @param state - Mutable history builder state
+ * @param entry - The fetched sources entry
+ */
 function handleFetchedSources(state: HistoryBuilderState, entry: unknown): void {
     const sources = (entry as { data: FetchedSource[] | undefined }).data;
     if (sources && sources.length > 0) {
@@ -74,7 +84,11 @@ function handleFetchedSources(state: HistoryBuilderState, entry: unknown): void 
     }
 }
 
-/** Match tool result messages back to their pending tool calls. */
+/**
+ * Match tool result messages back to their pending tool calls.
+ * @param state - Mutable history builder state
+ * @param msg - The tool result message
+ */
 function handleToolResult(
     state: HistoryBuilderState,
     msg: Record<string, unknown>
@@ -101,7 +115,7 @@ function handleToolResult(
 }
 
 /** Parsed content blocks from a message's content field. */
-interface ExtractedContent {
+export interface ExtractedContent {
     textContent: string;
     thinkingContent: string | undefined;
     toolCalls: Array<{
@@ -113,8 +127,12 @@ interface ExtractedContent {
     }>;
 }
 
-/** Parse a message's content field into text, thinking, and tool call blocks. */
-function extractMessageContent(msg: Record<string, unknown>): ExtractedContent {
+/**
+ * Parse a message's content field into text, thinking, and tool call blocks.
+ * @param msg - The message to extract content from
+ * @returns The extracted text, thinking, and tool call content
+ */
+export function extractMessageContent(msg: Record<string, unknown>): ExtractedContent {
     let textContent = "";
     let thinkingContent: string | undefined;
     const toolCalls: ExtractedContent["toolCalls"] = [];
@@ -150,7 +168,11 @@ function extractMessageContent(msg: Record<string, unknown>): ExtractedContent {
     return { textContent, thinkingContent, toolCalls };
 }
 
-/** Extract token usage data from an assistant message, if present. */
+/**
+ * Extract token usage data from an assistant message, if present.
+ * @param msg - The assistant message
+ * @returns Token usage data, or undefined if not present
+ */
 function extractUsage(msg: Record<string, unknown>): HistoryMessage["usage"] {
     if (!msg.usage) return undefined;
     const u = msg.usage as Record<string, unknown>;
@@ -163,7 +185,11 @@ function extractUsage(msg: Record<string, unknown>): HistoryMessage["usage"] {
     };
 }
 
-/** After appending an assistant message, update accumulated-source tracking. */
+/**
+ * After appending an assistant message, update accumulated-source tracking.
+ * @param state - Mutable history builder state
+ * @param msgIndex - Index of the just-appended assistant message
+ */
 function handlePostAssistantPush(
     state: HistoryBuilderState,
     msgIndex: number
@@ -174,7 +200,12 @@ function handlePostAssistantPush(
     }
 }
 
-/** Register tool calls from a message so later tool-result messages can match back. */
+/**
+ * Register tool calls from a message so later tool-result messages can match back.
+ * @param state - Mutable history builder state
+ * @param toolCalls - The tool calls to register
+ * @param msgIndex - Index of the message containing these tool calls
+ */
 function registerPendingToolCalls(
     state: HistoryBuilderState,
     toolCalls: ExtractedContent["toolCalls"],
@@ -192,7 +223,13 @@ function registerPendingToolCalls(
     }
 }
 
-/** Resolve assistant-specific fields (model, provider, error, usage) from a message. */
+/**
+ * Resolve assistant-specific fields (model, provider, error, usage) from a message.
+ * @param msg - The message to resolve fields from
+ * @param role - The message role
+ * @param state - Mutable history builder state
+ * @returns Picked assistant fields
+ */
 function resolveAssistantFields(
     msg: Record<string, unknown>,
     role: string,
@@ -211,7 +248,14 @@ function resolveAssistantFields(
     };
 }
 
-/** Process a user or assistant message entry and append it to the history. */
+/**
+ * Process a user or assistant message entry and append it to the history.
+ * @param state - Mutable history builder state
+ * @param entry - The session entry
+ * @param entry.id - The entry's unique ID
+ * @param msg - The message object
+ * @param role - The message role
+ */
 function handleMessage(
     state: HistoryBuilderState,
     entry: { id: string },
@@ -249,7 +293,11 @@ function handleMessage(
     }
 }
 
-/** Process a single branch entry and update the history builder state. */
+/**
+ * Process a single branch entry and update the history builder state.
+ * @param state - Mutable history builder state
+ * @param entry - The branch entry to process
+ */
 function processBranchEntry(state: HistoryBuilderState, entry: SessionEntry): void {
     if (entry.type === "model_change") {
         handleModelChange(state, entry);
@@ -278,7 +326,14 @@ function processBranchEntry(state: HistoryBuilderState, entry: SessionEntry): vo
     handleMessage(state, entry, msg, role);
 }
 
-/** Resolve model info from builder state or fallback row data. */
+/**
+ * Resolve model info from builder state or fallback row data.
+ * @param state - Mutable history builder state
+ * @param row - Fallback row data
+ * @param row.model_provider - The row's model provider
+ * @param row.model_id - The row's model ID
+ * @returns Resolved model info, or null if unavailable
+ */
 function resolveModel(
     state: HistoryBuilderState,
     row: { model_provider: string | null; model_id: string | null }
@@ -299,6 +354,13 @@ function resolveModel(
  *
  * This is the sole method for reading session history — the SessionManager
  * handles JSONL file restoration automatically when the session is loaded.
+ *
+ * @param activeSession - The active session to build history from
+ * @param row - Database row data for fallback model info
+ * @param row.session_file_path - Path to the session file
+ * @param row.model_provider - Fallback model provider
+ * @param row.model_id - Fallback model ID
+ * @returns The built history result with messages and resolved model
  */
 export function buildHistoryFromSession(
     activeSession: ActiveSession,
@@ -325,7 +387,14 @@ export function buildHistoryFromSession(
 
 // --- Session tree ---
 
-/** Extract content info from a message for tree node display. */
+/**
+ * Extract content info from a message for tree node display.
+ * @param block - A single content block
+ * @param result - Accumulator for extracted content
+ * @param result.fullContent - Accumulated full text content
+ * @param result.hasToolCall - Whether a tool call block was seen
+ * @param result.hasThinking - Whether a thinking block was seen
+ */
 function processContentBlock(
     block: Record<string, unknown>,
     result: { fullContent: string; hasToolCall: boolean; hasThinking: boolean }
@@ -339,7 +408,11 @@ function processContentBlock(
     }
 }
 
-/** Extract content info from a message for tree node display. */
+/**
+ * Extract content info from a message for tree node display.
+ * @param msg - The message to extract content from
+ * @returns Content summary with text, tool call, and thinking flags
+ */
 function extractTreeContent(msg: Record<string, unknown>): {
     fullContent: string;
     hasToolCall: boolean;
@@ -358,7 +431,14 @@ function extractTreeContent(msg: Record<string, unknown>): {
     return result;
 }
 
-/** Whether a tree node with the given role and content should be skipped. */
+/**
+ * Whether a tree node with the given role and content should be skipped.
+ * @param role - The message role
+ * @param fullContent - The full text content
+ * @param hasToolCall - Whether the message contains tool calls
+ * @param hasThinking - Whether the message contains thinking blocks
+ * @returns True if the node should be filtered out
+ */
 function shouldSkipTreeNode(
     role: string | undefined,
     fullContent: string,
@@ -370,7 +450,11 @@ function shouldSkipTreeNode(
     return false;
 }
 
-/** Build a preview string from full content (first ~40 chars or first line). */
+/**
+ * Build a preview string from full content (first ~40 chars or first line).
+ * @param fullContent - The full message content
+ * @returns A truncated preview string
+ */
 function buildPreview(fullContent: string): string {
     const firstLine = fullContent.split('\n')[0] || '';
     return firstLine.length > 40 ? firstLine.slice(0, 40) + '…' : firstLine;
@@ -379,6 +463,10 @@ function buildPreview(fullContent: string): string {
 /**
  * Build a session tree node from an entry, or return null if it should be skipped.
  * Filters by entry type, role, content, and tool-call/thinking presence.
+ * @param entry - The session entry to build a node from
+ * @param activeBranchIds - Set of entry IDs on the active branch
+ * @param leafId - The current leaf entry ID
+ * @returns A tree node, or null if the entry should be skipped
  */
 function buildNodeFromEntry(
     entry: SessionEntry,
@@ -409,7 +497,13 @@ function buildNodeFromEntry(
     };
 }
 
-/** Walk up the entry tree from a hidden parent to find the closest visible ancestor. */
+/**
+ * Walk up the entry tree from a hidden parent to find the closest visible ancestor.
+ * @param startId - The entry ID to start walking from
+ * @param visibleById - Set of visible entry IDs
+ * @param fullEntryById - Map of all entries by ID
+ * @returns The closest visible ancestor ID, or null if none found
+ */
 function findClosestVisibleAncestor(
     startId: string,
     visibleById: Set<string>,
@@ -428,6 +522,9 @@ function findClosestVisibleAncestor(
  * Repair parent IDs on visible nodes: since we filtered out non-message nodes,
  * some parentIds point to hidden entries. Walk up the entry tree to find
  * the closest visible ancestor.
+ * @param nodes - The visible tree nodes to repair
+ * @param relations - The tree relations to update
+ * @param allEntries - All session entries (including hidden ones)
  */
 function repairParentIds(
     nodes: SessionTreeNodeData[],
@@ -456,6 +553,8 @@ function repairParentIds(
  * Get the full session tree as nodes and relations for DAG visualization.
  * Returns only user messages and final assistant text responses (no tool calls,
  * thinking blocks, tool results, or other intermediate entries).
+ * @param agentSession - The PiAgentSession to build the tree from
+ * @returns The session tree nodes, relations, and current leaf ID
  */
 export function getSessionTreeFromAgent(
     agentSession: PiAgentSession
@@ -507,71 +606,103 @@ export function getSessionTreeFromAgent(
  * in the append-only session tree.
  *
  * @param agentSession - The PiAgentSession to navigate (caller passes it in)
+ * @param targetEntryId - The entry ID to navigate to
+ * @returns The editor text (if available) and whether the operation was cancelled
  */
 export async function navigateMessage(
     agentSession: PiAgentSession,
     targetEntryId: string
 ): Promise<{ editorText?: string; cancelled: boolean }> {
-    // Check the type of entry we're navigating to — for non-user messages (e.g., assistant),
-    // we want to navigate to the parent entry so the message gets "deleted"
-    const entry = agentSession.sessionManager.getEntry(targetEntryId);
+    const sessionManager = agentSession.sessionManager;
+    const entry = sessionManager.getEntry(targetEntryId);
     if (!entry) {
         throw new Error(`Entry ${targetEntryId} not found in session`);
     }
 
-    // For user messages: navigateTree handles this correctly — sets leaf to parent and returns text
-    // For non-user messages (assistant, etc.): we need to navigate to the parent to effectively delete this message
-    let navigateTargetId = targetEntryId;
-    if (entry.type === "message" && entry.message.role !== "user") {
-        // For assistant messages, navigate to the parent entry to delete this response
-        // The parent is typically the user message or tool result that preceded this response
-        const parentId = entry.parentId;
-        if (parentId) {
-            navigateTargetId = parentId;
-        } else {
-            // If the assistant message is a root (no parent), we can't navigate further back
-            // Just navigate to the message itself
-            navigateTargetId = targetEntryId;
-        }
+    // For user messages: navigateTree sets the leaf to the parent (excluding
+    // the message from context) and returns the text for re-submission.
+    if (entry.type === "message" && entry.message.role === "user") {
+        const result = await agentSession.navigateTree(targetEntryId, {
+            summarize: false,
+        });
+        return {
+            editorText: result.editorText,
+            cancelled: result.cancelled,
+        };
     }
 
-    const result = await agentSession.navigateTree(navigateTargetId, {
-        summarize: false,
-    });
+    // For non-user messages: move the leaf back to the parent so this message
+    // and everything after it are abandoned (parent = preceding user message).
+
+    // navigateTree can't do this: navigating to user msg excludes it,
+    // navigating to assistant includes it. We branch manually.
+    const parentEntryId = entry.parentId;
+    if (!parentEntryId) {
+        // No parent — root entry. Navigate directly (navigateTree includes it
+        // in context, which is the best we can do).
+        const result = await agentSession.navigateTree(targetEntryId, {
+            summarize: false,
+        });
+        return {
+            editorText: result.editorText,
+            cancelled: result.cancelled,
+        };
+    }
+
+    // Branch to the parent entry. This creates a new branch point — the old
+    // assistant message becomes a sibling, not an ancestor.
+    sessionManager.branch(parentEntryId);
+
+    // Rebuild the agent's context from the new branch position.
+    const sessionContext = sessionManager.buildSessionContext();
+    agentSession.agent.state.messages = sessionContext.messages;
+
+    // Extract user message text for frontend re-send. Walk up from parent to
+    // find the nearest user message (may not be one after regenWithFeedback).
+    let editorText: string | undefined;
+    let currentId: string | null = parentEntryId;
+    while (currentId) {
+        const ancestor = sessionManager.getEntry(currentId);
+        if (!ancestor) break;
+        if (ancestor.type === "message" && ancestor.message.role === "user") {
+            const content = ancestor.message.content;
+            if (typeof content === "string") {
+                editorText = content;
+                // Array.isArray is a type guard, not unbounded allocation
+                // oxlint-disable-next-line secure-coding/no-unlimited-resource-allocation
+            } else if (Array.isArray(content)) {
+                editorText = content
+                    .filter((c): c is { type: "text"; text: string } => c.type === "text")
+                    .map((c) => c.text)
+                    .join("\n");
+            }
+            break;
+        }
+        currentId = ancestor.parentId;
+    }
 
     return {
-        editorText: result.editorText,
-        cancelled: result.cancelled,
+        editorText,
+        cancelled: false,
     };
 }
 
-/**
- * In-place edit of an assistant message.
- *
- * Navigates the tree back to before the target assistant message, appends a
- * new assistant message with the edited text content, then replays all subsequent
- * entries (user messages, assistant messages, model changes, etc.) from the
- * abandoned branch onto the new branch.
- *
- * Since the session tree is append-only, this creates a new branch — the old
- * entries remain in the JSONL file but are no longer on the active path.
- *
- * @param agentSession - The PiAgentSession to edit (caller passes it in)
- */
 type SessionManager = PiAgentSession["sessionManager"];
 
-/** Replay a single entry onto the session manager (append to current branch). */
+/**
+ * Replay a single entry onto the session manager (append to current branch).
+ * @param sessionManager - The session manager to replay onto
+ * @param entry - The entry to replay
+ * @returns {void}
+ */
 function replayEntry(
     sessionManager: SessionManager,
     entry: SessionEntry
 ): void {
     switch (entry.type) {
         case "message":
-            // The SessionMessageEntry.message type is AgentMessage which includes custom
-            // message types (BranchSummaryMessage, etc.) via declaration merging, but
-            // appendMessage only accepts the base LLM-compatible message types. Since
-            // we're replaying entries from the current branch, all message entries
-            // will be standard LLM-compatible messages — safe to cast.
+            // SessionMessageEntry.message includes custom types via merging,
+            // but appendMessage accepts only base LLM. Safe to cast on current branch.
             sessionManager.appendMessage(entry.message as Parameters<typeof sessionManager.appendMessage>[0]);
             break;
         case "model_change":
@@ -592,9 +723,8 @@ function replayEntry(
             );
             break;
         case "label": {
-            // entry.label is string | undefined on LabelEntry; appendLabelChange
-            // accepts string | undefined per the .d.ts, but TS narrowing through
-            // the SessionEntry union doesn't cooperate. Force-cast to satisfy TS.
+            // entry.label is string | undefined; appendLabelChange accepts that per
+            // the .d.ts, but TS narrowing through the union fails. Force-cast.
             const labelEntry = entry as { targetId: string; label: string | undefined };
             sessionManager.appendLabelChange(labelEntry.targetId, labelEntry.label);
             break;
@@ -611,6 +741,22 @@ function replayEntry(
     }
 }
 
+/**
+ * In-place edit of an assistant message.
+ *
+ * Navigates the tree back to before the target assistant message, appends a
+ * new assistant message with the edited text content, then replays all subsequent
+ * entries (user messages, assistant messages, model changes, etc.) from the
+ * abandoned branch onto the new branch.
+ *
+ * Since the session tree is append-only, this creates a new branch — the old
+ * entries remain in the JSONL file but are no longer on the active path.
+ *
+ * @param agentSession - The PiAgentSession to edit (caller passes it in)
+ * @param targetEntryId - The entry ID of the assistant message to edit
+ * @param newContent - The new text content for the edited message
+ * @returns Whether the operation was cancelled
+ */
 export async function editAssistantMessage(
     agentSession: PiAgentSession,
     targetEntryId: string,
@@ -666,6 +812,7 @@ export async function editAssistantMessage(
  * Returns entry IDs and text content.
  *
  * @param activeSession - The active session to read from
+ * @returns Array of user messages with entry IDs and text content
  */
 export function getUserMessages(activeSession: ActiveSession): Array<{ entryId: string; text: string }> {
     return activeSession.agentSession.getUserMessagesForForking();

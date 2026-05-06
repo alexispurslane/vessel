@@ -1,4 +1,7 @@
 <script lang="ts">
+    /**
+     * @file Dialog wrapper for conversation settings.
+     */
     import {
         Dialog,
         DialogContent,
@@ -79,6 +82,24 @@
     // Conversation mode: "agent" = all tools, "chat" = no tools, null = inherit global
     let agentMode: "agent" | "chat" | null = $state(null);
 
+    /**
+     * Load an optional array setting into a pill-list state pair.
+     * Returns mapped items when the setting is present, or empty otherwise.
+     *
+     * @param values - The raw array from settings (or null/undefined)
+     * @param mapFn - Maps each raw value to a pill-list item
+     * @returns An object with useCustom and items state
+     */
+    function loadListSetting<T>(
+        values: string[] | null | undefined,
+        mapFn: (item: string) => T
+    ): { useCustom: boolean; items: T[] } {
+        if (values !== null && values !== undefined) {
+            return { useCustom: true, items: values.map(mapFn) };
+        }
+        return { useCustom: false, items: [] };
+    }
+
     // --- Load / Save ---
     async function loadSettings() {
         loading = true;
@@ -91,49 +112,33 @@
             allowAllDomainsState = settings.allowAllDomains ?? null;
             deleteWorkspaceWithConversation = settings.deleteWorkspaceWithConversation ?? true;
 
-            if (settings.extraReadPaths !== null && settings.extraReadPaths !== undefined) {
-                useCustomReadPaths = true;
-                readPaths = settings.extraReadPaths.map((p: string) => ({
-                    path: p,
-                    editing: false,
-                }));
-            } else {
-                useCustomReadPaths = false;
-                readPaths = [];
-            }
+            const read = loadListSetting(settings.extraReadPaths, (p: string) => ({
+                path: p,
+                editing: false,
+            }));
+            useCustomReadPaths = read.useCustom;
+            readPaths = read.items;
 
-            if (settings.extraWritePaths !== null && settings.extraWritePaths !== undefined) {
-                useCustomWritePaths = true;
-                writePaths = settings.extraWritePaths.map((p: string) => ({
-                    path: p,
-                    editing: false,
-                }));
-            } else {
-                useCustomWritePaths = false;
-                writePaths = [];
-            }
+            const write = loadListSetting(settings.extraWritePaths, (p: string) => ({
+                path: p,
+                editing: false,
+            }));
+            useCustomWritePaths = write.useCustom;
+            writePaths = write.items;
 
-            if (settings.allowedNetDomains !== null && settings.allowedNetDomains !== undefined) {
-                useCustomDomains = true;
-                allowedDomains = settings.allowedNetDomains.map((d: string) => ({
-                    domain: d,
-                    editing: false,
-                }));
-            } else {
-                useCustomDomains = false;
-                allowedDomains = [];
-            }
+            const domains = loadListSetting(settings.allowedNetDomains, (d: string) => ({
+                domain: d,
+                editing: false,
+            }));
+            useCustomDomains = domains.useCustom;
+            allowedDomains = domains.items;
 
-            if (settings.allowEnv !== null && settings.allowEnv !== undefined) {
-                useCustomEnvVars = true;
-                allowedEnvVars = settings.allowEnv.map((e: string) => ({
-                    name: e,
-                    editing: false,
-                }));
-            } else {
-                useCustomEnvVars = false;
-                allowedEnvVars = [];
-            }
+            const env = loadListSetting(settings.allowEnv, (e: string) => ({
+                name: e,
+                editing: false,
+            }));
+            useCustomEnvVars = env.useCustom;
+            allowedEnvVars = env.items;
 
             if (settings.secrets !== null && settings.secrets !== undefined) {
                 useCustomSecrets = true;

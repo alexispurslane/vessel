@@ -1,5 +1,7 @@
 <script lang="ts">
     /**
+     * @file Pill list for key-value pair entries.
+     *
      * A reusable component that renders a list of editable "pills" (rounded badges)
      * where each pill has multiple key-value fields (e.g. key, value, hosts for secrets).
      *
@@ -27,6 +29,7 @@
         /** Width class for the input (e.g. "w-24"). */
         width?: string;
         /** Input type — use "password" for sensitive fields. */
+        // oxlint-disable-next-line secure-coding/no-hardcoded-credentials -- 'password' is an HTML input type, not a credential
         type?: "text" | "password";
         /** Whether to display this field in the non-editing pill view. */
         showInView?: boolean;

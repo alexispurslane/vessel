@@ -38,6 +38,8 @@
         clearError();
         submitting = true;
         try {
+            // password passed to login function, never logged
+            // oxlint-disable-next-line secure-coding/no-sensitive-data-exposure
             await doLogin(username, password);
         } finally {
             submitting = false;

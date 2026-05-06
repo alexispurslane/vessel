@@ -1,5 +1,5 @@
 /**
- * Sandboxed tool operations backed by zerobox.
+ * @file Sandboxed tool operations backed by zerobox.
  *
  * Each operations interface wraps a zerobox Sandbox instance so that
  * tool execution (bash, read, write, edit, find, ls) is confined
@@ -30,6 +30,9 @@ import type {
 /**
  * Create sandboxed bash operations.
  * All shell commands execute inside the zerobox sandbox.
+ *
+ * @param sandbox - The zerobox sandbox instance to route commands through.
+ * @returns BashOperations implementation backed by the sandbox.
  */
 export function createSandboxedBashOps(sandbox: Sandbox): BashOperations {
     return {
@@ -37,9 +40,8 @@ export function createSandboxedBashOps(sandbox: Sandbox): BashOperations {
             // Run the command inside the sandbox, collect all output
             const result: CommandOutput = await sandbox.exec("sh", ["-c", command]).output();
 
-            // Dump the full output as one stream — the model gets it all at once anyway.
-            // The onData callback is for TUI rendering; in our web app context it just
-            // buffers into the tool result string.
+            // Dump full output as one stream — the model gets it all at once anyway.
+            // onData is for TUI rendering; in our web app it just buffers into the result.
             const combined = result.stdout + result.stderr;
             if (combined) {
                 options.onData(Buffer.from(combined));
@@ -55,6 +57,9 @@ export function createSandboxedBashOps(sandbox: Sandbox): BashOperations {
 /**
  * Create sandboxed read operations.
  * File reads go through zerobox so the sandbox's allowRead/denyRead policies apply.
+ *
+ * @param sandbox - The zerobox sandbox instance to route reads through.
+ * @returns ReadOperations implementation backed by the sandbox.
  */
 export function createSandboxedReadOps(sandbox: Sandbox): ReadOperations {
     return {
@@ -67,7 +72,7 @@ export function createSandboxedReadOps(sandbox: Sandbox): ReadOperations {
             return Buffer.from(output.stdout);
         },
         async access(absolutePath: string): Promise<void> {
-            // Use test inside the sandbox to check readability
+            // oxlint-disable-next-line secure-coding/no-hardcoded-credentials
             const result = await sandbox.exec("test", ["-r", absolutePath]).output();
             if (result.code !== 0) {
                 throw new Error(`File not readable: ${absolutePath}`);
@@ -81,6 +86,9 @@ export function createSandboxedReadOps(sandbox: Sandbox): ReadOperations {
 /**
  * Create sandboxed write operations.
  * File writes go through zerobox so the sandbox's allowWrite/denyWrite policies apply.
+ *
+ * @param sandbox - The zerobox sandbox instance to route writes through.
+ * @returns WriteOperations implementation backed by the sandbox.
  */
 export function createSandboxedWriteOps(sandbox: Sandbox): WriteOperations {
     return {
@@ -107,6 +115,9 @@ export function createSandboxedWriteOps(sandbox: Sandbox): WriteOperations {
 /**
  * Create sandboxed edit operations.
  * Combines read + write through the sandbox so edits are also confined.
+ *
+ * @param sandbox - The zerobox sandbox instance to route edits through.
+ * @returns EditOperations implementation backed by the sandbox.
  */
 export function createSandboxedEditOps(sandbox: Sandbox): EditOperations {
     return {
@@ -125,6 +136,7 @@ export function createSandboxedEditOps(sandbox: Sandbox): EditOperations {
             }
         },
         async access(absolutePath: string): Promise<void> {
+            // oxlint-disable-next-line secure-coding/no-hardcoded-credentials
             const result = await sandbox.exec("test", ["-r", absolutePath]).output();
             if (result.code !== 0) {
                 throw new Error(`File not accessible: ${absolutePath}`);
@@ -138,29 +150,34 @@ export function createSandboxedEditOps(sandbox: Sandbox): EditOperations {
 /**
  * Create sandboxed find operations.
  * File existence and glob matching go through the sandbox.
+ *
+ * @param sandbox - The zerobox sandbox instance to route finds through.
+ * @returns FindOperations implementation backed by the sandbox.
  */
 export function createSandboxedFindOps(sandbox: Sandbox): FindOperations {
     return {
         exists(absolutePath: string): Promise<boolean> | boolean {
+            // oxlint-disable secure-coding/no-hardcoded-credentials
             return sandbox
                 .exec("test", ["-e", absolutePath])
                 .output()
                 .then((r) => r.code === 0);
+            // oxlint-enable secure-coding/no-hardcoded-credentials
         },
         async glob(pattern: string, cwd: string, options: { ignore: string[]; limit: number }) {
-            // Use find inside the sandbox for glob matching
-            const ignoreArgs = options.ignore
-                .flatMap((i) => ["-not", "-path", `*/${i}/*`])
-                .join(" ");
-            const cmd = `find '${cwd}' -name '${pattern}' ${ignoreArgs || ""} -type f 2>/dev/null | head -n ${options.limit}`;
+            const findArgs: string[] = [cwd, "-name", pattern, "-type", "f"];
+            for (const ignore of options.ignore) {
+                findArgs.push("-not", "-path", `*/${ignore}/*`);
+            }
             const r = await sandbox
-                .exec("sh", ["-c", cmd])
+                .exec("find", findArgs)
                 .output();
             if (r.code !== 0 && !r.stdout) return [];
             return r.stdout
                 .split("\n")
                 .map((l) => l.trim())
-                .filter(Boolean);
+                .filter(Boolean)
+                .slice(0, options.limit);
         },
     };
 }
@@ -170,20 +187,25 @@ export function createSandboxedFindOps(sandbox: Sandbox): FindOperations {
 /**
  * Create sandboxed ls operations.
  * Directory listing and stat go through the sandbox.
+ *
+ * @param sandbox - The zerobox sandbox instance to route ls through.
+ * @returns LsOperations implementation backed by the sandbox.
  */
 export function createSandboxedLsOps(sandbox: Sandbox): LsOperations {
     return {
         exists(absolutePath: string): Promise<boolean> | boolean {
+            // oxlint-disable secure-coding/no-hardcoded-credentials
             return sandbox
                 .exec("test", ["-e", absolutePath])
                 .output()
                 .then((r) => r.code === 0);
+            // oxlint-enable secure-coding/no-hardcoded-credentials
         },
         async stat(absolutePath: string) {
-            // We need isDirectory — use test -d inside the sandbox
+            // oxlint-disable-next-line secure-coding/no-hardcoded-credentials
             const dirResult = await sandbox.exec("test", ["-d", absolutePath]).output();
             const isDir = dirResult.code === 0;
-            // Also check if path exists at all
+            // oxlint-disable-next-line secure-coding/no-hardcoded-credentials
             const existsResult = await sandbox.exec("test", ["-e", absolutePath]).output();
             if (existsResult.code !== 0) {
                 throw new Error(`path does not exist: ${absolutePath}`);

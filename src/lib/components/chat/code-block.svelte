@@ -1,4 +1,7 @@
 <script lang="ts">
+    /**
+     * @file Syntax-highlighted code block component.
+     */
     import Clipboard from "@lucide/svelte/icons/clipboard";
     import Check from "@lucide/svelte/icons/check";
     import { highlightElement } from "@speed-highlight/core";
@@ -17,7 +20,12 @@
     let copied = $state(false);
     let codeEl: HTMLDivElement | undefined = $state();
 
-    /** Map markdown lang identifiers to speed-highlight language names */
+    /**
+     * Map markdown lang identifiers to speed-highlight language names.
+     *
+     * @param l - The markdown language identifier
+     * @returns The speed-highlight language name
+     */
     function mapLang(l: string): string {
         if (!l) return "";
         const lower = l.toLowerCase();

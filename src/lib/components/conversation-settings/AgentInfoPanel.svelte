@@ -1,4 +1,7 @@
 <script lang="ts">
+    /**
+     * @file Panel showing agent info for a conversation.
+     */
     import { ScrollArea } from "$lib/components/ui/scroll-area/index.js";
     import { Spinner } from "$lib/components/ui/spinner/index.js";
     import { Tabs, TabsContent, TabsList, TabsTrigger } from "$lib/components/ui/tabs/index.js";

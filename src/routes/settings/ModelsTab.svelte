@@ -1,4 +1,7 @@
 <script lang="ts">
+    /**
+     * @file Settings tab for model selection and management.
+     */
     import { onMount } from "svelte";
     import { PROVIDERS, isOpenAICompatibleProvider, getProviderConfig } from "$lib/providers.js";
     import {
@@ -69,7 +72,12 @@
     /** Whether the current provider selection supports a models endpoint */
     let isOpenAICompatible = $derived(isOpenAICompatibleProvider(newProviderName));
 
-    /** Whether a given existing provider supports model fetching */
+    /**
+     * Whether a given existing provider supports model fetching.
+     *
+     * @param prov - The provider info object
+     * @returns Whether the provider has a models endpoint configured
+     */
     function providerSupportsFetch(prov: ProviderInfo): boolean {
         return !!prov.modelsEndpoint;
     }

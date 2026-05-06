@@ -1,10 +1,7 @@
 {
     "lsp": {
-        "eslint": {
-            "settings": {
-                "validate": "on",
-                "packageManager": "npm"
-            }
+        "oxc": {
+            "settings": {}
         },
         "vscode-css-language-server": {
             "settings": {

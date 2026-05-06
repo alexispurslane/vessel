@@ -22,6 +22,8 @@ const PATH_BLACKLIST = [
 ];
 
 function isBlacklistedPath(resolvedPath: string): boolean {
+    // filesystem path prefix check, not XPath
+    // oxlint-disable-next-line secure-coding/no-xpath-injection
     return PATH_BLACKLIST.some(prefix => resolvedPath === prefix || resolvedPath.startsWith(prefix + "/"));
 }
 
@@ -33,7 +35,17 @@ interface CompletionPathOptions {
     prefix: string;
 }
 
-/** Build the completion path for a directory entry. */
+/**
+ * Build the completion path for a directory entry.
+ *
+ * @param opts - Completion path options
+ * @param opts.name - The entry name
+ * @param opts.isDir - Whether the entry is a directory
+ * @param opts.partial - The original partial path
+ * @param opts.searchPath - The expanded search path
+ * @param opts.prefix - The prefix to filter by
+ * @returns The full completion path string
+ */
 function buildCompletionPath(opts: CompletionPathOptions): string {
     const { name, isDir, partial, searchPath, prefix } = opts;
     const parentDir = dirname(partial);
@@ -42,6 +54,7 @@ function buildCompletionPath(opts: CompletionPathOptions): string {
     if (partial.endsWith("/")) {
         completionPath = partial + name;
     } else if (prefix === "") {
+        // oxlint-disable-next-line secure-coding/no-xpath-injection
         completionPath = searchPath + "/" + name;
     } else if (parentDir === ".") {
         completionPath = name;
@@ -66,13 +79,55 @@ function buildCompletionPath(opts: CompletionPathOptions): string {
     return completionPath;
 }
 
-/** Sort completions: directories first, then alphabetically. */
+/**
+ * Sort completions: directories first, then alphabetically.
+ *
+ * @param a - First completion path
+ * @param b - Second completion path
+ * @returns Sort comparison value
+ */
 function sortCompletions(a: string, b: string): number {
     const aIsDir = a.endsWith("/");
     const bIsDir = b.endsWith("/");
     if (aIsDir && !bIsDir) return -1;
     if (!aIsDir && bIsDir) return 1;
     return a.localeCompare(b);
+}
+
+/**
+ * Resolve a search path into a directory to list and a prefix to filter by.
+ *
+ * @param searchPath - The expanded search path
+ * @returns An object with dirPath and prefix
+ */
+async function resolveSearchPath(searchPath: string): Promise<{ dirPath: string; prefix: string }> {
+    try {
+        const pathFile = Bun.file(searchPath);
+        const pathStat = await pathFile.stat();
+        if (pathStat.isDirectory()) {
+            return { dirPath: searchPath, prefix: "" };
+        }
+        return { dirPath: dirname(searchPath), prefix: basename(searchPath) };
+    } catch {
+        return { dirPath: dirname(searchPath), prefix: basename(searchPath) };
+    }
+}
+
+/**
+ * Check whether a directory entry matches the filter criteria.
+ *
+ * @param name - The entry name
+ * @param isDir - Whether the entry is a directory
+ * @param prefix - The prefix to filter by
+ * @param type - The type filter ("file", "directory", or "all")
+ * @returns True if the entry should be included in completions
+ */
+function entryMatchesFilter(name: string, isDir: boolean, prefix: string, type: string): boolean {
+    if (name.startsWith(".") && !prefix.startsWith(".")) return false;
+    if (!name.toLowerCase().startsWith(prefix.toLowerCase())) return false;
+    if (type === "directory" && !isDir) return false;
+    if (type === "file" && isDir) return false;
+    return true;
 }
 
 /**
@@ -97,23 +152,7 @@ export const POST = apiHandler(FsCompleteBody, async ({ body }) => {
     }
 
     // Determine the directory to list and the prefix to filter by
-    let dirPath: string;
-    let prefix: string;
-
-    try {
-        const pathFile = Bun.file(searchPath);
-        const pathStat = await pathFile.stat();
-        if (pathStat.isDirectory()) {
-            dirPath = searchPath;
-            prefix = "";
-        } else {
-            dirPath = dirname(searchPath);
-            prefix = basename(searchPath);
-        }
-    } catch {
-        dirPath = dirname(searchPath);
-        prefix = basename(searchPath);
-    }
+    const { dirPath, prefix } = await resolveSearchPath(searchPath);
 
     // Resolve to absolute path
     const resolvedDir = resolve(dirPath);
@@ -128,24 +167,16 @@ export const POST = apiHandler(FsCompleteBody, async ({ body }) => {
         const completions: string[] = [];
 
         for (const entry of entries) {
-            const name = entry.name;
-
-            // Skip hidden files unless prefix starts with .
-            if (name.startsWith(".") && !prefix.startsWith(".")) {
-                continue;
-            }
-
-            // Filter by prefix
-            if (!name.toLowerCase().startsWith(prefix.toLowerCase())) {
-                continue;
-            }
-
-            // Filter by type
             const isDir = entry.isDirectory();
-            if (type === "directory" && !isDir) continue;
-            if (type === "file" && isDir) continue;
+            if (!entryMatchesFilter(entry.name, isDir, prefix, type)) continue;
 
-            completions.push(buildCompletionPath({ name, isDir, partial, searchPath, prefix }));
+            completions.push(buildCompletionPath({
+                name: entry.name,
+                isDir,
+                partial,
+                searchPath,
+                prefix,
+            }));
         }
 
         completions.sort(sortCompletions);

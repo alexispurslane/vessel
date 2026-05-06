@@ -1,5 +1,5 @@
 /**
- * MCP server configuration management.
+ * @file MCP server configuration management.
  *
  * MCP server configs are stored in the `settings` table under the key
  * `mcp.servers` as a JSON object: `{ "server-name": { ...ServerEntry }, ... }`
@@ -58,6 +58,7 @@ export interface McpServerInfo {
 /**
  * Get all MCP server configs from the DB.
  * Returns the raw `Record<string, McpServerEntry>` object.
+ * @returns The MCP servers config object, or empty object on failure
  */
 export function getMcpServersFromDb(): Record<string, McpServerEntry> {
     const db = getDb();
@@ -76,6 +77,8 @@ export function getMcpServersFromDb(): Record<string, McpServerEntry> {
 
 /**
  * Set the entire MCP servers config in the DB.
+ * @param servers - The full MCP servers config to persist
+ * @returns {void}
  */
 export function setMcpServersToDb(servers: Record<string, McpServerEntry>): void {
     const db = getDb();
@@ -88,6 +91,7 @@ export function setMcpServersToDb(servers: Record<string, McpServerEntry>): void
 
 /**
  * List all MCP servers (for the frontend).
+ * @returns Array of MCP server info with name and config
  */
 export function listMcpServers(): McpServerInfo[] {
     const servers = getMcpServersFromDb();
@@ -96,6 +100,9 @@ export function listMcpServers(): McpServerInfo[] {
 
 /**
  * Add or update a single MCP server.
+ * @param name - The server name
+ * @param config - The server configuration
+ * @returns {Promise<void>}
  */
 export async function upsertMcpServer(name: string, config: McpServerEntry): Promise<void> {
     const servers = getMcpServersFromDb();
@@ -107,6 +114,8 @@ export async function upsertMcpServer(name: string, config: McpServerEntry): Pro
 /**
  * Delete a single MCP server by name.
  * Returns true if the server existed and was deleted.
+ * @param name - The server name to delete
+ * @returns Whether the server existed and was deleted
  */
 export async function deleteMcpServer(name: string): Promise<boolean> {
     const servers = getMcpServersFromDb();
@@ -124,6 +133,9 @@ export async function deleteMcpServer(name: string): Promise<boolean> {
  * The global config file only includes servers with `defaultEnabled !== false`,
  * since this is what new conversation sessions (with no per-conversation override)
  * will use. Per-conversation filtering is handled separately by filterMcpServers().
+ *
+ * @param servers - Optional server configs to write; reads from DB if omitted
+ * @returns {Promise<void>}
  */
 export async function writeMcpConfigFile(servers?: Record<string, McpServerEntry>): Promise<void> {
     const allServers = servers ?? getMcpServersFromDb();
@@ -169,6 +181,9 @@ export async function ensureMcpConfigFile(): Promise<void> {
  *   (servers with `defaultEnabled !== false` are included, i.e. `true` or missing = on)
  * - `enabledMcpServers === []`: no servers included
  * - `enabledMcpServers === ["github", "fs"]`: only those named servers
+ *
+ * @param enabledMcpServers - Explicit list of server names, or null/undefined for defaults
+ * @returns Filtered MCP servers config
  */
 export function filterMcpServers(
     enabledMcpServers: string[] | null | undefined
@@ -199,6 +214,9 @@ export function filterMcpServers(
 /**
  * Write a per-conversation MCP config file and return its path.
  * This is used when a conversation only enables a subset of MCP servers.
+ * @param conversationId - The conversation ID
+ * @param enabledMcpServers - Explicit list of server names, or null/undefined for defaults
+ * @returns The path to the written config file
  */
 export async function writeConversationMcpConfig(
     conversationId: string,

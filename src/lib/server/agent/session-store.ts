@@ -1,5 +1,5 @@
 /**
- * Session store — central coordinator.
+ * @file Active session lifecycle management: creation, subscription, disposal, and inter-session coordination.
  *
  * Owns the `sessions` Map and provides the core session lifecycle:
  * getOrCreateSession, subscribe, sendMessage, switchSessionModel,
@@ -90,6 +90,7 @@ import {
     getConversationDbRow,
     navigateSessionMessage,
     editSessionAssistantMessage,
+    regenWithFeedback as regenWithFeedbackSession,
     getSessionUserMessages,
     getSessionTreeFromSession,
     setSessionLeafEntry,
@@ -136,6 +137,12 @@ const sessions = new Map<string, ActiveSession>();
 
 // --- Session disposal ---
 
+/**
+ * Schedule a session for disposal after the idle timeout.
+ *
+ * @param conversationId - The conversation ID to schedule for disposal
+ * @returns {void}
+ */
 function scheduleDispose(conversationId: string): void {
     const session = sessions.get(conversationId);
     if (!session) return;
@@ -158,6 +165,12 @@ function scheduleDispose(conversationId: string): void {
     }, SESSION_DISPOSE_TIMEOUT_MS);
 }
 
+/**
+ * Cancel a pending disposal timer for a session.
+ *
+ * @param conversationId - The conversation ID whose disposal to cancel
+ * @returns {void}
+ */
 function cancelDispose(conversationId: string): void {
     const session = sessions.get(conversationId);
     if (session?.disposeTimer) {
@@ -170,6 +183,9 @@ function cancelDispose(conversationId: string): void {
  * Immediately dispose a session if it has no subscribers and is not streaming.
  * Called from the broadcast function after agent_end events, so sessions
  * that just finished generating don't leak when the user already navigated away.
+ *
+ * @param conversationId - The conversation ID to check for idle disposal
+ * @returns {void}
  */
 function disposeIfIdle(conversationId: string): void {
     const session = sessions.get(conversationId);
@@ -194,6 +210,10 @@ function disposeIfIdle(conversationId: string): void {
 /**
  * Create a new conversation (both in our DB and as a pi session file).
  * Returns the conversation ID.
+ *
+ * @param title - Optional title for the conversation
+ * @param modelId - Optional model ID to use for the conversation
+ * @returns The newly created conversation ID
  */
 export async function createConversation(title?: string, modelId?: string): Promise<string> {
     const id = randomUUID();
@@ -223,6 +243,9 @@ export async function createConversation(title?: string, modelId?: string): Prom
  * Fully destroy a conversation: dispose in-memory session, delete the
  * pi session file, delete the workspace directory (if configured), and remove the DB row.
  * Only called when the user explicitly hits the trash icon.
+ *
+ * @param conversationId - The conversation ID to destroy
+ * @returns {void}
  */
 export async function destroyConversation(conversationId: string): Promise<void> {
     // 1. Dispose in-memory session if loaded
@@ -253,12 +276,25 @@ export async function destroyConversation(conversationId: string): Promise<void>
     log.info("session-store", `Destroyed conversation ${conversationId} (explicit user delete)`);
 }
 
-/** Open the SessionManager for a conversation, overriding cwd to match the session work dir. */
+/**
+ * Open the SessionManager for a conversation, overriding cwd to match the session work dir.
+ *
+ * @param row - DB row with session file path
+ * @param row.session_file_path - Path to the pi session file
+ * @param sessionWorkDir - Working directory for the session
+ * @returns The opened SessionManager
+ */
 function openSessionManager(row: { session_file_path: string }, sessionWorkDir: string): SessionManager {
     return SessionManager.open(row.session_file_path, SESSIONS_DIR, sessionWorkDir);
 }
 
-/** Resolve MCP config: write per-conversation or use global, return flags and whether MCP is active. */
+/**
+ * Resolve MCP config: write per-conversation or use global, return flags and whether MCP is active.
+ *
+ * @param conversationId - The conversation ID
+ * @param conversationSettings - Per-conversation settings (may include enabledMcpServers)
+ * @returns MCP flag values and whether any MCP servers are active
+ */
 async function resolveMcpConfig(conversationId: string, conversationSettings: ConversationSettings | null): Promise<{
     mcpFlagValues: Map<string, boolean | string>;
     hasMcpServers: boolean;
@@ -280,7 +316,16 @@ async function resolveMcpConfig(conversationId: string, conversationSettings: Co
 
 // --- getOrCreateConversation helpers ---
 
-/** Resolve the model for a conversation: conversation-specific → global default → none. */
+/**
+ * Resolve the model for a conversation: conversation-specific → global default → none.
+ *
+ * @param row - DB row with model provider and model ID
+ * @param row.model_provider - The model provider from the DB
+ * @param row.model_id - The model ID from the DB
+ * @param settingsManager - Settings manager for default model config
+ * @param modelRegistry - Registry to look up models by ID
+ * @returns The resolved PiModel, or undefined if none configured
+ */
 function resolveSessionModel(
     row: { model_provider: string | null; model_id: string | null },
     settingsManager: SettingsManager,
@@ -334,7 +379,12 @@ interface SessionInfrastructureOptions {
     sessionWorkDir: string;
 }
 
-/** Create the agent session infrastructure: extensions, resource loader, and the session itself. */
+/**
+ * Create the agent session infrastructure: extensions, resource loader, and the session itself.
+ *
+ * @param opts - Session infrastructure options
+ * @returns The agent session and extensions result
+ */
 async function createSessionInfrastructure(
     opts: SessionInfrastructureOptions
 ): Promise<{ agentSession: PiAgentSession; extensionsResult: Awaited<ReturnType<typeof createAgentSession>>["extensionsResult"] }> {
@@ -376,15 +426,22 @@ async function createSessionInfrastructure(
         }
     }
 
-    // Initialize extensions by calling bindExtensions(). This emits the
-    // session_start event, which pi-mcp-adapter uses to connect to MCP servers.
-    // In the web app we don't have a TUI, so we pass empty bindings.
+    // Initialize extensions via bindExtensions(). This emits session_start so
+    // pi-mcp-adapter connects to MCP servers. No TUI, so pass empty bindings.
     await agentSession.bindExtensions({});
 
     return { agentSession, extensionsResult };
 }
 
-/** Register Vessel-specific tools (fetch, search, sandboxed tools) and set active tools. */
+/**
+ * Register Vessel-specific tools (fetch, search, sandboxed tools) and set active tools.
+ *
+ * @param agentSession - The agent session to register tools on
+ * @param conversationSettings - Per-conversation settings for tool resolution
+ * @param sandbox - Optional sandbox instance for sandboxed tools
+ * @param searchResultUrls - Set to collect search result URLs
+ * @returns {void}
+ */
 function registerVesselTools(
     agentSession: PiAgentSession,
     conversationSettings: ConversationSettings | null,
@@ -459,15 +516,24 @@ function registerVesselTools(
     }
 }
 
-/** Read a global setting from the DB by key, returning its string value or null. */
+/**
+ * Read a global setting from the DB by key, returning its string value or null.
+ *
+ * @param key - The setting key to look up
+ * @returns The setting value, or null if not found
+ */
 function readGlobalSetting(key: string): string | null {
     const db = getDb();
     const row = db.query("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined;
     return row?.value ?? null;
 }
 
-/** Resolve the append system prompt: conversation override → global, migrating legacy string format.
- *  Also appends user identity information (name and pronouns) so the AI can address the user properly.
+/**
+ * Resolve the append system prompt: conversation override → global, migrating legacy string format.
+ * Also appends user identity information (name and pronouns) so the AI can address the user properly.
+ *
+ * @param conversationSettings - Per-conversation settings (may include appendSystemPrompt)
+ * @returns Array of append system prompt strings
  */
 function resolveAppendSystemPrompt(conversationSettings: ConversationSettings | null): string[] {
     let rawAppend = conversationSettings?.appendSystemPrompt ?? null;
@@ -499,7 +565,11 @@ function resolveAppendSystemPrompt(conversationSettings: ConversationSettings | 
     ];
 }
 
-/** Build the user identity append string (name and pronouns) for the system prompt. */
+/**
+ * Build the user identity append string (name and pronouns) for the system prompt.
+ *
+ * @returns The user identity string, or null if no identity info available
+ */
 function buildUserInfoAppend(): string | null {
     const username = getUsername();
     const pronouns = getPronouns();
@@ -513,7 +583,13 @@ function buildUserInfoAppend(): string | null {
     return info;
 }
 
-/** Apply custom/append system prompt overrides to the agent session. */
+/**
+ * Apply custom/append system prompt overrides to the agent session.
+ *
+ * @param agentSession - The agent session to apply overrides to
+ * @param conversationSettings - Per-conversation settings with prompt overrides
+ * @returns {void}
+ */
 function applySystemPromptOverrides(
     agentSession: PiAgentSession,
     conversationSettings: ConversationSettings | null
@@ -533,7 +609,14 @@ function applySystemPromptOverrides(
     }
 }
 
-/** Wire up agent + EventBus subscriptions to broadcast SSE events. */
+/**
+ * Wire up agent + EventBus subscriptions to broadcast SSE events.
+ *
+ * @param agentSession - The agent session to subscribe to
+ * @param eventBus - The event bus for internal events
+ * @param conversationId - The conversation ID for event routing
+ * @returns An unsubscribe function
+ */
 function setupSessionEventSubscriptions(
     agentSession: PiAgentSession,
     eventBus: ReturnType<typeof createEventBus>,
@@ -557,13 +640,13 @@ function setupSessionEventSubscriptions(
             (sseEvent.data as Record<string, unknown>).turnGeneration = session.turnGeneration;
         }
 
-        broadcast(sessions, scheduleDispose, disposeIfIdle, conversationId, sseEvent);
+        broadcast({ sessions, scheduleDispose, disposeIfIdle }, conversationId, sseEvent);
     });
 
     const unsubscribeEventBus = eventBus.on("fetched_sources", (data) => {
         const sources = data as FetchedSource[];
         log.debug("fetch-tracker", `EventBus received fetched_sources: ${String(sources.length)} sources for conversation ${conversationId}`);
-        broadcast(sessions, scheduleDispose, disposeIfIdle, conversationId, {
+        broadcast({ sessions, scheduleDispose, disposeIfIdle }, conversationId, {
             event: "fetched_sources",
             data: { sources },
         });
@@ -579,6 +662,9 @@ function setupSessionEventSubscriptions(
  * Get or create an active AgentSession for a conversation.
  * If the session is already in memory, return it.
  * If not, hydrate from the pi session file.
+ *
+ * @param conversationId - The conversation ID to get or hydrate
+ * @returns The active AgentSession for the conversation
  */
 export async function getOrHydrateSession(conversationId: string): Promise<PiAgentSession> {
     const existing = sessions.get(conversationId);
@@ -603,7 +689,7 @@ export async function getOrHydrateSession(conversationId: string): Promise<PiAge
 
     const modelRegistry = getModelRegistry();
 
-    // Load per-conversation settings and compute session work dir before opening session
+    // Load per-conversation settings and compute session work dir before opening
     const conversationSettings = loadConversationSettingsFromDb(conversationId);
     const sandbox = await createSessionSandbox(conversationId, conversationSettings);
     const sessionWorkDir = sandbox ? getSessionWorkDir(conversationId) : process.cwd();
@@ -651,6 +737,11 @@ export async function getOrHydrateSession(conversationId: string): Promise<PiAge
 /**
  * Subscribe to SSE events for a session.
  * Returns an unsubscribe function.
+ *
+ * @param conversationId - The conversation ID to subscribe to
+ * @param subscriberId - Unique ID for this subscriber
+ * @param send - Callback to send SSE events to the subscriber
+ * @returns An unsubscribe function
  */
 export function subscribeToConversation(
     conversationId: string,
@@ -666,12 +757,11 @@ export function subscribeToConversation(
     cancelDispose(conversationId);
     session.subscribers.set(subscriberId, { send });
 
-    // If the session is actively streaming, send a recovery snapshot so the
-    // reconnecting client can display the partial in-flight message.
-    // The subscriber is registered FIRST so any subsequent deltas broadcast
-    // after this point will also be delivered — and the snapshot already
-    // includes all content accumulated up to this synchronous point, so no
-    // deltas are lost. (Node.js single-threaded model guarantees this.)
+    // If streaming, send a recovery snapshot so the reconnecting client shows
+    // the partial in-flight message.
+
+    // Subscriber is registered first so subsequent deltas are also delivered.
+    // Snapshot includes all content up to this sync point — no deltas lost.
     if (session.agentSession.isStreaming) {
         const state = session.agentSession.state;
         const streamingMsg = state.streamingMessage;
@@ -697,6 +787,14 @@ export function subscribeToConversation(
 
 /**
  * Send a custom (non-displayed) message to an active session.
+ *
+ * @param conversationId - The conversation ID to send to
+ * @param customType - The custom message type
+ * @param content - The message content
+ * @param options - Optional delivery options
+ * @param options.triggerTurn - Whether to trigger a new turn
+ * @param options.deliverAs - How to deliver the message
+ * @returns {void}
  */
 export async function sendCustomMessage(
     conversationId: string,
@@ -710,6 +808,11 @@ export async function sendCustomMessage(
 
 /**
  * Send a user message to the agent.
+ *
+ * @param conversationId - The conversation ID to send to
+ * @param content - The message content
+ * @param statusContent - Optional status content shown during generation
+ * @returns {void}
  */
 export async function sendMessage(conversationId: string, content: string, statusContent?: string): Promise<void> {
     const agentSession = await getOrHydrateSession(conversationId);
@@ -722,6 +825,10 @@ export async function sendMessage(conversationId: string, content: string, statu
  * If not, this is a no-op (the model will be set when the session is created).
  *
  * Only requires a model ID — the provider is resolved automatically.
+ *
+ * @param conversationId - The conversation ID to switch model for
+ * @param modelId - The model ID to switch to
+ * @returns {void}
  */
 export async function switchSessionModel(conversationId: string, modelId: string): Promise<void> {
     const model = findModelById(modelId);
@@ -744,6 +851,9 @@ export async function switchSessionModel(conversationId: string, modelId: string
 
 /**
  * Abort current generation for a session.
+ *
+ * @param conversationId - The conversation ID to abort generation for
+ * @returns {void}
  */
 export async function abortSession(conversationId: string): Promise<void> {
     const session = sessions.get(conversationId);
@@ -758,6 +868,9 @@ export async function abortSession(conversationId: string): Promise<void> {
  *
  * Used by file upload/delete endpoints to trigger a sandbox snapshot
  * after out-of-band filesystem changes.
+ *
+ * @param conversationId - The conversation ID to get sandbox for
+ * @returns The Sandbox instance, or null if not available
  */
 export function getSessionSandbox(conversationId: string): Sandbox | null {
     const session = sessions.get(conversationId);
@@ -773,18 +886,21 @@ export function getSessionSandbox(conversationId: string): Sandbox | null {
  * Called by:
  * - Idle timeout (scheduleDispose): all subscribers disconnected
  * - Browser session end (via /api/sessions/release endpoint)
+ *
+ * @param conversationId - The conversation ID to dispose
+ * @param options - Optional disposal options
+ * @param options.force - Whether to force disposal even if streaming
+ * @returns {void}
  */
 export function disposeSession(conversationId: string, options?: { force?: boolean }): void {
     const session = sessions.get(conversationId);
     if (!session) return;
 
-    // Don't dispose if the agent is actively generating. Disposal will be
-    // retried when the generation finishes and all subscribers disconnect.
-    // Force disposal is allowed for explicit conversation deletion.
-    //
-    // Also don't dispose if there are active subscribers — even if isStreaming
-    // is momentarily false between events in a multi-turn loop, a connected
-    // client means the session is still in use.
+    // Don't dispose if the agent is actively generating. Disposal is retried
+    // when generation finishes and all subscribers disconnect. Force allowed.
+
+    // Don't dispose if there are active subscribers — even if isStreaming is
+    // momentarily false between multi-turn events, a connected client = in use.
     if (!options?.force && (session.agentSession.isStreaming || session.subscribers.size > 0)) return;
 
     // Clear any pending disposal timer
@@ -805,14 +921,16 @@ export function disposeSession(conversationId: string, options?: { force?: boole
  * sandbox policy) when next accessed via getOrCreateSession.
  *
  * Returns true if the session was active and disposed, false otherwise.
+ *
+ * @param conversationId - The conversation ID to restart
+ * @returns Whether the session was active and disposed
  */
 export function restartSession(conversationId: string): boolean {
     const session = sessions.get(conversationId);
     if (!session) return false;
 
-    // Don't restart mid-generation — the user may reload and need the
-    // session (and event buffer) alive. The restart will happen naturally
-    // when the session is next loaded after the generation completes.
+    // Don't restart mid-generation — the user may reload and need the session
+    // alive. Restart happens naturally on next load after generation completes.
     if (session.agentSession.isStreaming) return false;
 
     // Clear any pending disposal timer
@@ -834,6 +952,12 @@ export function restartSession(conversationId: string): boolean {
  * the system prompt. The session picks up changes immediately on the next turn.
  *
  * Also persists the custom system prompt to the conversation_settings DB table.
+ *
+ * @param conversationId - The conversation ID to update prompt for
+ * @param options - System prompt override options
+ * @param options.customSystemPrompt - Custom system prompt to set (null to clear)
+ * @param options.appendSystemPrompt - Append system prompt lines to set (null to clear)
+ * @returns Whether the update was applied (false if session not in memory)
  */
 export function updateSessionSystemPrompt(
     conversationId: string,
@@ -877,9 +1001,8 @@ export function updateSessionSystemPrompt(
     }
     saveConversationSettingsToDb(conversationId, existingSettings);
 
-    // Keep the in-memory conversation settings in sync so that
-    // getSessionAgentInfo() reads the updated values without needing
-    // to re-read from the DB.
+    // Keep the in-memory conversation settings in sync so
+    // getSessionAgentInfo() reads updated values without re-reading DB.
     session.conversationSettings = existingSettings;
 
     return true;
@@ -891,6 +1014,8 @@ export function updateSessionSystemPrompt(
  * when next accessed via getOrCreateSession.
  *
  * Returns the number of sessions that were restarted.
+ *
+ * @returns The number of sessions restarted
  */
 export function restartAllSessions(): number {
     const ids = [...sessions.keys()];
@@ -925,6 +1050,9 @@ export function restartAllSessions(): number {
  * Returns an object with:
  * - messages: array of { id, role, content, thinking, model, modelProvider, timestamp }
  * - model: the last model used (provider + modelId)
+ *
+ * @param conversationId - The conversation ID to load history for
+ * @returns Object with messages array and last model info
  */
 export async function getSessionHistory(conversationId: string): Promise<{
     messages: Array<{
@@ -959,9 +1087,8 @@ export async function getSessionHistory(conversationId: string): Promise<{
         return { messages: [], model: null };
     }
 
-    // Ensure the session is loaded — it restores from the JSONL file automatically.
-    // This also gives us tree-aware history (respecting the current leaf position
-    // after any navigation/edit/delete operations).
+    // Ensure the session is loaded (restores from JSONL automatically) and we
+    // get tree-aware history respecting the current leaf position.
     await getOrHydrateSession(conversationId);
 
     // Cancel any pending disposal since we're actively using the session
@@ -981,6 +1108,9 @@ export async function getSessionHistory(conversationId: string): Promise<{
  * Get the current system prompt and available tools/skills for a conversation's
  * active AgentSession. The session must be loaded in memory (getOrCreateSession
  * handles this automatically).
+ *
+ * @param conversationId - The conversation ID to get agent info for
+ * @returns Agent info object, or null if session not active
  */
 export function getSessionAgentInfo(conversationId: string): {
     systemPrompt: string;
@@ -1012,6 +1142,9 @@ export function getSessionAgentInfo(conversationId: string): {
 /**
  * Get the MCP server connection status for an active conversation session.
  * Reads from pi-mcp-adapter's internal McpServerManager via the extension runner.
+ *
+ * @param conversationId - The conversation ID to get MCP status for
+ * @returns Array of MCP server statuses
  */
 export function getMcpServerStatus(conversationId: string): McpServerStatusType[] {
     const session = sessions.get(conversationId);
@@ -1031,6 +1164,10 @@ export function getMcpServerStatus(conversationId: string): McpServerStatusType[
  *
  * This uses the SDK's navigateTree method which handles branching properly
  * in the append-only session tree.
+ *
+ * @param conversationId - The conversation ID to navigate
+ * @param targetEntryId - The entry ID to navigate to
+ * @returns Object with editor text (for user messages) and cancelled status
  */
 export async function navigateMessage(
     conversationId: string,
@@ -1055,6 +1192,11 @@ export async function navigateMessage(
  *
  * Since the session tree is append-only, this creates a new branch — the old
  * entries remain in the JSONL file but are no longer on the active path.
+ *
+ * @param conversationId - The conversation ID to edit in
+ * @param targetEntryId - The assistant entry ID to edit
+ * @param newContent - The new text content for the assistant message
+ * @returns Object with cancelled status
  */
 export async function editAssistantMessage(
     conversationId: string,
@@ -1069,8 +1211,35 @@ export async function editAssistantMessage(
 }
 
 /**
+ * Regenerate an assistant message with user feedback.
+ *
+ * Navigates the session tree back to before the target assistant message
+ * (creating a new branch), then sends the user's critique as a hidden
+ * custom message that quotes the original response. The custom message
+ * triggers a new LLM turn, so the agent generates a corrected response.
+ *
+ * @param conversationId - The conversation ID to regenerate in
+ * @param targetEntryId - The assistant entry ID to regenerate
+ * @param feedback - The user's feedback on the original response
+ * @returns Object with cancelled status
+ */
+export async function regenWithFeedback(
+    conversationId: string,
+    targetEntryId: string,
+    feedback: string
+): Promise<{ cancelled: boolean }> {
+    const agentSession = await getOrHydrateSession(conversationId);
+    cancelDispose(conversationId);
+
+    return regenWithFeedbackSession(agentSession, targetEntryId, feedback);
+}
+
+/**
  * Get all user messages from the session, for editing/forking.
  * Returns entry IDs and text content.
+ *
+ * @param conversationId - The conversation ID to get user messages for
+ * @returns Array of entry IDs and text content
  */
 export function getUserMessages(conversationId: string): Array<{ entryId: string; text: string }> {
     const session = sessions.get(conversationId);
@@ -1085,6 +1254,9 @@ export function getUserMessages(conversationId: string): Array<{ entryId: string
  * Get the full session tree as nodes and relations for DAG visualization.
  * Returns only user messages and final assistant text responses (no tool calls,
  * thinking blocks, tool results, or other intermediate entries).
+ *
+ * @param conversationId - The conversation ID to get tree for
+ * @returns Object with tree nodes, relations, and current leaf ID
  */
 export async function getSessionTree(conversationId: string): Promise<{
     nodes: import("./session-messages.js").SessionTreeNodeData[];
@@ -1102,6 +1274,10 @@ export async function getSessionTree(conversationId: string): Promise<{
  * Used by the DAG viewer to navigate to a different point in the tree.
  * Unlike navigateMessage (which handles edit/delete semantics), this directly
  * branches to the target entry.
+ *
+ * @param conversationId - The conversation ID to set leaf for
+ * @param targetEntryId - The entry ID to set as the current leaf
+ * @returns {void}
  */
 export async function setSessionLeaf(conversationId: string, targetEntryId: string): Promise<void> {
     const agentSession = await getOrHydrateSession(conversationId);
@@ -1114,6 +1290,8 @@ export async function setSessionLeaf(conversationId: string, targetEntryId: stri
 
 /**
  * Get all custom model definitions from our DB.
+ *
+ * @returns Array of custom model definitions
  */
 export function listCustomModels(): CustomModelDef[] {
     const db = getDb();
@@ -1144,6 +1322,8 @@ export function listCustomModels(): CustomModelDef[] {
  * Validates that the model ID doesn't already exist under a different provider
  * (in either custom models or built-in models from pi's registry).
  *
+ * @param model - The custom model definition to upsert
+ * @returns {void}
  * @throws Error if the model ID already exists under a different provider
  */
 export function upsertCustomModel(model: CustomModelDef): void {
@@ -1197,6 +1377,9 @@ export function upsertCustomModel(model: CustomModelDef): void {
 /**
  * Delete a custom model from our DB.
  * Only requires the model ID — provider is implicit from the unique ID.
+ *
+ * @param id - The model ID to delete
+ * @returns {void}
  */
 export function deleteCustomModel(id: string): void {
     const db = getDb();

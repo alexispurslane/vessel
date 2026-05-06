@@ -1,4 +1,7 @@
 <script lang="ts">
+    /**
+     * @file Main sidebar with search, pinned/recent conversations, and navigation.
+     */
     import {
         Sidebar,
         SidebarContent,

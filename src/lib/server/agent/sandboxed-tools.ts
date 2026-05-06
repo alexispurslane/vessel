@@ -1,5 +1,5 @@
 /**
- * Sandboxed coding tools for pi-coding-agent.
+ * @file Sandboxed coding tools for pi-coding-agent.
  *
  * Builds each tool individually with custom Operations that route
  * through a zerobox Sandbox, instead of using the convenience
@@ -53,6 +53,11 @@ export interface SandboxedCodingToolsOptions {
  * ripgrep search runs directly on the host and can't be intercepted. The agent
  * can use bash with grep/rg commands instead, which goes through the sandboxed
  * bash operations.
+ *
+ * @param cwd - The working directory for the tools
+ * @param sandbox - The zerobox sandbox instance
+ * @param options - Optional configuration (search result URL tracker)
+ * @returns Array of sandboxed AgentTool instances
  */
 export function createSandboxedCodingTools(cwd: string, sandbox: Sandbox, options?: SandboxedCodingToolsOptions): AnyAgentTool[] {
     return [

@@ -18,6 +18,8 @@ export const GET = tryApi(() => {
 
     const settings: Record<string, string> = {};
     for (const row of rows) {
+        // row.key from DB settings table under our control, not user input
+        // oxlint-disable-next-line secure-coding/detect-object-injection
         settings[row.key] = row.value;
     }
 

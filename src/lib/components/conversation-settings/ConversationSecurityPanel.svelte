@@ -1,4 +1,7 @@
 <script lang="ts">
+    /**
+     * @file Panel for editing per-conversation security settings.
+     */
     import { Button } from "$lib/components/ui/button/index.js";
     import { Switch } from "$lib/components/ui/switch/index.js";
     import { Separator } from "$lib/components/ui/separator/index.js";

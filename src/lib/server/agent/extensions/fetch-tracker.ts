@@ -1,5 +1,5 @@
 /**
- * Source tracker extension for pi-coding-agent.
+ * @file Source tracker extension for pi-coding-agent.
  *
  * Tracks which sources the agent has consulted (fetched pages and web searches)
  * since the model's last full message to the user. Uses the extension lifecycle
@@ -32,6 +32,9 @@ export type { FetchedSource };
  * Check if a turn's assistant message contains visible text content for the
  * user, as opposed to being an intermediate step (just tool calls + thinking).
  * Intermediate turns typically have only a newline or empty text plus tool calls.
+ *
+ * @param message - The turn end event message
+ * @returns Whether the message has visible text content
  */
 function hasVisibleText(message: TurnEndEvent["message"]): boolean {
     if (message.role !== "assistant") return false;
@@ -50,6 +53,12 @@ function hasVisibleText(message: TurnEndEvent["message"]): boolean {
     return false;
 }
 
+/**
+ * Extension factory that tracks fetched sources during agent turns.
+ *
+ * @param pi - The pi extension API
+ * @returns The extension lifecycle handlers
+ */
 export const fetchTracker: ExtensionFactory = (pi) => {
     let sources: FetchedSource[] = [];
     let currentTurn = 0;
@@ -96,6 +105,11 @@ export const fetchTracker: ExtensionFactory = (pi) => {
         }
     });
 
+    /**
+     * Flush accumulated sources to the session file and SSE layer.
+     *
+     * @returns {void}
+     */
     const flush = () => {
         if (sources.length === 0) return;
 
@@ -111,9 +125,8 @@ export const fetchTracker: ExtensionFactory = (pi) => {
     };
 
     pi.on("turn_end", (event: TurnEndEvent) => {
-        // Only flush when the turn produced visible text for the user.
-        // Intermediate turns (tool call + thinking only) should keep
-        // accumulating sources until the final response or agent_end.
+        // Only flush when the turn produced visible text. Intermediate turns
+        // (tool call + thinking only) keep accumulating until final response/agent_end.
         const visible = hasVisibleText(event.message);
         log.debug("fetch-tracker", `turn_end, hasVisibleText: ${String(visible)}, accumulated sources: ${String(sources.length)}`);
         if (!visible) return;

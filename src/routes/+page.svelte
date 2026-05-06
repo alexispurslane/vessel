@@ -106,20 +106,22 @@
         const messageText = inputValue.trim();
         const id = await createConversation();
         if (id) {
-            // Navigate to chat page with the initial message and model selection as URL parameters.
-            // The chat page will send the message after connecting to the SSE stream,
-            // ensuring the user message is displayed immediately and the response streams properly.
+            // Navigate to chat page with the initial message and model selection
+            // as URL params. The chat page sends after connecting to the SSE stream.
             isCreating = false;
+            // oxlint-disable-next-line secure-coding/no-ldap-injection -- URL params, not LDAP
             let url = `/chat/${id}?initialMessage=${encodeURIComponent(messageText)}`;
             if (selectedModelId) {
                 url += `&initialModel=${encodeURIComponent(selectedModelId)}`;
             }
-            // Sandbox quick-toggle query params (always send state so conversation gets explicit settings)
+            // Sandbox quick-toggle query params
+            // (always send so conversation gets explicit settings)
             url += `&sandboxOn=${String(sandboxOn)}`;
             url += `&netAllDomainsOn=${String(netAllDomainsOn)}`;
             url += `&mcpServersOn=${String(mcpServersOn)}`;
             url += `&agentMode=${agentMode}`;
-            // @ts-expect-error -- dynamic URL with query params can't satisfy SvelteKit typed routes
+            // @ts-expect-error
+            // dynamic URL with query params can't satisfy SvelteKit typed routes
             void goto(resolve(url));
         } else {
             isCreating = false;

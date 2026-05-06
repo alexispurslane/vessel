@@ -1,5 +1,5 @@
 /**
- * Per-session zerobox sandbox factory.
+ * @file Per-session zerobox sandbox factory.
  *
  * Each conversation gets an isolated sandbox that controls:
  * - Filesystem: agent can only read/write within its workspace
@@ -201,6 +201,9 @@ async function installSandboxDeps(): Promise<void> {
 
 /**
  * Load a sandbox setting from the DB, returning undefined if not found.
+ *
+ * @param key - The settings key to look up.
+ * @returns The setting value, or undefined if not found.
  */
 function getSetting(key: string): string | undefined {
     const db = getDb();
@@ -212,6 +215,10 @@ function getSetting(key: string): string | undefined {
 
 /**
  * Parse a JSON setting from the DB, with a fallback default.
+ *
+ * @param key - The settings key to look up.
+ * @param fallback - Default value if the key is missing or unparseable.
+ * @returns The parsed setting value, or the fallback.
  */
 function getJsonSetting<T>(key: string, fallback: T): T {
     const raw = getSetting(key);
@@ -229,11 +236,29 @@ function getJsonSetting<T>(key: string, fallback: T): T {
  *
  * Returns the conversation value if it is non-null and non-undefined;
  * otherwise returns the global value.
+ *
+ * @param conversationValue - Per-conversation override (null/undefined = use global).
+ * @param globalValue - The global default value.
+ * @returns The resolved value.
  */
 function resolveOverride<T>(conversationValue: T | null | undefined, globalValue: T): T {
     return conversationValue !== null && conversationValue !== undefined
         ? conversationValue
         : globalValue;
+}
+
+/** Input for resolving the `allowNet` policy from conversation overrides and global settings. */
+interface ResolveAllowNetInput {
+    /** Per-conversation allowNet override (null/undefined = use global). */
+    conversationAllowNet: boolean | null | undefined;
+    /** Per-conversation allowed domains (used when conversation allowNet is true). */
+    conversationAllowedNetDomains: string[] | null | undefined;
+    /** Global raw allowNet setting string ("true"/"false"/undefined). */
+    globalAllowNetRaw: string | undefined;
+    /** Global allowed domains list. */
+    globalAllowedNetDomains: string[];
+    /** Whether all domains are allowed when net is on. */
+    allowAllDomains: boolean;
 }
 
 /**
@@ -244,14 +269,12 @@ function resolveOverride<T>(conversationValue: T | null | undefined, globalValue
  * granted and `allowAllDomains` is true the result is `true`; otherwise a
  * specific domain list is returned (or `true` if no domains are configured,
  * which effectively means allow-all as a fallback).
+ *
+ * @param input - The resolved network policy input.
+ * @returns The resolved network policy: false, true, or a domain list.
  */
-function resolveAllowNet(
-    conversationAllowNet: boolean | null | undefined,
-    conversationAllowedNetDomains: string[] | null | undefined,
-    globalAllowNetRaw: string | undefined,
-    globalAllowedNetDomains: string[],
-    allowAllDomains: boolean,
-): boolean | string[] {
+function resolveAllowNet(input: ResolveAllowNetInput): boolean | string[] {
+    const { conversationAllowNet, conversationAllowedNetDomains, globalAllowNetRaw, globalAllowedNetDomains, allowAllDomains } = input;
     let result: boolean | string[];
 
     // Per-conversation override takes precedence
@@ -276,6 +299,9 @@ function resolveAllowNet(
 
 /**
  * Return the net domain list, or `true` (allow-all) as a fallback when empty.
+ *
+ * @param domains - The list of allowed network domains.
+ * @returns The domain list, or true if empty (allow-all fallback).
  */
 function resolveNetDomains(domains: string[]): boolean | string[] {
     return domains.length > 0 ? domains : true;
@@ -288,6 +314,9 @@ function resolveNetDomains(domains: string[]): boolean | string[] {
  * A null value in the conversation settings means "use the global default."
  *
  * Returns null if sandboxing is disabled (either globally or per-conversation).
+ *
+ * @param conversationSettings - Optional per-conversation settings overrides.
+ * @returns The resolved sandbox policy, or null if sandboxing is disabled.
  */
 export function loadSandboxPolicyFromDb(conversationSettings?: ConversationSettings | null): SandboxPolicy | null {
     // Per-conversation sandboxEnabled takes precedence; null = use global default
@@ -295,7 +324,7 @@ export function loadSandboxPolicyFromDb(conversationSettings?: ConversationSetti
     const enabled = conversationSettings?.sandboxEnabled ?? (globalEnabled !== "false");
     if (!enabled) return null;
 
-    // Per-conversation overrides: null = use global, otherwise use the conversation value
+    // Per-conversation overrides: null = use global, otherwise use conversation value
     const globalExtraReadPaths = getJsonSetting<string[]>(
         SANDBOX_SETTINGS_KEYS.EXTRA_READ_PATHS,
         []
@@ -330,13 +359,13 @@ export function loadSandboxPolicyFromDb(conversationSettings?: ConversationSetti
     const allowAllDomains = resolveOverride(conversationSettings?.allowAllDomains, globalAllowAllDomains);
 
     // Determine allowNet: conversation override takes precedence
-    const allowNet = resolveAllowNet(
-        conversationSettings?.allowNet,
-        conversationSettings?.allowedNetDomains,
+    const allowNet = resolveAllowNet({
+        conversationAllowNet: conversationSettings?.allowNet,
+        conversationAllowedNetDomains: conversationSettings?.allowedNetDomains,
         globalAllowNetRaw,
         globalAllowedNetDomains,
         allowAllDomains,
-    );
+    });
 
     return {
         extraReadPaths,
@@ -364,6 +393,10 @@ export function loadSandboxPolicyFromDb(conversationSettings?: ConversationSetti
  * full node_modules — only the curated deps in data/deps/node_modules.
  *
  * Returns null if sandboxing is disabled in settings.
+ *
+ * @param conversationId - The conversation ID to create a sandbox for.
+ * @param conversationSettings - Optional per-conversation settings overrides.
+ * @returns A configured Sandbox instance, or null if sandboxing is disabled.
  */
 export async function createSessionSandbox(
     conversationId: string,
@@ -421,6 +454,10 @@ export async function createSessionSandbox(
  * staging files don't pollute the snapshot diffs.
  *
  * Returns null if sandboxing is disabled in settings.
+ *
+ * @param conversationId - The conversation ID to create a sandbox for.
+ * @param conversationSettings - Optional per-conversation settings overrides.
+ * @returns A configured Sandbox instance, or null if sandboxing is disabled.
  */
 export async function createFileManagementSandbox(
     conversationId: string,
@@ -453,6 +490,9 @@ export async function createFileManagementSandbox(
 /**
  * Get the session workspace directory for a conversation.
  * This is where the agent's sandboxed file operations are rooted.
+ *
+ * @param conversationId - The conversation ID.
+ * @returns The absolute path to the session workspace directory.
  */
 export function getSessionWorkDir(conversationId: string): string {
     return resolve(SESSIONS_DIR, conversationId, "workspace");
@@ -461,6 +501,9 @@ export function getSessionWorkDir(conversationId: string): string {
 /**
  * Load per-conversation settings from the conversation_settings table.
  * Returns null if no row exists (meaning: all defaults apply, inherit from global).
+ *
+ * @param conversationId - The conversation ID to load settings for.
+ * @returns The conversation settings, or null if none exist.
  */
 export function loadConversationSettingsFromDb(conversationId: string): ConversationSettings | null {
     const db = getDb();
@@ -482,6 +525,9 @@ export function loadConversationSettingsFromDb(conversationId: string): Conversa
  * network access is enabled, regardless of sandbox state. Used by
  * resolveActiveToolNames() to auto-disable the fetch tool when network
  * is off.
+ *
+ * @param conversationSettings - Optional per-conversation settings overrides.
+ * @returns Whether network access is allowed.
  */
 export function isNetworkAllowed(conversationSettings?: ConversationSettings | null): boolean {
     const globalAllowNetRaw = getSetting(SANDBOX_SETTINGS_KEYS.ALLOW_NET);
@@ -495,6 +541,9 @@ export function isNetworkAllowed(conversationSettings?: ConversationSettings | n
  * Returns "agent" (all tools enabled) or "chat" (no tools).
  * Per-conversation agentMode overrides the global default. A null
  * conversation agentMode means "inherit global".
+ *
+ * @param conversationSettings - Optional per-conversation settings overrides.
+ * @returns The effective agent mode ("agent" or "chat").
  */
 export function getEffectiveAgentMode(conversationSettings?: ConversationSettings | null): "agent" | "chat" {
     const globalMode = getSetting("sandbox.defaultAgentMode") ?? "agent";
@@ -503,6 +552,9 @@ export function getEffectiveAgentMode(conversationSettings?: ConversationSetting
 
 /**
  * Save per-conversation settings to the conversation_settings table.
+ *
+ * @param conversationId - The conversation ID to save settings for.
+ * @param settings - The conversation settings to persist.
  */
 export function saveConversationSettingsToDb(conversationId: string, settings: ConversationSettings): void {
     const db = getDb();

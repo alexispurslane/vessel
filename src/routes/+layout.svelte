@@ -82,9 +82,8 @@
     });
 
     onMount(() => {
-        // Revalidate auth on the client — this catches session expiry
-        // that the server might not know about yet. The SSR data already
-        // initialized the store, so the user sees content immediately.
+        // Revalidate auth on the client — catches session expiry the
+        // server might not know about. SSR data already initialized the store.
         void checkAuth();
 
         // When the user returns to the tab, clear any tab title notification
@@ -96,15 +95,13 @@
         document.addEventListener("visibilitychange", handleVisibilityChange);
 
         // When the user closes the tab or navigates away, release the
-        // in-memory session on the server. We use sendBeacon because
-        // fetch requests may not complete during page unload.
+        // in-memory session. Use sendBeacon (fetch may not complete on unload).
         function handleBeforeUnload() {
             const chat = getChat();
             const convId = chat.conversationId;
             if (convId) {
-                // sendBeacon sends a POST with credentials (cookies) by default
-                // for same-origin requests. We set Content-Type so SvelteKit
-                // can parse the body if needed (our endpoint doesn't require one).
+                // sendBeacon sends a POST with credentials by default for
+                // same-origin. Set Content-Type so SvelteKit can parse the body.
                 navigator.sendBeacon(
                     `/api/sessions/${convId}/release`,
                     new Blob([], { type: "application/json" })

@@ -1,4 +1,7 @@
 <script lang="ts">
+    /**
+     * @file Settings tab for user profile management.
+     */
     import { onMount } from "svelte";
     import {
         Card,

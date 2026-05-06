@@ -8,6 +8,7 @@
         deleteMessage,
         editMessage,
         editAssistantMessage,
+        regenWithFeedback,
         reloadMessages,
     } from "$lib/stores/chat.svelte.js";
     import { getConversations } from "$lib/stores/conversations.svelte.js";
@@ -273,10 +274,12 @@
     // (generating is true but no assistant message has visible content yet,
     //  or we just sent/regenerated but the SSE stream hasn't started yet)
     let waitingForResponse = $derived.by(() => {
-        // If we're actively navigating (delete/edit in flight), don't show skeleton
+        // If we're actively navigating (delete/edit in flight),
+        // don't show skeleton
         if (chat.navigating) return false;
         if (!chat.generating) return false;
-        // During generation: show skeleton if no streaming message or streaming message has no visible content
+        // During generation: show skeleton if no streaming message
+        // or the streaming message has no visible content
         const streamingMsg = displayMessages.find((m: ChatMessageType) => m.streaming);
         const result =
             !streamingMsg ||
@@ -290,14 +293,19 @@
         return result;
     });
 
-    /** Whether an assistant message is "intermediate" — thinking/tool calls only, no visible text for the user.
+    /**
+     * Whether an assistant message is "intermediate" — thinking/tool calls only, no visible text for the user.
      *  These get grouped into ThinkingGroups in the render layer.
      *
      *  Important: a message that is still streaming might start with thinking/tool calls
      *  and later receive text content, so we only group non-streaming messages that
      *  definitively have no content. Streaming messages with thinking but no content yet
      *  are still grouped (they'll stay in the group since tool calls always precede final text
-     *  in the agent loop — the text comes in a NEW message/turn). */
+     *  in the agent loop — the text comes in a NEW message/turn).
+     *
+     * @param msg - The chat message to check
+     * @returns Whether the message is an intermediate assistant message
+     */
     function isIntermediateAssistant(msg: ChatMessageType): boolean {
         if (msg.role !== "assistant") return false;
         // If it has visible text content (non-empty after trimming), it's not intermediate
@@ -309,6 +317,90 @@
         if (msg.isError) return false;
         // Empty assistant messages with no thinking/tools are not intermediate either
         return false;
+    }
+
+    /**
+     * Push the current group into the items list (if one exists) and clear it.
+     *
+     * @param items - The render items being built
+     * @param group - The current thinking group, or null
+     * @returns null (the group has been finalized)
+     */
+    function finalizeGroup(
+        items: RenderItem[],
+        group: ThinkingGroupType | null
+    ): ThinkingGroupType | null {
+        if (group) items.push(group);
+        return null;
+    }
+
+    /**
+     * Add an intermediate assistant message's steps to the current group, or create a new group.
+     *
+     * @param group - The current thinking group, or null if none started yet
+     * @param msg - The intermediate assistant message to add
+     * @returns The (possibly new) current group
+     */
+    function addToOrCreateGroup(
+        group: ThinkingGroupType | null,
+        msg: ChatMessageType
+    ): ThinkingGroupType {
+        const g = group ?? {
+            type: "thinkingGroup",
+            id: `group-${msg.id}`,
+            steps: [],
+            streaming: false,
+            model: msg.model,
+            modelProvider: msg.modelProvider,
+            messageIds: [],
+        };
+
+        addThinkingStep(g, msg);
+        addToolCallSteps(g, msg);
+
+        g.messageIds.push(msg.id);
+        if (msg.model) g.model = msg.model;
+        if (msg.modelProvider) g.modelProvider = msg.modelProvider;
+        return g;
+    }
+
+    /**
+     * Add a thinking step to the group if the message has thinking content.
+     *
+     * @param group - The thinking group to add to
+     * @param msg - The message with potential thinking content
+     */
+    function addThinkingStep(group: ThinkingGroupType, msg: ChatMessageType): void {
+        if (!msg.thinking && !msg.thinkingStreaming) return;
+        group.steps.push({
+            id: `${msg.id}-thinking`,
+            messageId: msg.id,
+            type: "thinking",
+            thinking: msg.thinking,
+            streaming: msg.thinkingStreaming,
+        });
+        if (msg.thinkingStreaming) group.streaming = true;
+    }
+
+    /**
+     * Add tool call steps to the group if the message has tool calls.
+     *
+     * @param group - The thinking group to add to
+     * @param msg - The message with potential tool calls
+     */
+    function addToolCallSteps(group: ThinkingGroupType, msg: ChatMessageType): void {
+        if (!msg.toolCalls) return;
+        for (let i = 0; i < msg.toolCalls.length; i++) {
+            const tc = msg.toolCalls[i];
+            group.steps.push({
+                id: `${msg.id}-tool-${String(i)}`,
+                messageId: msg.id,
+                type: "toolCall",
+                toolCall: tc,
+                streaming: tc.status === "running",
+            });
+            if (tc.status === "running") group.streaming = true;
+        }
     }
 
     /** Transform the flat message list into render items, grouping consecutive intermediate
@@ -324,60 +416,13 @@
 
         for (const msg of displayMessages) {
             if (isIntermediateAssistant(msg)) {
-                // This message belongs in a thinking group
-                if (!currentGroup) {
-                    currentGroup = {
-                        type: "thinkingGroup",
-                        id: `group-${msg.id}`,
-                        steps: [],
-                        streaming: false,
-                        model: msg.model,
-                        modelProvider: msg.modelProvider,
-                        messageIds: [],
-                    };
-                }
-
-                // Add thinking step (if present)
-                if (msg.thinking || msg.thinkingStreaming) {
-                    currentGroup.steps.push({
-                        id: `${msg.id}-thinking`,
-                        messageId: msg.id,
-                        type: "thinking",
-                        thinking: msg.thinking,
-                        streaming: msg.thinkingStreaming,
-                    });
-                    if (msg.thinkingStreaming) currentGroup.streaming = true;
-                }
-
-                // Add tool call steps (interleaved after the thinking)
-                if (msg.toolCalls) {
-                    for (let i = 0; i < msg.toolCalls.length; i++) {
-                        const tc = msg.toolCalls[i];
-                        currentGroup.steps.push({
-                            id: `${msg.id}-tool-${String(i)}`,
-                            messageId: msg.id,
-                            type: "toolCall",
-                            toolCall: tc,
-                            streaming: tc.status === "running",
-                        });
-                        if (tc.status === "running") currentGroup.streaming = true;
-                    }
-                }
-
-                currentGroup.messageIds.push(msg.id);
-                if (msg.model) currentGroup.model = msg.model;
-                if (msg.modelProvider) currentGroup.modelProvider = msg.modelProvider;
+                currentGroup = addToOrCreateGroup(currentGroup, msg);
             } else {
-                // This message breaks any current group
-                if (currentGroup) {
-                    items.push(currentGroup);
-                    currentGroup = null;
-                }
+                currentGroup = finalizeGroup(items, currentGroup);
                 items.push({ type: "message", msg });
             }
         }
 
-        // Don't forget the last group
         if (currentGroup) {
             items.push(currentGroup);
         }
@@ -455,9 +500,9 @@
 
     $effect(() => {
         // Only persist when the draft has been restored for THIS conversation.
-        // Without the draftRestoredForId check, switching conversations would
-        // momentarily persist the old conversation's text under the new ID
-        // before draftRestored is reset.
+        // Without the draftRestoredForId check, switching conversations
+
+        // would momentarily persist old text under the new ID before reset.
         if (id && draftRestored && draftRestoredForId === id) {
             const key = draftKey(id);
             if (inputText.trim()) {
@@ -513,27 +558,30 @@
         console.log(
             `[chat-lifecycle] $effect: running for id=${currentId}, prev hydrated=${String(untrack(() => hydrated))}`
         );
-        // Reset the draft-restored flag and banner — the new conversation's draft hasn't been restored yet
+        // Reset the draft-restored flag and banner — the new
+        // conversation's draft hasn't been restored yet
         draftRestored = false;
         draftRestoredForId = null;
         dismissDraftBanner();
-        // Clear the input so the old conversation's draft text doesn't leak into the new one.
-        // The correct draft (if any) will be restored by onConnectStream after connectStream resolves.
+        // Clear the input so the old conversation's draft text doesn't leak.
+        // The correct draft will be restored by onConnectStream after connectStream.
         inputText = "";
-        // Reset hydrated — we want to render from SSR data for the new conversation first,
-        // then transition to the live store once connectStream completes.
+        // Reset hydrated — render from SSR data for the new conversation
+        // first, then transition to the live store once connectStream completes.
         hydrated = false;
         if (currentId) {
             untrack(() => {
                 // Initialize sandbox files from SSR data.
-                // Must be inside untrack() — otherwise $page.data becomes a dependency
-                // of this $effect, causing it to re-run (disconnecting/reconnecting the
-                // SSE stream and clearing messages) whenever $page.data changes.
+                // Must be inside untrack() — otherwise $page.data becomes
+
+                // a dependency of this $effect, causing re-runs
+                // (disconnecting/reconnecting SSE) on $page.data changes.
                 sandboxFiles = pageData.sandboxFiles;
-                // Apply initial conversation settings (sandbox toggles from URL params)
-                // BEFORE connecting the SSE stream. If we wait until after the stream
-                // is connected, the settings update can restart the server-side session,
-                // silently detaching the SSE subscriber and losing all events.
+                // Apply initial settings (sandbox toggles from URL params)
+                // BEFORE connecting the SSE stream. If we wait until after
+
+                // the stream is connected, the settings update can restart
+                // the server-side session, detaching the SSE subscriber.
                 void applyInitialSettings(currentId, page.url).then(() =>
                     connectStream(currentId, pageData.messageHistory).then(() =>
                         onConnectStream(currentId)
@@ -654,6 +702,10 @@
         void editAssistantMessage(messageId, newText);
     }
 
+    function handleRegenWithFeedback(messageId: string, feedback: string) {
+        void regenWithFeedback(messageId, feedback);
+    }
+
     function handleSearchClick(query: string, results: SearchResultItem[]) {
         searchResultsQuery = query;
         searchResultsData = results;
@@ -732,7 +784,12 @@
         });
     });
 
-    /** ESC pressed anywhere on the page cancels in-progress AI inference */
+    /**
+     * ESC pressed anywhere on the page cancels in-progress AI inference.
+     *
+     * @param e - The keyboard event
+     * @returns {void}
+     */
     function handleGlobalKeydown(e: KeyboardEvent) {
         if (e.key === "Escape" && chat.generating) {
             e.preventDefault();
@@ -998,6 +1055,7 @@
                                                             ondelete={handleDeleteMessage}
                                                             onedit={handleEditMessage}
                                                             oneditassistant={handleEditAssistantMessage}
+                                                            onregenfeedback={handleRegenWithFeedback}
                                                             navigating={chat.navigating}
                                                             onsearchclick={handleSearchClick}
                                                             onpageclick={handlePageClick}

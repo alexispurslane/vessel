@@ -103,7 +103,11 @@ export const PUT = apiHandler(PutBody, ({ body, event }) => {
     ];
 
     const settingsChanged = restartKeys.some((key) => {
+        // key iterates over hardcoded restartKeys array, not user input
+        // oxlint-disable-next-line secure-coding/detect-object-injection
         const oldVal = oldSettings?.[key];
+        // same: key from hardcoded restartKeys
+        // oxlint-disable-next-line secure-coding/detect-object-injection
         const newVal = settings[key];
         return JSON.stringify(oldVal) !== JSON.stringify(newVal);
     });

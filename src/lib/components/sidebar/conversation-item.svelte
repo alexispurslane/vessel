@@ -1,4 +1,7 @@
 <script lang="ts">
+    /**
+     * @file Sidebar conversation list item component.
+     */
     import { SidebarMenuItem, SidebarMenuButton } from "$lib/components/ui/sidebar/index.js";
     import {
         ContextMenu,

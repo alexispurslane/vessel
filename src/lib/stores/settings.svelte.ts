@@ -1,5 +1,5 @@
 /**
- * Settings store — manages app-wide settings like default model and secondary model.
+ * @file Settings store — manages app-wide settings like default model and secondary model.
  */
 import {
     getSettings as apiGet,
@@ -13,6 +13,11 @@ let models = $state<ModelInfo[]>([]);
 let loading = $state(false);
 let error = $state<string | null>(null);
 
+/**
+ * Get the settings store state.
+ *
+ * @returns Settings store accessors
+ */
 export function getSettingsStore() {
     return {
         get settings() {
@@ -36,6 +41,11 @@ export function getSettingsStore() {
     };
 }
 
+/**
+ * Load settings and available models from the server.
+ *
+ * @returns {void}
+ */
 export async function loadSettings(): Promise<void> {
     loading = true;
     error = null;
@@ -50,6 +60,12 @@ export async function loadSettings(): Promise<void> {
     }
 }
 
+/**
+ * Save updated settings to the server.
+ *
+ * @param updates - Key-value pairs to update
+ * @returns Whether the save succeeded
+ */
 export async function saveSettings(updates: Record<string, string>): Promise<boolean> {
     error = null;
     try {
@@ -62,14 +78,31 @@ export async function saveSettings(updates: Record<string, string>): Promise<boo
     }
 }
 
+/**
+ * Set the default model and persist to server.
+ *
+ * @param modelId - The model ID to set as default
+ * @returns Whether the save succeeded
+ */
 export async function setDefaultModel(modelId: string): Promise<boolean> {
     return saveSettings({ defaultModel: modelId });
 }
 
+/**
+ * Set the secondary model and persist to server.
+ *
+ * @param modelId - The model ID to set as secondary
+ * @returns Whether the save succeeded
+ */
 export async function setSecondaryModel(modelId: string): Promise<boolean> {
     return saveSettings({ secondaryModel: modelId });
 }
 
+/**
+ * Clear the current error message.
+ *
+ * @returns {void}
+ */
 export function clearError(): void {
     error = null;
 }

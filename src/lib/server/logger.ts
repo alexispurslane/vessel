@@ -1,5 +1,5 @@
 /**
- * Simple structured logger with log levels.
+ * @file Simple structured logger with log levels.
  *
  * Set LOG_LEVEL environment variable to control verbosity:
  * - "debug": everything

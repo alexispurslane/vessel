@@ -1,6 +1,5 @@
 /**
- * Extracted page-level handlers for the chat/[id] route.
- *
+ * @file Extracted page-level handlers for the chat/[id] route.
  */
 
 import {
@@ -99,6 +98,7 @@ export interface ChatHandlerContext {
 /**
  * Get the shared chat store instance.
  * Both handler factories need this — extracted to avoid duplication.
+ * @returns The chat store API object
  */
 function getSharedChat() {
     return getChat();
@@ -110,6 +110,8 @@ function getSharedChat() {
 
 /**
  * Parse sandbox quick-toggle settings from URL search params.
+ * @param url - The URL containing search params
+ * @returns The parsed conversation settings
  */
 export function parseSandboxSettings(url: URL): ConversationSettings {
     const settings: ConversationSettings = {};
@@ -146,6 +148,9 @@ export function parseSandboxSettings(url: URL): ConversationSettings {
  *
  * By applying settings first, the session is in its final state before the
  * SSE stream subscribes, so no restart is needed.
+ * @param conversationId - The conversation ID
+ * @param url - The URL containing sandbox settings params
+ * @returns {Promise<void>}
  */
 export async function applyInitialSettings(
     conversationId: string,
@@ -168,7 +173,10 @@ export async function applyInitialSettings(
 /**
  * Upload pending files, track progress, and return the uploaded file names.
  * Throws on upload failure — caller handles cleanup.
- * Module-level so it doesn't count against factory function length.
+ * @param currentId - The current conversation ID
+ * @param filesToSend - The pending files to upload
+ * @param ctx - The chat handler context
+ * @returns The uploaded file names
  */
 async function uploadFiles(
     currentId: string,
@@ -200,11 +208,18 @@ async function uploadFiles(
 /**
  * Create the send-related handlers: `handleSend` (with file upload support)
  * and its sub-functions. Extracted from +page.svelte to keep the page focused on rendering.
+ * @param ctx - The chat handler context
+ * @returns Object with handleSend and chat store
  */
 export function createSendHandlers(ctx: ChatHandlerContext) {
     const chat = getSharedChat();
 
-    /** Send with files: upload first, then send to API with status content. */
+    /**
+     * Send with files: upload first, then send to API with status content.
+     * @param text - The message text
+     * @param filesToSend - The files to upload
+     * @param statusUpdates - Status messages to include
+     */
     async function handleSendWithFiles(
         text: string,
         filesToSend: PendingFile[],
@@ -233,7 +248,11 @@ export function createSendHandlers(ctx: ChatHandlerContext) {
         }
     }
 
-    /** Send without files: may include invisible status updates. */
+    /**
+     * Send without files: may include invisible status updates.
+     * @param text - The message text
+     * @param statusUpdates - Status messages to include
+     */
     function handleSendWithoutFiles(text: string, statusUpdates: string[]) {
         const currentId = ctx.getId();
         if (statusUpdates.length > 0) {
@@ -268,9 +287,7 @@ export function createSendHandlers(ctx: ChatHandlerContext) {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // onConnectStream — callback after connectStream resolves
-    // -----------------------------------------------------------------------
+    // --- onConnectStream — callback after connectStream resolves ---
 
     return {
         handleSend,
@@ -285,6 +302,8 @@ export function createSendHandlers(ctx: ChatHandlerContext) {
 /**
  * Create the `onConnectStream` callback invoked after `connectStream` resolves.
  * Handles hydration, model restoration, draft restoration, and initial messages.
+ * @param ctx - The chat handler context
+ * @returns Object with onConnectStream and chat store
  */
 export function createConnectStreamHandler(ctx: ChatHandlerContext) {
     const chat = getSharedChat();
@@ -294,6 +313,9 @@ export function createConnectStreamHandler(ctx: ChatHandlerContext) {
      * Waits for the SSE stream to be connected first — the server can't deliver
      * events until the subscriber is registered, so sending before the stream
      * is up means all SSE events are silently lost.
+     * @param currentId - The current conversation ID
+     * @param initialMessage - The initial message text
+     * @param initialModel - Optional model ID override
      */
     async function sendInitialMessage(currentId: string, initialMessage: string, initialModel: string | null) {
         const modelId = initialModel || ctx.getSelectedModelId();
@@ -312,6 +334,7 @@ export function createConnectStreamHandler(ctx: ChatHandlerContext) {
      * - Restoring model selection from the conversation's last model
      * - Restoring in-progress message draft from sessionStorage
      * - Sending an initial message if one was passed via URL params
+     * @param currentId - The current conversation ID
      */
     function onConnectStream(currentId: string) {
         console.log(

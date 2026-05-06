@@ -1,4 +1,7 @@
 <script lang="ts">
+    /**
+     * @file Settings tab for tool and MCP server configuration.
+     */
     import { onMount } from "svelte";
     import {
         Card,

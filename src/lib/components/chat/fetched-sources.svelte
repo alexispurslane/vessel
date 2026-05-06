@@ -1,4 +1,7 @@
 <script lang="ts">
+    /**
+     * @file Display panel for agent-fetched sources and search results.
+     */
     import ChevronDown from "@lucide/svelte/icons/chevron-down";
     import Globe from "@lucide/svelte/icons/globe";
     import Search from "@lucide/svelte/icons/search";

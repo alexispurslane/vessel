@@ -1,5 +1,5 @@
 /**
- * Notifications store — manages completion notification preferences and dispatches
+ * @file Notifications store — manages completion notification preferences and dispatches
  * browser notifications, tab title updates, and optional sounds when a long-running
  * generation completes.
  *
@@ -27,6 +27,11 @@ let titleTimeout: ReturnType<typeof setTimeout> | null = null;
 
 // --- Public API ---
 
+/**
+ * Get the notifications store state.
+ *
+ * @returns Notification store accessors
+ */
 export function getNotificationsStore() {
     return {
         get browserEnabled() {
@@ -41,7 +46,11 @@ export function getNotificationsStore() {
         get permissionGranted() {
             return permissionGranted;
         },
-        /** Whether any notification type is enabled */
+        /**
+         * Whether any notification type is enabled.
+         *
+         * @returns Whether any notification is enabled
+         */
         get anyEnabled() {
             return browserEnabled || soundEnabled || tabTitleEnabled;
         },
@@ -51,6 +60,8 @@ export function getNotificationsStore() {
 /**
  * Sync local state from the settings store (key-value pairs from the server).
  * Called once after settings load and whenever settings change.
+ *
+ * @returns {void}
  */
 export function syncNotificationSettings(): void {
     const settings = getSettingsStore().settings;
@@ -61,6 +72,8 @@ export function syncNotificationSettings(): void {
 
 /**
  * Request browser notification permission. Returns the new permission state.
+ *
+ * @returns Whether permission was granted
  */
 export async function requestBrowserPermission(): Promise<boolean> {
     if (typeof Notification === "undefined") return false;
@@ -79,6 +92,10 @@ export async function requestBrowserPermission(): Promise<boolean> {
 
 /**
  * Toggle a notification setting and persist it to the server.
+ *
+ * @param key - The setting key (e.g., "notificationBrowser")
+ * @param value - Whether to enable the setting
+ * @returns {void}
  */
 export async function setNotificationSetting(key: string, value: boolean): Promise<void> {
     await saveSettings({ [key]: value ? "true" : "false" });
@@ -106,6 +123,8 @@ export function notifyCompletion(conversationTitle: string): void {
 /**
  * Clear the "(Done)" prefix from the tab title and restore the original.
  * Called when the user returns to the tab or starts a new generation.
+ *
+ * @returns {void}
  */
 export function clearTabTitleNotification(): void {
     if (titleTimeout) {
@@ -124,9 +143,8 @@ function sendBrowserNotification(title: string): void {
     if (typeof Notification === "undefined") return;
     if (Notification.permission !== "granted") return;
 
-    // Only show when the page is not visible (user switched tabs / minimized).
-    // document.hasFocus() is unreliable across browsers — visibilityState
-    // is the standard API for detecting whether a page is actually visible.
+    // Only show when the page is not visible (user switched tabs/minimized).
+    // visibilityState is the standard API; document.hasFocus() is unreliable.
     if (document.visibilityState === "visible") return;
 
     try {

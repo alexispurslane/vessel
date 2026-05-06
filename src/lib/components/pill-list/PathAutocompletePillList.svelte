@@ -1,5 +1,7 @@
 <script lang="ts">
     /**
+     * @file Pill list with filesystem path autocomplete.
+     *
      * A pill list specialized for filesystem paths, with:
      * - Path autocomplete via the /api/fs-complete endpoint
      * - Keyboard navigation (ArrowUp/Down, Tab, Enter, Escape) in the autocomplete dropdown

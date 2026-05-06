@@ -51,7 +51,6 @@ export const GET = tryApi(async ({ params }) => {
 
         // Type the JSON response to avoid `any`
         // OpenAI format: { data: [{ id: "...", ... }, ...] }
-        // Some endpoints return a flat array of model IDs or objects
         type ModelsResponse = { data?: Array<Record<string, unknown>> } | Array<unknown> | null;
         const data = (await res.json()) as ModelsResponse;
 

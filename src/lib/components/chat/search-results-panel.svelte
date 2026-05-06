@@ -1,4 +1,7 @@
 <script lang="ts">
+    /**
+     * @file Panel showing web search results.
+     */
     import ExternalLink from "@lucide/svelte/icons/external-link";
     import X from "@lucide/svelte/icons/x";
     import Search from "@lucide/svelte/icons/search";

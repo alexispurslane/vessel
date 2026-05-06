@@ -1,5 +1,5 @@
 /**
- * Server-only types for Vessel.
+ * @file Server-only types for Vessel.
  *
  * Shared domain types (ConversationListItem, CustomModelDef, etc.)
  * live in $lib/types.ts and are imported from there.

@@ -1,4 +1,7 @@
 <script lang="ts">
+    /**
+     * @file Chat input component with file upload support.
+     */
     import { Button } from "$lib/components/ui/button/index.js";
     import { Textarea } from "$lib/components/ui/textarea/index.js";
     import {
@@ -136,10 +139,8 @@
         try {
             const text = await navigator.clipboard.readText();
             if (text) {
-                // document.execCommand('insertText') is deprecated but remains the
-                // only reliable way to insert text at the cursor in a contentEditable.
-                // The modern Input API (InputEvent.getTargetRanges() + execCommand)
-                // doesn't provide a direct replacement for insertText.
+                // document.execCommand('insertText') is deprecated but the only
+                // reliable way to insert text at the cursor in a contentEditable.
                 document.execCommand("insertText", false, text);
             }
         } catch {

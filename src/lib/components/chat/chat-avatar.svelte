@@ -1,4 +1,7 @@
 <script lang="ts">
+    /**
+     * @file Avatar component for chat messages.
+     */
     import {
         Tooltip,
         TooltipContent,

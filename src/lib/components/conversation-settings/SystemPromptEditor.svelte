@@ -1,4 +1,7 @@
 <script lang="ts">
+    /**
+     * @file System prompt text editor component.
+     */
     import Pencil from "@lucide/svelte/icons/pencil";
     import Save from "@lucide/svelte/icons/save";
     import X from "@lucide/svelte/icons/x";

@@ -7,7 +7,12 @@ import { badRequest, notFound, internalError } from "$lib/server/api-errors.js";
 import { resolve, dirname, join } from "path";
 import { mkdir, rename } from "node:fs/promises";
 
-/** Read all chunks from a ReadableStreamBody and return them as a Blob. */
+/**
+ * Read all chunks from a ReadableStreamBody and return them as a Blob.
+ *
+ * @param body - The readable stream to consume
+ * @returns A Blob containing all chunks
+ */
 async function readBodyAsBlob(body: ReadableStream<Uint8Array>): Promise<Blob> {
     const chunks: ArrayBuffer[] = [];
     const reader = body.getReader();
@@ -26,24 +31,19 @@ async function readBodyAsBlob(body: ReadableStream<Uint8Array>): Promise<Blob> {
 }
 
 /**
- * POST /api/sessions/[id]/upload
+ * Validate the upload request and return the validated paths, or an error response.
  *
- * Upload a file to the agent's sandbox workspace using streaming.
- *
- * The file is sent as raw binary in the request body with metadata in headers:
- * - `X-Filename`: the original filename (required)
- * - `Content-Type`: the file's MIME type
- *
- * The body streams directly to disk via Bun.write() —
- * no size limits, no encoding overhead.
- *
- * Files are written to `data/sessions/<id>/workspace/<filename>`,
- * which is the agent's sandbox working directory.
+ * @param params - The route params
+ * @param params.id - The conversation/session ID
+ * @param request - The incoming request
+ * @returns The validated paths, or an error Response if validation fails
  */
-export const POST: RequestHandler = async ({ params, request }) => {
+async function validateUploadRequest(
+    params: { id: string },
+    request: Request
+): Promise<{ workDir: string; filename: string; filePath: string; dir: string } | Response> {
     const conversationId = params.id;
 
-    // Verify the conversation/session exists
     try {
         await getOrHydrateSession(conversationId);
     } catch {
@@ -60,7 +60,6 @@ export const POST: RequestHandler = async ({ params, request }) => {
         return badRequest("X-Filename header is required");
     }
 
-    // Sanitize the filename: strip directory components, reject traversal
     let filename: string;
     try {
         filename = sanitizeFilename(rawFilename);
@@ -68,7 +67,6 @@ export const POST: RequestHandler = async ({ params, request }) => {
         return badRequest("Invalid filename");
     }
 
-    // Resolve and validate the full path stays within the workspace
     let filePath: string;
     try {
         filePath = sanitizeAndResolvePath(workDir, filename);
@@ -76,32 +74,77 @@ export const POST: RequestHandler = async ({ params, request }) => {
         return badRequest("Invalid file path");
     }
 
-    const dir = dirname(filePath);
-
-    // Defense-in-depth: re-verify the resolved path is still within the workspace
     if (!filePath.startsWith(resolve(workDir))) {
         return badRequest("Invalid file path");
     }
 
-    const sandbox = await createFileManagementSandbox(conversationId);
+    return { workDir, filename, filePath, dir: dirname(filePath) };
+}
 
-    // When the sandbox is active, we need to route the file write through
-    // it so zerobox's snapshot records the change. Each sandbox.exec() call
-    // creates its own snapshot session (baseline → command → incremental diff).
-    // If we write directly to disk, the file appears in the baseline of the
-    // next sandboxed tool call — not as a change in any diff.
-    //
-    // We use a dedicated file-management sandbox (not the agent's sandbox)
-    // so that user file operations always succeed regardless of the agent's
-    // read/write restrictions. The file-management sandbox still records
-    // snapshots so the changes appear in the audit trail.
-    //
-    // Strategy: stream to a temp file inside the workspace (excluded from
-    // snapshots via .upload-tmp in snapshotExclude), then mv it into place
-    // through the sandbox. The snapshot will record the file as "Created".
-    //
-    // When the sandbox is not available (sandboxing disabled), we write
-    // directly — snapshots are off anyway in that case.
+/**
+ * Move a temp file into the workspace through the sandbox.
+ *
+ * @param sandbox - The sandbox instance, or null if sandboxing is disabled
+ * @param tmpAbsPath - Absolute path to the temp file
+ * @param filePath - Absolute path to the final destination
+ * @param dir - Directory of the final destination
+ */
+async function moveFileToDestination(
+    sandbox: Awaited<ReturnType<typeof createFileManagementSandbox>>,
+    tmpAbsPath: string,
+    filePath: string,
+    dir: string
+): Promise<void> {
+    if (sandbox) {
+        await mkdir(dir, { recursive: true });
+        const result = await sandbox
+            .exec("mv", [tmpAbsPath, filePath])
+            .output();
+        if (result.code !== 0) {
+            throw new Error(`Sandbox mv failed: ${result.stderr}`);
+        }
+        return;
+    }
+
+    await mkdir(dir, { recursive: true });
+    try {
+        await rename(tmpAbsPath, filePath);
+    } catch {
+        // rename can fail across mount points; fall back to copy + delete
+        await Bun.write(filePath, Bun.file(tmpAbsPath));
+        try { await Bun.file(tmpAbsPath).unlink(); } catch { /* ignore cleanup errors */ }
+    }
+}
+
+/**
+ * POST /api/sessions/[id]/upload
+ *
+ * Upload a file to the agent's sandbox workspace using streaming.
+ *
+ * The file is sent as raw binary in the request body with metadata in headers:
+ * - `X-Filename`: the original filename (required)
+ * - `Content-Type`: the file's MIME type
+ *
+ * The body streams directly to disk via Bun.write() —
+ * no size limits, no encoding overhead.
+ *
+ * Files are written to `data/sessions/<id>/workspace/<filename>`,
+ * which is the agent's sandbox working directory.
+ *
+ * @param root0 - The request handler params
+ * @param root0.params - The route params (includes id)
+ * @param root0.request - The incoming request
+ * @returns JSON response with upload result
+ */
+export const POST: RequestHandler = async ({ params, request }) => {
+    const validated = await validateUploadRequest(params, request);
+    if (validated instanceof Response) return validated;
+
+    const { workDir, filename, filePath, dir } = validated;
+    const sandbox = await createFileManagementSandbox(params.id);
+
+    // Strategy: stream to a temp file in .upload-tmp (excluded from
+    // snapshots), then mv into place via the sandbox.
     const UPLOAD_TMP_DIR = ".upload-tmp";
     const tmpSuffix = `${String(Date.now())}.${crypto.randomUUID().slice(0, 8)}`;
     const tmpRelPath = join(UPLOAD_TMP_DIR, `${filename}.tmp.${tmpSuffix}`);
@@ -109,43 +152,20 @@ export const POST: RequestHandler = async ({ params, request }) => {
     await mkdir(dirname(tmpAbsPath), { recursive: true });
 
     try {
-        // Stream the request body to the temp file (inside workspace but excluded from snapshots)
         if (request.body) {
             const combined = await readBodyAsBlob(request.body);
             await Bun.write(tmpAbsPath, combined);
         }
 
-        if (sandbox) {
-            // Move the file through the sandbox so the snapshot records it as "Created".
-            // The .upload-tmp directory is excluded from snapshots, so the temp file
-            // won't appear in the baseline — only the final destination will show up
-            // as a new file in the incremental diff.
-            await mkdir(dir, { recursive: true });
-            const result = await sandbox
-                .exec("mv", [tmpAbsPath, filePath])
-                .output();
-            if (result.code !== 0) {
-                throw new Error(`Sandbox mv failed: ${result.stderr}`);
-            }
-        } else {
-            // No sandbox — move the temp file directly into the workspace
-            await mkdir(dir, { recursive: true });
-            try {
-                await rename(tmpAbsPath, filePath);
-            } catch {
-                // rename can fail across mount points; fall back to copy + delete
-                await Bun.write(filePath, Bun.file(tmpAbsPath));
-                try { await Bun.file(tmpAbsPath).unlink(); } catch { /* ignore cleanup errors */ }
-            }
-        }
+        await moveFileToDestination(sandbox, tmpAbsPath, filePath, dir);
 
         return json({
             success: true,
             filename,
-            path: join("/", filename), // Relative to sandbox root
+            path: join("/", filename),
         });
     } catch (err) {
-        console.error(`[upload] Error uploading file to session ${conversationId}:`, err);
+        console.error(`[upload] Error uploading file to session ${params.id}:`, err);
         const message = err instanceof Error ? err.message : "Upload failed";
         return internalError(message);
     }

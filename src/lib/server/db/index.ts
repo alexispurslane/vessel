@@ -1,3 +1,7 @@
+/**
+ * @file SQLite database singleton, schema migrations, and query helpers.
+ */
+
 import { Database } from "bun:sqlite";
 import { join } from "path";
 import { SCHEMA, runMigrations } from "./schema.js";
@@ -7,6 +11,11 @@ const DB_PATH = join(process.cwd(), "data", "vessel.db");
 
 let _db: Database | null = null;
 
+/**
+ * Get the singleton SQLite database, running schema migrations on first call.
+ *
+ * @returns The Database instance
+ */
 export function getDb(): Database {
     if (_db) return _db;
 
@@ -23,6 +32,11 @@ export function getDb(): Database {
     return _db;
 }
 
+/**
+ * Close the singleton database connection.
+ *
+ * @returns {void}
+ */
 export function closeDb(): void {
     if (_db) {
         _db.close();
@@ -32,6 +46,8 @@ export function closeDb(): void {
 
 /**
  * Get all unique tag names from the tags table, sorted alphabetically.
+ *
+ * @returns Array of tag name strings
  */
 export function getAllTags(): string[] {
     const db = getDb();
@@ -42,6 +58,8 @@ export function getAllTags(): string[] {
 /**
  * Upsert tags into the tags table.
  * Ensures each tag exists in the global tags table for AI tag suggestions.
+ *
+ * @param tags - Array of tag names to upsert
  */
 export function upsertTags(tags: string[]): void {
     if (tags.length === 0) return;
@@ -62,6 +80,9 @@ export function upsertTags(tags: string[]): void {
  * Get all conversations that have a given tag.
  * Uses LIKE to find candidate rows, then filters for exact tag matches
  * to avoid false positives (e.g. "python" matching "python3").
+ *
+ * @param tag - The tag to filter by
+ * @returns Conversations with the given tag
  */
 export function getConversationsByTag(tag: string): import("$lib/types.js").ConversationListItem[] {
     const db = getDb();

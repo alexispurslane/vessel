@@ -1,5 +1,5 @@
 /**
- * Conversation listing and full-text search.
+ * @file Conversation listing and full-text search.
  *
  * Queries the conversations DB table and (for search) reads session files
  * via the pi-coding-agent SDK to match against message content.
@@ -46,7 +46,11 @@ const MAX_SNIPPETS_PER_CONVERSATION = 3;
 
 // --- DB query ---
 
-/** Fetch all conversations ordered by most recently updated. */
+/**
+ * Fetch all conversations ordered by most recently updated.
+ *
+ * @returns All conversation rows from the DB, newest first.
+ */
 function fetchAllConversationRows(): ConversationRow[] {
     const db = getDb();
     return db
@@ -58,7 +62,11 @@ function fetchAllConversationRows(): ConversationRow[] {
 
 // --- List ---
 
-/** List all conversations from our DB (for sidebar). */
+/**
+ * List all conversations from our DB (for sidebar).
+ *
+ * @returns Conversation list items for the sidebar.
+ */
 export function listConversations(): ConversationListItem[] {
     return fetchAllConversationRows().map((row) => ({
         id: row.id,
@@ -75,6 +83,9 @@ export function listConversations(): ConversationListItem[] {
 /**
  * Extract text content from a message entry's content field.
  * Handles both string content and content-block arrays.
+ *
+ * @param content - The message content (string or content-block array).
+ * @returns Extracted text, or empty string if no text content found.
  */
 function extractTextFromContent(content: unknown): string {
     if (typeof content === "string") return content;
@@ -89,6 +100,12 @@ function extractTextFromContent(content: unknown): string {
 
 /**
  * Search for a query string in text and return surrounding context snippets.
+ *
+ * @param text - The text to search within.
+ * @param query - The query string to find.
+ * @param maxSnippets - Maximum number of snippets to return.
+ * @param messageId - Optional message ID to associate with each snippet.
+ * @returns Array of context snippets with surrounding text.
  */
 function findSnippets(
     text: string,
@@ -122,6 +139,12 @@ function findSnippets(
 
 /**
  * Scan a session's branch entries for messages matching the query and collect snippets.
+ *
+ * @param branchEntries - Session branch entries to scan.
+ * @param query - The original query string (for snippet extraction).
+ * @param lowerQuery - Lowercased query (for case-insensitive matching).
+ * @param maxSnippets - Maximum number of snippets to collect.
+ * @returns Matching snippets from user/assistant messages.
  */
 function scanBranchForSnippets(
     branchEntries: import("@mariozechner/pi-coding-agent").SessionEntry[],
@@ -146,6 +169,12 @@ function scanBranchForSnippets(
 /**
  * Collect search snippets from a session file's message content.
  * Opens the session via the SDK and scans user/assistant messages for the query.
+ *
+ * @param sessionFilePath - Path to the session file, or null/undefined.
+ * @param query - The original query string (for snippet extraction).
+ * @param lowerQuery - Lowercased query (for case-insensitive matching).
+ * @param maxSnippets - Maximum number of snippets to return.
+ * @returns Matching snippets from the session's messages.
  */
 async function collectSnippetsFromSession(
     sessionFilePath: string | null | undefined,
@@ -167,6 +196,16 @@ async function collectSnippetsFromSession(
 /**
  * Build a ConversationSearchResult for a row that matched the query.
  * Combines title and content snippets, capped at the max.
+ *
+ * @param row - The matching conversation row from the DB.
+ * @param row.id - Conversation ID.
+ * @param row.title - Conversation title.
+ * @param row.tags - JSON-encoded tags string.
+ * @param row.updated_at - Last updated timestamp.
+ * @param titleMatch - Whether the title matched the query.
+ * @param contentSnippets - Snippets from message content matches.
+ * @param query - The search query (for title snippet extraction).
+ * @returns A fully populated search result.
  */
 function buildSearchResult(
     row: { id: string; title: string; tags: string; updated_at: string },
@@ -206,6 +245,10 @@ function buildSearchResult(
  *
  * Fetches all conversations once, then does a single pass checking both
  * title and content for each conversation, marking the match source.
+ *
+ * @param query - The search query string.
+ * @param limit - Maximum number of results to return.
+ * @returns Search results with match source and context snippets.
  */
 export async function searchConversations(query: string, limit = 20): Promise<ConversationSearchResult[]> {
     const lowerQuery = query.toLowerCase();

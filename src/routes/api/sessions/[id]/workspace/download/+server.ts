@@ -79,11 +79,12 @@ export const GET = tryApi(async ({ params, url }) => {
 
     const fileName = basename(filePath);
     const ext = extname(filePath).toLowerCase();
+    // ext from extname(), MIME_TYPES is a static map
+    // oxlint-disable-next-line secure-coding/detect-object-injection
     const mimeType = MIME_TYPES[ext] || "application/octet-stream";
 
-    // Use RFC 5987 to encode the filename, avoiding header injection
-    // from double-quote characters in filenames. The filename* parameter
-    // with UTF-8 encoding is supported by all modern browsers.
+    // Use RFC 5987 to encode the filename, avoiding header injection.
+    // The filename* param with UTF-8 is supported by all modern browsers.
     const encodedFileName = encodeURIComponent(fileName);
 
     // Bun.file() creates an efficient Response that streams the file

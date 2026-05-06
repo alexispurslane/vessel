@@ -1,3 +1,7 @@
+/**
+ * @file Filename and path sanitization to prevent directory traversal attacks.
+ */
+
 import { basename, resolve, sep } from "path";
 import { realpathSync } from "node:fs";
 
@@ -69,9 +73,8 @@ export function sanitizeAndResolvePath(basePath: string, relativePath: string): 
     // Join and resolve the full path
     const fullPath = resolve(resolvedBase, relativePath);
 
-    // Verify the final resolved path is still within the allowed base directory.
-    // We add a trailing separator to prevent prefix attacks like:
-    //   basePath = /home/user/work  matching  /home/user/workspace
+    // Verify the final resolved path is still within the allowed base.
+    // Trailing separator prevents prefix attacks (e.g. /work matching /workspace).
     if (!fullPath.startsWith(resolvedBase + sep) && fullPath !== resolvedBase) {
         throw new Error("Resolved path escapes the allowed base directory");
     }

@@ -1,4 +1,7 @@
 <script lang="ts">
+    /**
+     * @file Tool call display component.
+     */
     import { Spinner } from "$lib/components/ui/spinner/index.js";
     import Wrench from "@lucide/svelte/icons/wrench";
     import Check from "@lucide/svelte/icons/check";
@@ -34,8 +37,11 @@
                 {#each Object.entries(toolCall.arguments) as [key, value], i (key)}
                     {#if i > 0}<span class="text-muted-foreground/40 mx-0.5">·</span>{/if}
                     {@const displayValue = formatArgValue(value)}
-                    {@const fullValue = typeof value === 'string' ? value : JSON.stringify(value, null, 2)}
-                    <span class="font-mono" title={fullValue}>{key} <span class="text-muted-foreground/40">·</span> {displayValue}</span>
+                    {@const fullValue =
+                        typeof value === "string" ? value : JSON.stringify(value, null, 2)}
+                    <span class="font-mono" title={fullValue}
+                        >{key} <span class="text-muted-foreground/40">·</span> {displayValue}</span
+                    >
                 {/each}
             </span>
         {/if}

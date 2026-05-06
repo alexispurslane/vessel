@@ -1,4 +1,7 @@
 <script lang="ts">
+    /**
+     * @file DAG visualization for conversation branching.
+     */
     import type { SessionTreeNodeData } from "$lib/api.js";
     import {
         graphStratify,

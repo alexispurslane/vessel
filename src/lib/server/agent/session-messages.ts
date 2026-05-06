@@ -1,5 +1,5 @@
 /**
- * Message operations within sessions.
+ * @file Message operations within sessions.
  *
  * Functions for sending messages, retrieving history, navigating the session
  * tree, editing assistant messages, and managing session leaf position.
@@ -37,6 +37,7 @@ export type {
 import { generateTitleAndTags } from "./title-generator.js";
 import { getDb } from "../db/index.js";
 import { log } from "$lib/server/logger.js";
+import { extractMessageContent } from "./session-history.js";
 
 // --- Message sending ---
 
@@ -47,6 +48,12 @@ import { log } from "$lib/server/logger.js";
  * queued for the next turn (e.g. file upload/delete notices). This way the AI
  * sees the status information in context, but it doesn't appear as a visible
  * user message in the chat UI.
+ *
+ * @param agentSession - The PiAgentSession to send the message to
+ * @param conversationId - The conversation ID (for title generation)
+ * @param content - The user message text
+ * @param statusContent - Optional hidden status content for the AI
+ * @returns {Promise<void>}
  */
 export async function sendMessageToSession(
     agentSession: PiAgentSession,
@@ -54,10 +61,8 @@ export async function sendMessageToSession(
     content: string,
     statusContent?: string
 ): Promise<void> {
-    // If there's invisible status content (e.g., file upload/delete notices),
-    // send it as a custom message queued for the next turn. This way the AI
-    // sees the status information in context, but it doesn't appear as a
-    // visible user message in the chat UI.
+    // Send invisible status content (file upload/delete notices) as a hidden
+    // custom message queued for the next turn — AI sees it, chat UI doesn't.
     if (statusContent) {
         await agentSession.sendCustomMessage(
             {
@@ -86,6 +91,14 @@ export async function sendMessageToSession(
 
 /**
  * Send a custom (non-displayed) message to the agent session.
+ *
+ * @param agentSession - The PiAgentSession to send the message to
+ * @param customType - The custom message type identifier
+ * @param content - The message content
+ * @param options - Delivery options for the custom message
+ * @param options.triggerTurn - Whether this message triggers an LLM turn
+ * @param options.deliverAs - How to deliver the message (steer, followUp, nextTurn)
+ * @returns {Promise<void>}
  */
 export async function sendCustomMessageToSession(
     agentSession: PiAgentSession,
@@ -112,6 +125,13 @@ export async function sendCustomMessageToSession(
  * Build and return the full message history for a session.
  *
  * Delegates to buildHistoryFromSession from session-history.ts.
+ *
+ * @param activeSession - The active session to build history from
+ * @param row - The DB row with session file path and model info
+ * @param row.session_file_path - Path to the session JSONL file
+ * @param row.model_provider - The model provider name
+ * @param row.model_id - The model identifier
+ * @returns The message history and model info
  */
 export function getHistoryFromSession(
     activeSession: ActiveSession,
@@ -150,6 +170,9 @@ export function getHistoryFromSession(
 /**
  * Look up the DB row for a conversation (session_file_path, model_provider, model_id).
  * Used by getSessionHistory in session-store.ts to get the row before delegating here.
+ *
+ * @param conversationId - The conversation ID to look up
+ * @returns The DB row, or undefined if not found
  */
 export function getConversationDbRow(conversationId: string): {
     session_file_path: string;
@@ -179,6 +202,10 @@ export function getConversationDbRow(conversationId: string): {
  *
  * This uses the SDK's navigateTree method which handles branching properly
  * in the append-only session tree.
+ *
+ * @param agentSession - The PiAgentSession to navigate
+ * @param targetEntryId - The entry ID to navigate to
+ * @returns The editor text (if user message) and whether cancelled
  */
 export async function navigateSessionMessage(
     agentSession: PiAgentSession
@@ -198,6 +225,11 @@ export async function navigateSessionMessage(
  *
  * Since the session tree is append-only, this creates a new branch — the old
  * entries remain in the JSONL file but are no longer on the active path.
+ *
+ * @param agentSession - The PiAgentSession to operate on
+ * @param targetEntryId - The entry ID of the assistant message to edit
+ * @param newContent - The replacement text content
+ * @returns Whether the operation was cancelled
  */
 export async function editSessionAssistantMessage(
     agentSession: PiAgentSession,
@@ -208,8 +240,84 @@ export async function editSessionAssistantMessage(
 }
 
 /**
+ * Regenerate an assistant message with user feedback.
+ *
+ * Navigates the session tree back to before the target assistant message
+ * (creating a new branch), then sends the user's critique as a hidden
+ * custom message that quotes the original response. The custom message
+ * triggers a new LLM turn, so the agent generates a corrected response.
+ *
+ * The original branch is preserved — the user can navigate back to it
+ * via the session tree / DAG viewer.
+ *
+ * @param agentSession - The PiAgentSession to operate on
+ * @param targetEntryId - The entry ID of the assistant message to regenerate
+ * @param feedback - The user's critique of what was wrong
+ * @returns Whether the operation was cancelled
+ */
+export async function regenWithFeedback(
+    agentSession: PiAgentSession,
+    targetEntryId: string,
+    feedback: string
+): Promise<{ cancelled: boolean }> {
+    const sessionManager = agentSession.sessionManager;
+    const entry = sessionManager.getEntry(targetEntryId);
+    if (!entry) {
+        throw new Error(`Entry ${targetEntryId} not found in session`);
+    }
+    if (entry.type !== "message" || entry.message.role !== "assistant") {
+        throw new Error(`Entry ${targetEntryId} is not an assistant message`);
+    }
+
+    // 1. Extract the original assistant message text before navigating away.
+    const { textContent } = extractMessageContent(entry.message as unknown as Record<string, unknown>);
+
+    // 2. Branch from the parent so the user message stays IN context but the
+    //    old assistant response is OUT, letting the model generate a fresh reply.
+
+    // navigateTree can't do this: navigating to user msg excludes it,
+    // navigating to assistant includes it. We branch + append manually.
+
+    // branch() only moves the leaf — the branch isn't real until a child
+    // entry is appended (per SessionManager.branch() docs).
+    const parentEntryId = entry.parentId;
+
+    if (!parentEntryId) {
+        throw new Error(`Assistant message ${targetEntryId} has no parent — cannot regenerate`);
+    }
+
+    // 3. Format the critique as a hidden custom message quoting the original
+    //    response so the model knows what it previously said (now off-branch).
+    const critiqueContent =
+        `Your previous response to this message was:\n\n> ${textContent.replace(/\n/g, "\n> ")}\n\nHowever, this response had issues: ${feedback}\n\nPlease provide a corrected response.`;
+
+    // Set leaf to user message, then append the critique as its child. This
+    // locks in the new branch — the old assistant becomes a sibling.
+    sessionManager.branch(parentEntryId);
+    sessionManager.appendCustomMessageEntry(
+        "regen_feedback",
+        critiqueContent,
+        false
+    );
+
+    // Rebuild context: user message + critique are in, old assistant is out.
+    // The custom message converts to a user message via convertToLlm.
+
+    // Use agent.continue() instead of sendCustomMessage — the entry is already
+    // appended, sendCustomMessage would cause a duplicate via _processAgentEvent.
+    const sessionContext = sessionManager.buildSessionContext();
+    agentSession.agent.state.messages = sessionContext.messages;
+    await agentSession.agent.continue();
+
+    return { cancelled: false };
+}
+
+/**
  * Get all user messages from the session, for editing/forking.
  * Returns entry IDs and text content.
+ *
+ * @param activeSession - The active session to query
+ * @returns Array of entry IDs and their text content
  */
 export function getSessionUserMessages(
     activeSession: ActiveSession
@@ -223,6 +331,9 @@ export function getSessionUserMessages(
  * Get the full session tree as nodes and relations for DAG visualization.
  * Returns only user messages and final assistant text responses (no tool calls,
  * thinking blocks, tool results, or other intermediate entries).
+ *
+ * @param agentSession - The PiAgentSession to query
+ * @returns The session tree nodes, relations, and current leaf ID
  */
 export async function getSessionTreeFromSession(
     agentSession: PiAgentSession
@@ -239,6 +350,10 @@ export async function getSessionTreeFromSession(
  * Used by the DAG viewer to navigate to a different point in the tree.
  * Unlike navigateMessage (which handles edit/delete semantics), this directly
  * branches to the target entry.
+ *
+ * @param agentSession - The PiAgentSession to modify
+ * @param targetEntryId - The entry ID to set as the new leaf
+ * @returns {Promise<void>}
  */
 export async function setSessionLeafEntry(
     agentSession: PiAgentSession,

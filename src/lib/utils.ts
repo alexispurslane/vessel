@@ -1,3 +1,6 @@
+/**
+ * @file Shared utility functions: CSS class merging, JSON parsing, hashing, draft persistence, and display formatting.
+ */
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { z, type ZodType } from "zod";
@@ -20,6 +23,7 @@ export function cn(...inputs: ClassValue[]) {
 export function safeJsonParse<T>(json: string | null | undefined, schema: ZodType<T>): T | null {
     if (json == null) return null;
     try {
+        // oxlint-disable-next-line secure-coding/no-unsafe-deserialization -- Zod validate
         const raw: unknown = JSON.parse(json);
         return schema.parse(raw);
     } catch {
@@ -42,6 +46,7 @@ export function safeJsonParse<T>(json: string | null | undefined, schema: ZodTyp
  */
 export function tryJsonParse<T>(json: string | null | undefined, schema: ZodType<T>): T {
     if (json == null) throw new SyntaxError("Cannot parse null/undefined JSON string");
+    // oxlint-disable-next-line secure-coding/no-unsafe-deserialization -- Zod validate
     const raw: unknown = JSON.parse(json);
     return schema.parse(raw);
 }
@@ -76,6 +81,8 @@ export const recordSchema = z.record(z.string(), z.unknown());
 
 /**
  * Returns a deterministic hue (0–359) from a string hash.
+ * @param str - The string to hash
+ * @returns A hue value between 0 and 359
  */
 export function hashHue(str: string): number {
     let hash = 0;
@@ -90,6 +97,8 @@ export function hashHue(str: string): number {
  * Returns a deterministic HSL color from a string hash.
  * Uses the string's hash to pick a hue, with fixed saturation and lightness
  * for pleasant, consistent pill text colors that work on both light and dark backgrounds.
+ * @param str - The string to hash
+ * @returns An HSL color string
  */
 export function hashColor(str: string): string {
     const hue = hashHue(str);
@@ -99,6 +108,8 @@ export function hashColor(str: string): string {
 /**
  * Returns a deterministic light HSL background color from a string hash,
  * suitable for pill backgrounds with the hashColor as text.
+ * @param str - The string to hash
+ * @returns An HSL color string for light backgrounds
  */
 export function hashColorBg(str: string): string {
     const hue = hashHue(str);
@@ -108,6 +119,8 @@ export function hashColorBg(str: string): string {
 /**
  * Returns a deterministic dark HSL background color from a string hash,
  * suitable for pill backgrounds in dark mode.
+ * @param str - The string to hash
+ * @returns An HSL color string for dark backgrounds
  */
 export function hashColorBgDark(str: string): string {
     const hue = hashHue(str);
@@ -126,7 +139,11 @@ export type WithElementRef<T, U extends HTMLElement = HTMLElement> = T & { ref?:
 /** The sessionStorage key prefix used for per-conversation message drafts. */
 export const DRAFT_KEY_PREFIX = "chat-draft:";
 
-/** Check whether a specific conversation has an unsent draft in sessionStorage. */
+/**
+ * Check whether a specific conversation has an unsent draft in sessionStorage.
+ * @param conversationId - The conversation ID to check
+ * @returns Whether a draft exists
+ */
 export function hasDraft(conversationId: string): boolean {
     try {
         return sessionStorage.getItem(`${DRAFT_KEY_PREFIX}${conversationId}`) !== null;
@@ -135,7 +152,10 @@ export function hasDraft(conversationId: string): boolean {
     }
 }
 
-/** Return the set of conversation IDs that currently have unsent drafts. */
+/**
+ * Return the set of conversation IDs that currently have unsent drafts.
+ * @returns A Set of conversation IDs with drafts
+ */
 export function getDraftConversationIds(): Set<string> {
     const ids = new Set<string>();
     try {
@@ -155,6 +175,9 @@ export function getDraftConversationIds(): Set<string> {
  * Format a tool argument value into a compact display string.
  * Strips escape characters from strings, replaces newlines with spaces,
  * and truncates long values with an ellipsis.
+ * @param value - The value to format
+ * @param maxLen - Maximum display length before truncation
+ * @returns A compact string representation of the value
  */
 export function formatArgValue(value: unknown, maxLen = 40): string {
     if (value === null) return "null";

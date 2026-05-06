@@ -1,5 +1,5 @@
 /**
- * Chat store — manages SSE connection, message state, and send/abort for the active conversation.
+ * @file Chat connection store: SSE stream lifecycle, message sending, and generation state.
  *
  * Architecture:
  * - `ChatState` — a single `$state` object holding all mutable chat state
@@ -34,6 +34,7 @@ import {
     deleteMessage as _deleteMessage,
     editMessage as _editMessage,
     editAssistantMessage as _editAssistantMessage,
+    regenWithFeedback as _regenWithFeedback,
     handleStreamRecovery,
     handleMessageStart,
     handleMessageUpdate,
@@ -90,6 +91,7 @@ const state = $state<ChatState>({
 
 /**
  * Request auto-title generation for the current conversation if not already done.
+ * @param s - The chat state
  */
 function requestTitleGeneration(s: ChatState): void {
     if (!s.titleGenerationRequested && s.currentConversationId) {
@@ -97,7 +99,7 @@ function requestTitleGeneration(s: ChatState): void {
         const convId = s.currentConversationId;
         generateTitle(convId)
             .then((result) => {
-                // Update sidebar if we got a title (either newly generated or already set server-side)
+                // Update sidebar if we got a title (newly generated or already set)
                 if (result.title && result.title !== "New Chat") {
                     updateConversationTitleAndTags(convId, result.title, result.tags ?? []);
                 }
@@ -110,7 +112,10 @@ function requestTitleGeneration(s: ChatState): void {
 
 // --- SSE event handlers (take state and event data) ---
 
-/** Handle the 'connected' SSE event. */
+/**
+ * Handle the 'connected' SSE event.
+ * @param s - The chat state
+ */
 function handleConnected(s: ChatState): void {
     console.log(`[chat-lifecycle] handleConnected: SSE connected, messages.length=${s.messages.length}, generating=${s.generating}`);
     s.connected = true;
@@ -122,13 +127,19 @@ function handleConnected(s: ChatState): void {
     }
 }
 
-/** Handle the 'agent_start' SSE event. */
+/**
+ * Handle the 'agent_start' SSE event.
+ * @param s - The chat state
+ */
 function handleAgentStart(s: ChatState): void {
     console.log(`[chat-lifecycle] handleAgentStart: messages.length=${s.messages.length}`);
     s.generating = true;
 }
 
-/** Handle the 'agent_end' SSE event. */
+/**
+ * Handle the 'agent_end' SSE event.
+ * @param s - The chat state
+ */
 function handleAgentEnd(s: ChatState): void {
     console.log(`[chat-lifecycle] handleAgentEnd: messages.length=${s.messages.length}, streamingMessageId=${s.streamingMessageId}`);
     s.generating = false;
@@ -140,25 +151,32 @@ function handleAgentEnd(s: ChatState): void {
     // Auto-generate title after first response if not already done
     requestTitleGeneration(s);
 
-    // Reload message history from server to sync entry IDs.
-    // During SSE streaming, messages get temporary IDs (e.g. "assistant-1234567890").
-    // After generation completes, we need the real JSONL entry IDs for
-    // delete/edit operations to work correctly.
+    // Reload messages to sync entry IDs. SSE uses temporary
+    // IDs; real JSONL IDs are needed for delete/edit ops.
     void _reloadMessages(s);
 }
 
-/** Handle the 'turn_start' SSE event. */
+/**
+ * Handle the 'turn_start' SSE event.
+ * @param s - The chat state
+ */
 function handleTurnStart(s: ChatState): void {
     // A new turn starts — may need a new assistant message for it
     s.generating = true;
 }
 
-/** Handle the 'turn_end' SSE event. */
+/**
+ * Handle the 'turn_end' SSE event.
+ * @param _s - The chat state (unused)
+ */
 function handleTurnEnd(_s: ChatState): void {
     // Turn ended, but generation might continue with more turns
 }
 
-/** Handle the 'session_tree' SSE event. */
+/**
+ * Handle the 'session_tree' SSE event.
+ * @param s - The chat state
+ */
 function handleSessionTree(s: ChatState): void {
     // Only reload if we're not currently navigating ourselves
     // (our own navigate calls reloadMessages directly)
@@ -167,7 +185,10 @@ function handleSessionTree(s: ChatState): void {
     }
 }
 
-/** Handle the 'error' SSE event (connection-level error). */
+/**
+ * Handle the 'error' SSE event (connection-level error).
+ * @param s - The chat state
+ */
 function handleError(s: ChatState): void {
     console.log(`[chat] SSE 'error' event: connection lost`);
     s.connected = false;
@@ -178,7 +199,10 @@ function handleError(s: ChatState): void {
 
 /**
  * Create an EventSource for a conversation's SSE stream and wire up all event handlers.
- * Returns the EventSource instance and the generation number for stale-checks.
+ * @param s - The chat state
+ * @param conversationId - The conversation to stream
+ * @param thisGeneration - Generation counter for stale-checks
+ * @returns The wired EventSource instance
  */
 function setupEventSource(
     s: ChatState,
@@ -190,7 +214,10 @@ function setupEventSource(
 
     const es = new EventSource(streamUrl);
 
-    /** Returns true if this connection has been superseded by a newer connectStream call. */
+    /**
+     * Returns true if this connection has been superseded by a newer connectStream call.
+     * @returns Whether the connection is stale
+     */
     const isStale = () => thisGeneration !== s.connectGeneration;
 
     es.addEventListener("connected", () => {
@@ -262,10 +289,8 @@ function setupEventSource(
         handleError(s);
     });
 
-    // When the source tracker extension flushes fetched sources, attach them to
-    // the assistant message that produced them. The fetched_sources event fires at
-    // turn_end, which may arrive AFTER message_end has already cleared the streaming
-    // message ID — so we fall back to finding the last assistant message in the list.
+    // Attach fetched sources to the producing assistant msg;
+    // fall back to last assistant msg if streaming ID cleared.
     es.addEventListener("fetched_sources", (e: MessageEvent) => {
         if (isStale()) return;
         handleFetchedSources(s, e);
@@ -298,6 +323,9 @@ function setupEventSource(
  * Reset all chat state and prepare for connecting to a new conversation.
  * Disconnects any existing stream, bumps the generation counter,
  * clears all messages and streaming state, and sets the new conversation ID.
+ * @param s - The chat state
+ * @param conversationId - The new conversation ID
+ * @returns The new generation counter
  */
 function resetChatState(s: ChatState, conversationId: string): number {
     disconnectStream();
@@ -321,6 +349,10 @@ function resetChatState(s: ChatState, conversationId: string): number {
 
 // --- Public API ---
 
+/**
+ * Get the shared chat store instance with reactive getters and mutation methods.
+ * @returns The chat store API object
+ */
 export function getChat() {
     return {
         get messages() {
@@ -335,7 +367,10 @@ export function getChat() {
         get error() {
             return state.error;
         },
-        /** Set an error message to display in the chat UI */
+        /**
+         * Set an error message to display in the chat UI.
+         * @param msg - The error message, or null to clear
+         */
         setError(msg: string | null) {
             state.error = msg;
         },
@@ -351,22 +386,32 @@ export function getChat() {
         get lastModel() {
             return state.lastModel;
         },
-        /** Whether a navigate (delete/edit) operation is in progress */
+        /**
+                 * Whether a navigate (delete/edit) operation is in progress.
+                 * @returns The navigating flag
+                 */
         get navigating() {
             return state.navigating;
         },
-        /** Total input tokens across all assistant messages in this conversation */
+        /**
+         * Total input tokens across all assistant messages in this conversation.
+         * @returns The total input token count
+         */
         get totalInputTokens() {
             return state.messages.reduce((sum, m) => sum + (m.usage?.input ?? 0), 0);
         },
-        /** Total output tokens across all assistant messages in this conversation */
+        /**
+         * Total output tokens across all assistant messages in this conversation.
+         * @returns The total output token count
+         */
         get totalOutputTokens() {
             return state.messages.reduce((sum, m) => sum + (m.usage?.output ?? 0), 0);
         },
         /**
          * Add a user message to the local list only (does NOT send to the API).
-         * Returns the generated message ID. Use sendToApi() after to actually
-         * trigger the AI response.
+         * Use sendToApi() after to actually trigger the AI response.
+         * @param content - The message text
+         * @returns The generated message ID
          */
         addLocalUserMessage(content: string): string {
             const id = `user-${Date.now()}`;
@@ -381,7 +426,8 @@ export function getChat() {
         },
         /**
          * Update the content of a local message by ID.
-         * Used to append sandbox file notifications after uploads complete.
+         * @param id - The message ID to update
+         * @param content - The new content
          */
         updateLocalMessage(id: string, content: string) {
             const msg = state.messages.find((m) => m.id === id);
@@ -392,9 +438,12 @@ export function getChat() {
         /**
          * Send a message to the API without adding it to the local message list.
          * The AI response will come through the SSE stream.
-         * Use this after addLocalUserMessage() when you've already pushed the
+         * Use after addLocalUserMessage() when you've already pushed the
          * message locally (e.g. to show it before file uploads finish).
-         * statusContent is invisible context sent to the AI but not shown in the UI.
+         * @param content - The message text
+         * @param modelId - Optional model override
+         * @param statusContent - Invisible context sent to the AI
+         * @returns {Promise<void>}
          */
         async sendToApi(content: string, modelId?: string, statusContent?: string): Promise<void> {
             if (!state.currentConversationId) return;
@@ -428,7 +477,7 @@ export async function connectStream(
     const thisGeneration = resetChatState(state, conversationId);
     console.log(`[chat-lifecycle] connectStream: after resetChatState, messages.length=${state.messages.length}`);
 
-    // Load message history — either from preloaded SSR data (synchronous) or from the server (async)
+    // Load message history — preloaded SSR data (sync) or server (async)
     if (preloadedHistory) {
         populateFromHistory(state, preloadedHistory, conversationId);
     } else {
@@ -451,11 +500,14 @@ export async function connectStream(
     state.currentEventSource = es;
 }
 
+/**
+ * Disconnect the SSE stream and release the server-side session.
+ * @returns {void}
+ */
 export function disconnectStream(): void {
     console.log(`[chat-lifecycle] disconnectStream: conversationId=${state.currentConversationId}, hadEventSource=${!!state.currentEventSource}, messages.length=${state.messages.length}`);
     // Release the in-memory session on the server when switching away.
-    // This is best-effort — if it fails, the idle timeout on the server
-    // will eventually clean up.
+    // Best-effort; server idle timeout is the fallback if this fails.
     const convId = state.currentConversationId;
     if (convId) {
         releaseConversation(convId).catch(() => {
@@ -479,6 +531,10 @@ export function disconnectStream(): void {
 /**
  * Send a user message and add it to the local message list.
  * The actual response comes through the SSE stream.
+ * @param content - The message text
+ * @param modelId - Optional model override
+ * @param statusContent - Invisible context sent to the AI
+ * @returns {Promise<void>}
  */
 export async function send(content: string, modelId?: string, statusContent?: string): Promise<void> {
     if (!state.currentConversationId) return;
@@ -507,6 +563,7 @@ export async function send(content: string, modelId?: string, statusContent?: st
 /**
  * Reload message history from the server and update the local message list.
  * Used after navigating the session tree (delete/edit) to sync local state.
+ * @returns {Promise<void>}
  */
 export async function reloadMessages(): Promise<void> {
     return _reloadMessages(state);
@@ -519,6 +576,7 @@ export async function reloadMessages(): Promise<void> {
  *
  * @param messageId - The ID of the message to delete
  * @param role - The role of the message ("user" or "assistant")
+ * @returns {Promise<void>}
  */
 export async function deleteMessage(messageId: string, role: string): Promise<void> {
     return _deleteMessage(state, messageId, role, abort);
@@ -532,10 +590,11 @@ export async function deleteMessage(messageId: string, role: string): Promise<vo
  *
  * @param messageId - The ID of the message to edit
  * @param role - The role of the message ("user" or "assistant")
- * @param newText - For user messages: the edited text to send. If not provided, falls back to the original text.
+ * @param newText - For user messages: the edited text to send
+ * @returns {Promise<void>}
  */
 export async function editMessage(messageId: string, role: string, newText?: string): Promise<void> {
-    return _editMessage(state, messageId, role, newText, abort, send);
+    return _editMessage(state, messageId, role, { newText, abortFn: abort, sendFn: send });
 }
 
 /**
@@ -544,9 +603,24 @@ export async function editMessage(messageId: string, role: string, newText?: str
  * Navigates back to before the target assistant message, appends a new version
  * with the edited text, and replays all subsequent entries. Does NOT trigger
  * a new AI generation.
+ * @param messageId - The ID of the assistant message to edit
+ * @param newContent - The edited content
+ * @returns {Promise<void>}
  */
 export async function editAssistantMessage(messageId: string, newContent: string): Promise<void> {
     return _editAssistantMessage(state, messageId, newContent, abort);
+}
+
+/**
+ * Regenerate an assistant message with user feedback.
+ * Navigates back, sends the critique as a hidden custom message,
+ * and triggers a new LLM turn for a corrected response.
+ * @param messageId - The ID of the assistant message to regenerate
+ * @param feedback - The user feedback/critique
+ * @returns {Promise<void>}
+ */
+export async function regenWithFeedback(messageId: string, feedback: string): Promise<void> {
+    return _regenWithFeedback(state, messageId, feedback, abort);
 }
 
 /**
@@ -578,6 +652,7 @@ export function clearMessages(): void {
 /**
  * Switch to a different conversation — disconnect old stream, clear messages,
  * connect to the new one.
+ * @param conversationId - The conversation to switch to
  */
 export function switchConversation(conversationId: string): void {
     if (conversationId === state.currentConversationId) return;

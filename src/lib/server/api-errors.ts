@@ -1,3 +1,7 @@
+/**
+ * @file Structured API error responses and type-safe route handler wrappers.
+ */
+
 import { json } from "@sveltejs/kit";
 import type { ZodType as ZodSchema } from "zod";
 import type { RequestHandler } from "@sveltejs/kit";
@@ -9,6 +13,9 @@ type MaybePromise<T> = T | Promise<T>;
 /**
  * Standard structured API error response.
  * All API routes should use this for consistent error formatting.
+ * @param message - The error message
+ * @param status - The HTTP status code
+ * @returns A SvelteKit JSON response
  */
 export function apiError(message: string, status: number = 500) {
     return json({ error: message }, { status });
@@ -16,6 +23,8 @@ export function apiError(message: string, status: number = 500) {
 
 /**
  * Bad request (400) — client sent invalid data.
+ * @param message - The error message
+ * @returns A 400 JSON response
  */
 export function badRequest(message: string) {
     return apiError(message, 400);
@@ -23,6 +32,8 @@ export function badRequest(message: string) {
 
 /**
  * Unauthorized (401) — not authenticated.
+ * @param message - The error message
+ * @returns A 401 JSON response
  */
 export function unauthorized(message: string = "Unauthorized") {
     return apiError(message, 401);
@@ -30,6 +41,8 @@ export function unauthorized(message: string = "Unauthorized") {
 
 /**
  * Not found (404).
+ * @param message - The error message
+ * @returns A 404 JSON response
  */
 export function notFound(message: string = "Not found") {
     return apiError(message, 404);
@@ -37,6 +50,8 @@ export function notFound(message: string = "Not found") {
 
 /**
  * Internal server error (500).
+ * @param message - The error message
+ * @returns A 500 JSON response
  */
 export function internalError(message: string = "Internal server error") {
     return apiError(message, 500);
@@ -59,6 +74,9 @@ export function internalError(message: string = "Internal server error") {
  *     // body is typed as { name: string; key: string }
  *     // event.params, event.locals, etc. available
  *   });
+ * @param schema - Zod schema to validate the request body
+ * @param handler - Callback receiving the validated body and request event
+ * @returns A SvelteKit RequestHandler
  */
 export function apiHandler<T>(
     schema: ZodSchema<T>,
@@ -101,6 +119,8 @@ export function apiHandler<T>(
  *   export const GET = tryApi(async ({ params }) => {
  *     return json(listThings());
  *   });
+ * @param handler - Callback receiving the SvelteKit request event
+ * @returns A SvelteKit RequestHandler
  */
 export function tryApi(
     handler: (event: Parameters<RequestHandler>[0]) => MaybePromise<Response>

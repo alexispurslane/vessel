@@ -7,6 +7,10 @@ import { readdir } from "node:fs/promises";
 
 /**
  * Recursively list files in a directory, returning paths relative to the base.
+ *
+ * @param dir - The directory to list
+ * @param base - The base directory for relative paths
+ * @returns Array of relative file paths
  */
 async function listFilesRecursive(dir: string, base: string): Promise<string[]> {
     const results: string[] = [];
@@ -24,6 +28,13 @@ async function listFilesRecursive(dir: string, base: string): Promise<string[]> 
     return results;
 }
 
+/**
+ * Load conversation data for SSR: message history and sandbox files.
+ *
+ * @param root0 - The load function params
+ * @param root0.params - The route params (includes id)
+ * @returns Page data with messages and sandbox files
+ */
 export const load: PageServerLoad = async ({ params }) => {
     const conversationId = params.id;
 

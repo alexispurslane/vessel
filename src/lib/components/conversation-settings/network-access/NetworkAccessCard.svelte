@@ -1,4 +1,7 @@
 <script lang="ts">
+    /**
+     * @file Network access configuration card component.
+     */
     import { Label } from "$lib/components/ui/label/index.js";
     import { Switch } from "$lib/components/ui/switch/index.js";
     import { Separator } from "$lib/components/ui/separator/index.js";

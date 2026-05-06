@@ -1,4 +1,7 @@
 <script lang="ts">
+    /**
+     * @file Individual chat message rendering component.
+     */
     import { Streamdown } from "svelte-streamdown";
     import MathComponent from "svelte-streamdown/math";
     import MermaidComponent from "svelte-streamdown/mermaid";
@@ -16,6 +19,7 @@
     import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
     import X from "@lucide/svelte/icons/x";
     import Check from "@lucide/svelte/icons/check";
+    import ThumbsDown from "@lucide/svelte/icons/thumbs-down";
     import ToolCall from "$lib/components/chat/tool-call.svelte";
     import FetchedSources from "$lib/components/chat/fetched-sources.svelte";
     import type { ChatMessage as ChatMessageType } from "$lib/types.js";
@@ -36,6 +40,8 @@
         onedit?: (messageId: string, role: string, newText?: string) => void;
         /** Callback for in-place edit of an assistant message (no AI re-prompt, just modifies the stored text) */
         oneditassistant?: (messageId: string, newText: string) => void;
+        /** Callback to regenerate an assistant message with user feedback */
+        onregenfeedback?: (messageId: string, feedback: string) => void;
         /** Whether a navigation operation is in progress */
         navigating?: boolean;
         /** Callback when a search source is clicked, to open search results panel */
@@ -52,6 +58,7 @@
         ondelete,
         onedit,
         oneditassistant,
+        onregenfeedback,
         navigating = false,
         onsearchclick,
         onpageclick,
@@ -134,6 +141,8 @@
     let confirmDeleteTimer: ReturnType<typeof setTimeout> | undefined;
     let editing = $state(false);
     let editText = $state("");
+    let showFeedbackPopup = $state(false);
+    let feedbackText = $state("");
 
     /** Preprocessed content: fixes math formatting for Streamdown */
     const preprocessedContent = $derived(preprocessMathMarkdown(msg.content));
@@ -218,6 +227,32 @@
             handleEditSubmit();
         } else if (e.key === "Escape") {
             handleEditCancel();
+        }
+    }
+
+    function handleFeedbackOpen() {
+        feedbackText = "";
+        showFeedbackPopup = true;
+    }
+
+    function handleFeedbackSubmit() {
+        const trimmed = feedbackText.trim();
+        if (!trimmed) return;
+        showFeedbackPopup = false;
+        onregenfeedback?.(msg.id, trimmed);
+    }
+
+    function handleFeedbackCancel() {
+        showFeedbackPopup = false;
+        feedbackText = "";
+    }
+
+    function handleFeedbackKeydown(e: KeyboardEvent) {
+        if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            handleFeedbackSubmit();
+        } else if (e.key === "Escape") {
+            handleFeedbackCancel();
         }
     }
 </script>
@@ -387,6 +422,18 @@
                             <RotateCcw class="size-3" />
                         </button>
                     {/if}
+                    {#if onregenfeedback && msg.role === "assistant"}
+                        <button
+                            onclick={() => {
+                                handleFeedbackOpen();
+                            }}
+                            class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
+                            aria-label="Regenerate with feedback"
+                            title="Regenerate with feedback"
+                        >
+                            <ThumbsDown class="size-3" />
+                        </button>
+                    {/if}
                     {#if ondelete}
                         <button
                             onclick={() => {
@@ -437,6 +484,38 @@
                         <Spinner class="size-3" />
                         Updating...
                     </span>
+                </div>
+            {/if}
+            <!-- Feedback popup for regenerate-with-feedback -->
+            {#if showFeedbackPopup}
+                <div
+                    class="flex flex-col gap-1.5 mt-2 p-2 rounded border border-border bg-muted/50"
+                >
+                    <textarea
+                        bind:value={feedbackText}
+                        onkeydown={handleFeedbackKeydown}
+                        placeholder="What should be different?"
+                        class="w-full text-sm bg-background border border-border rounded px-2 py-1.5 resize-none focus:outline-none focus:ring-1 focus:ring-ring min-h-[60px]"
+                        rows={2}
+                    ></textarea>
+                    <div class="flex justify-end gap-1.5">
+                        <button
+                            onclick={handleFeedbackCancel}
+                            class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
+                            aria-label="Cancel feedback"
+                        >
+                            <X class="size-3" />
+                            Cancel
+                        </button>
+                        <button
+                            onclick={handleFeedbackSubmit}
+                            class="inline-flex items-center gap-1 text-[11px] text-primary-foreground bg-primary hover:bg-primary/90 transition-colors cursor-pointer px-2 py-1 rounded"
+                            aria-label="Submit feedback"
+                        >
+                            <ThumbsDown class="size-3" />
+                            Submit
+                        </button>
+                    </div>
                 </div>
             {/if}
         </div>

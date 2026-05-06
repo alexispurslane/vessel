@@ -1,5 +1,5 @@
 /**
- * Model registry and resolution logic.
+ * @file Model registry and resolution logic.
  *
  * Pure model resolution functions with no session state dependency.
  * All are module-level singletons or pure functions that only depend
@@ -25,9 +25,12 @@ const SESSIONS_DIR = resolve(DATA_DIR, "sessions");
 const AGENT_DIR = resolve(DATA_DIR, "agent");
 const MODELS_JSON_PATH = resolve(DATA_DIR, "models.json");
 
-/** Return the Vessel-specific append system prompt.
+/**
+ * Return the Vessel-specific append system prompt.
  * Now loaded from an embedded constant rather than a file on disk,
  * so it stays version-controlled alongside the source code.
+ *
+ * @returns The append system prompt string
  */
 export function loadVesselAppendPrompt(): string {
     return VESSEL_APPEND_PROMPT;
@@ -44,6 +47,8 @@ let _modelRegistry: ModelRegistry | undefined;
 /**
  * Get the singleton AuthStorage with API keys from our DB.
  * Rebuilds from DB on first call or when explicitly refreshed.
+ *
+ * @returns The AuthStorage singleton
  */
 export function getAuthStorage(): AuthStorage {
     if (!_authStorage) {
@@ -58,10 +63,8 @@ export function getAuthStorage(): AuthStorage {
  * Called after provider mutations (upsert/delete).
  */
 export function refreshAuthStorageKeys(): void {
-    // Always recreate AuthStorage from scratch to clear stale keys
-    // from deleted providers. AuthStorage doesn't expose a clear/remove
-    // method, so reusing the instance would leak credentials for
-    // providers that have been deleted from the DB.
+    // Recreate AuthStorage from scratch to clear stale keys from deleted
+    // providers. It has no clear/remove method, so reuse would leak creds.
     _authStorage = AuthStorage.create();
     const db = getDb();
     const providers = db
@@ -81,6 +84,8 @@ export function refreshAuthStorageKeys(): void {
  *
  * Must be called after ModelRegistry.create() and after refresh(), since
  * both reload all built-in models from pi-ai's models.generated.js.
+ *
+ * @param registry - The ModelRegistry to filter
  */
 function filterModelsToVesselProviders(registry: ModelRegistry): void {
     const db = getDb();
@@ -95,6 +100,8 @@ function filterModelsToVesselProviders(registry: ModelRegistry): void {
  * Get the singleton ModelRegistry.
  * Creates it on first call; callers should call refreshModelRegistry()
  * after mutations to providers or custom_models.
+ *
+ * @returns The ModelRegistry singleton
  */
 export function getModelRegistry(): ModelRegistry {
     if (!_modelRegistry) {

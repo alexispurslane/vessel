@@ -1,4 +1,7 @@
 <script lang="ts">
+    /**
+     * @file Settings tab for notification preferences.
+     */
     import { onMount } from "svelte";
     import {
         Card,

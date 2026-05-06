@@ -1,4 +1,7 @@
 <script lang="ts">
+    /**
+     * @file MCP server list configuration component.
+     */
     import { Switch } from "$lib/components/ui/switch/index.js";
     import { Label } from "$lib/components/ui/label/index.js";
     import { TriStateToggle } from "$lib/components/ui/tri-state-toggle/index.js";

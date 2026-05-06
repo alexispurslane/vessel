@@ -1,5 +1,5 @@
 /**
- * Tool resolution and agent info.
+ * @file Tool resolution and agent info.
  *
  * Functions for resolving which tools should be active in a session,
  * getting agent info for the UI, and checking MCP server connection status.
@@ -40,31 +40,27 @@ export interface ResolveActiveToolNamesResult {
 }
 
 /**
- * Decide which tools should be active for a conversation session.
+ * Collect tool names that should be disabled based on session rules.
  *
- * Uses the effective agent mode to determine which tools are available:
- * - "agent" mode: all non-MCP tools enabled (read, bash, edit, write, glob, grep, fetch)
- * - "chat" mode: no tools enabled (plain conversation)
+ * Applies three disabling rules in order:
+ * 1. Chat mode disables all non-MCP built-in/SDK tools (except
+ *    fetch/web_search when network is allowed).
+ * 2. MCP explicitly off disables all MCP tools.
+ * 3. Network off disables fetch and web_search.
  *
- * Additional rules:
- * - MCP tools are removed when MCP is explicitly off (enabledMcpServers === [])
- * - Sandbox mode removes grep since sandboxed tools omit it
- * - The fetch tool is automatically disabled when network permissions are off
+ * @param input - Tool resolution input parameters
+ * @returns Set of tool names that should be disabled
  */
-export function resolveActiveToolNames(input: ResolveActiveToolNamesInput): ResolveActiveToolNamesResult {
-    const { activeToolNames, allRegisteredToolNames, conversationSettings, sandbox, mcpToolNames, effectiveAgentMode, networkAllowed } = input;
+function collectDisabledTools(input: ResolveActiveToolNamesInput): Set<string> {
+    const { allRegisteredToolNames, conversationSettings, mcpToolNames, effectiveAgentMode, networkAllowed } = input;
 
-    // Identify MCP extension tools so we can disable them when MCP is off.
     const mcpExplicitlyOff = Array.isArray(conversationSettings?.enabledMcpServers) &&
         conversationSettings.enabledMcpServers.length === 0;
 
-    // Collect all tool names that should be disabled.
     const disabledTools = new Set<string>();
 
     // Chat mode: disable all non-MCP built-in and SDK tools.
-    // In chat mode, the agent is used as a plain conversation with no tools.
-    // Exception: the fetch tool is kept available when network access is on,
-    // so the model can still fetch web pages even in chat mode.
+    // Exception: fetch/web_search stay on when network is allowed.
     if (effectiveAgentMode === "chat") {
         for (const name of allRegisteredToolNames) {
             if (!mcpToolNames.has(name) && !(name === "fetch" && networkAllowed) && !(name === "web_search" && networkAllowed)) {
@@ -85,6 +81,29 @@ export function resolveActiveToolNames(input: ResolveActiveToolNamesInput): Reso
         disabledTools.add("fetch");
         disabledTools.add("web_search");
     }
+
+    return disabledTools;
+}
+
+/**
+ * Decide which tools should be active for a conversation session.
+ *
+ * Uses the effective agent mode to determine which tools are available:
+ * - "agent" mode: all non-MCP tools enabled (read, bash, edit, write, glob, grep, fetch)
+ * - "chat" mode: no tools enabled (plain conversation)
+ *
+ * Additional rules:
+ * - MCP tools are removed when MCP is explicitly off (enabledMcpServers === [])
+ * - Sandbox mode removes grep since sandboxed tools omit it
+ * - The fetch tool is automatically disabled when network permissions are off
+ *
+ * @param input - Tool resolution input parameters
+ * @returns The desired tool names and whether an update is needed
+ */
+export function resolveActiveToolNames(input: ResolveActiveToolNamesInput): ResolveActiveToolNamesResult {
+    const { activeToolNames, allRegisteredToolNames, sandbox } = input;
+
+    const disabledTools = collectDisabledTools(input);
 
     // Build the desired set: start from all registered tools, remove disabled ones
     // (and grep in sandbox mode since sandboxed tools omit it).
@@ -111,6 +130,7 @@ export function resolveActiveToolNames(input: ResolveActiveToolNamesInput): Reso
  * active AgentSession. The session must be loaded in memory.
  *
  * @param activeSession - The active session to read from (caller passes it in)
+ * @returns Agent info object, or null if unavailable
  */
 export function getSessionAgentInfo(activeSession: ActiveSession): {
     systemPrompt: string;
@@ -184,6 +204,7 @@ export interface McpServerStatus {
  * Reads from pi-mcp-adapter's internal McpServerManager via the extension runner.
  *
  * @param activeSession - The active session to read from (caller passes it in)
+ * @returns Array of MCP server status objects
  */
 export function getMcpServerStatus(activeSession: ActiveSession): McpServerStatus[] {
     try {
@@ -191,41 +212,30 @@ export function getMcpServerStatus(activeSession: ActiveSession): McpServerStatu
         const runner = getExtensionRunner(activeSession.agentSession);
         if (!runner?.extensions) return [];
 
-        // Find the MCP adapter extension by looking for the one that registered the "mcp" tool
+        // Find the MCP adapter extension by looking for the "mcp" tool
         for (const ext of runner.extensions) {
             if (ext.tools?.has("mcp")) {
-                // This is the MCP adapter extension. Its state holds the McpServerManager.
-                // The state isn't on the Extension object — it's in the closure.
-                // We need to access it through the manager on the state.
-                // Since state is a closure variable, we can try getting it from tool metadata.
+                // MCP adapter state (McpServerManager) is in a closure, not on the
+                // Extension object. Try getting it from tool metadata.
                 break;
             }
         }
 
-        // Direct approach: access the McpServerManager from the state.
-        // The state is stored in a closure, but the toolMetadata map is accessible
-        // through the pi extension API. Let's try reading the MCP tool's description
-        // which includes server names + tool counts in its dynamically generated description.
+        // Direct approach: access McpServerManager from the state. The state is in a
+        // closure, but the toolMetadata map is accessible via the pi extension API.
         const _toolRegistry = getToolRegistry(activeSession.agentSession);
         const toolDefMap = getToolDefinitions(activeSession.agentSession);
 
-        // The MCP proxy tool's description is dynamically built and includes server names + tool counts.
-        // But it doesn't include connection status directly.
-        // For a more direct approach, let's look at the extension runner's state.
-        // The runner stores extensions, and the MCP adapter stores its state locally.
-        // We can access it through the runner's private _extensions field.
+        // The MCP proxy tool's description includes server names + tool counts but
+        // not connection status. Extension runner's state is also inaccessible.
 
-        // Actually, the cleanest path: use the tool metadata cache file that pi-mcp-adapter writes
-        // at data/agent/.mcp-metadata-cache.json. This contains per-server tool lists.
-        // But it won't have connection status.
+        // The metadata cache (data/agent/.mcp-metadata-cache.json) has per-server tool
+        // lists but no connection status.
 
-        // Most practical: interrogate the McpServerManager directly.
-        // The adapter's `state` variable holds a reference to the manager.
-        // We can't get at the closure variable, but we CAN invoke the mcp tool
-        // with no arguments (which returns status) by calling the execute function.
+        // Most practical: invoke the mcp tool with no arguments (returns status) via
+        // the execute function, since we can't access the closure state variable.
 
-        // However, that's complex. For now, let's read the active tool list
-        // and report which MCP-related tools are present as a proxy for "connected".
+        // Simpler fallback: report MCP-related tools as a proxy for "connected".
         const result: McpServerStatus[] = [];
         const allServers = getMcpServersFromDb();
 
@@ -239,8 +249,8 @@ export function getMcpServerStatus(activeSession: ActiveSession): McpServerStatu
                 }
             }
 
-            // If we see tools from this server, it's connected.
-            // The MCP gateway tool is always present, so check for server-specific direct tools.
+            // If we see tools from this server, it's connected. Check for
+            // server-specific direct tools (not just the gateway tool).
             result.push({
                 name,
                 status: toolCount > 0 ? "connected" : "unknown",

@@ -1,4 +1,6 @@
 /**
+ * @file OG metadata API endpoint.
+ *
  * GET /api/og-metadata?url=...
  *
  * Fetches OpenGraph metadata for a URL. Used by the FetchedPages component
@@ -72,29 +74,19 @@ function extractDomain(url: string): string {
     }
 }
 
-export const GET = tryApi(async ({ url }) => {
-    const targetUrl = url.searchParams.get("url");
-    if (!targetUrl) {
-        return badRequest("Missing url parameter");
-    }
-
-    // Validate URL
-    let parsedUrl: URL;
-    try {
-        parsedUrl = new URL(targetUrl);
-    } catch {
-        return badRequest("Invalid URL");
-    }
-    if (!["http:", "https:"].includes(parsedUrl.protocol)) {
-        return badRequest("Unsupported protocol");
-    }
-
-    // Check cache
-    const cached = cache.get(targetUrl);
-    if (cached && cached.expires > Date.now()) {
-        return json(cached.data);
-    }
-
+/**
+ * Fetch a URL, extract OpenGraph metadata, and cache the result.
+ *
+ * Handles the full pipeline: HTTP fetch with timeout, content-type
+ * validation, HTML parsing for OG fields, relative URL resolution,
+ * and cache storage. Returns a fallback with just the domain on any
+ * failure.
+ *
+ * @param targetUrl - The URL to fetch OG metadata for
+ * @param parsedUrl - The pre-validated URL object
+ * @returns Extracted OG metadata as a string record
+ */
+async function extractOgMetadata(targetUrl: string, parsedUrl: URL): Promise<Record<string, string>> {
     try {
         const resp = await fetch(targetUrl, {
             signal: AbortSignal.timeout(FETCH_TIMEOUT),
@@ -107,12 +99,12 @@ export const GET = tryApi(async ({ url }) => {
         });
 
         if (!resp.ok) {
-            return json({ title: extractDomain(targetUrl), siteName: "", image: "", favicon: "", url: targetUrl });
+            return { title: extractDomain(targetUrl), siteName: "", image: "", favicon: "", url: targetUrl };
         }
 
         const contentType = resp.headers.get("content-type") ?? "";
         if (!contentType.includes("text/html") && !contentType.includes("application/xhtml")) {
-            return json({ title: extractDomain(targetUrl), siteName: "", image: "", favicon: "", url: targetUrl });
+            return { title: extractDomain(targetUrl), siteName: "", image: "", favicon: "", url: targetUrl };
         }
 
         // Only read the first 100KB — OG tags are in the <head>
@@ -147,15 +139,41 @@ export const GET = tryApi(async ({ url }) => {
         // Cache the result
         cache.set(targetUrl, { data, expires: Date.now() + CACHE_TTL });
 
-        return json(data);
+        return data;
     } catch {
-        // Fetch failed — return fallback with just the domain
-        return json({
+        return {
             title: extractDomain(targetUrl),
             siteName: "",
             image: "",
             favicon: "",
             url: targetUrl,
-        });
+        };
     }
+}
+
+export const GET = tryApi(async ({ url }) => {
+    const targetUrl = url.searchParams.get("url");
+    if (!targetUrl) {
+        return badRequest("Missing url parameter");
+    }
+
+    // Validate URL
+    let parsedUrl: URL;
+    try {
+        parsedUrl = new URL(targetUrl);
+    } catch {
+        return badRequest("Invalid URL");
+    }
+    if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+        return badRequest("Unsupported protocol");
+    }
+
+    // Check cache
+    const cached = cache.get(targetUrl);
+    if (cached && cached.expires > Date.now()) {
+        return json(cached.data);
+    }
+
+    const ogData = await extractOgMetadata(targetUrl, parsedUrl);
+    return json(ogData);
 });

@@ -1,4 +1,7 @@
 <script lang="ts">
+    /**
+     * @file Collapsible group for thinking/tool-call traces.
+     */
     import { Streamdown } from "svelte-streamdown";
     import MathComponent from "svelte-streamdown/math";
     import MermaidComponent from "svelte-streamdown/mermaid";

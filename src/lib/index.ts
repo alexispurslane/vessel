@@ -1,1 +1,5 @@
-// place files you want to import through the `$lib` alias in this folder.
+/**
+ * @file Re-exports for the $lib alias.
+ */
+
+export { };

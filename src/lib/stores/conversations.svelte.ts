@@ -1,5 +1,5 @@
 /**
- * Conversations store — tracks the sidebar conversation list.
+ * @file Conversations store — tracks the sidebar conversation list.
  */
 import {
     listConversations as apiList,
@@ -12,6 +12,7 @@ import type { ConversationListItem } from "$lib/types.js";
 /**
  * Produce an ISO 8601 datetime string without `new Date()`,
  * to satisfy the Svelte mutable-class linter in .svelte.ts files.
+ * @returns An ISO 8601 datetime string
  */
 function isoNow(): string {
     const ms = Date.now();
@@ -45,6 +46,10 @@ let activeId = $state<string | null>(null);
 /** Incremented each time loadConversations is called, so stale async results are discarded. */
 let loadGeneration = 0;
 
+/**
+ * Return a reactive snapshot of the conversations state.
+ * @returns An object with reactive list, loading, error, activeId, and activeConversation getters
+ */
 export function getConversations() {
     return {
         get list() {
@@ -65,6 +70,11 @@ export function getConversations() {
     };
 }
 
+/**
+ * Fetch the conversation list from the API and update the store.
+ * Discards stale results if called again before the fetch completes.
+ * @returns {Promise<void>}
+ */
 export async function loadConversations(): Promise<void> {
     loading = true;
     error = null;
@@ -84,6 +94,12 @@ export async function loadConversations(): Promise<void> {
     }
 }
 
+/**
+ * Create a new conversation via the API and add it to the store.
+ * @param title - Optional title for the new conversation
+ * @param modelId - Optional model ID to use
+ * @returns The new conversation ID, or null on failure
+ */
 export async function createConversation(title?: string, modelId?: string): Promise<string | null> {
     error = null;
     try {
@@ -108,6 +124,11 @@ export async function createConversation(title?: string, modelId?: string): Prom
     }
 }
 
+/**
+ * Delete a conversation via the API and remove it from the store.
+ * @param id - The conversation ID to delete
+ * @returns Whether the deletion succeeded
+ */
 export async function deleteConversation(id: string): Promise<boolean> {
     error = null;
     try {
@@ -123,6 +144,12 @@ export async function deleteConversation(id: string): Promise<boolean> {
     }
 }
 
+/**
+ * Rename a conversation via the API and update the store.
+ * @param id - The conversation ID to rename
+ * @param title - The new title
+ * @returns Whether the rename succeeded
+ */
 export async function renameConversation(id: string, title: string): Promise<boolean> {
     error = null;
     try {
@@ -139,6 +166,10 @@ export async function renameConversation(id: string, title: string): Promise<boo
 /**
  * Update a conversation's title and tags locally (e.g., after auto-generation).
  * Does NOT call the API since the server already updated the DB.
+ * @param id - The conversation ID to update
+ * @param title - The new title
+ * @param tags - The new tags
+ * @returns {void}
  */
 export function updateConversationTitleAndTags(id: string, title: string, tags: string[]): void {
     const conv = conversations.find((c) => c.id === id);
@@ -148,6 +179,12 @@ export function updateConversationTitleAndTags(id: string, title: string, tags: 
     }
 }
 
+/**
+ * Pin or unpin a conversation via the API and update the store.
+ * @param id - The conversation ID to pin/unpin
+ * @param pinned - Whether the conversation should be pinned
+ * @returns Whether the update succeeded
+ */
 export async function pinConversation(id: string, pinned: boolean): Promise<boolean> {
     error = null;
     try {

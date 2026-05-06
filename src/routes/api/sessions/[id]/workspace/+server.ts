@@ -8,6 +8,10 @@ import { readdir, rm } from "node:fs/promises";
 
 /**
  * Recursively list files in a directory, returning paths relative to the base.
+ *
+ * @param dir - The directory to list
+ * @param base - The base directory for relative paths
+ * @returns Array of relative file paths
  */
 async function listFilesRecursive(dir: string, base: string): Promise<string[]> {
     const results: string[] = [];
@@ -28,6 +32,10 @@ async function listFilesRecursive(dir: string, base: string): Promise<string[]> 
 /**
  * Remove empty parent directories up to the workspace root.
  * This keeps the workspace tidy after deleting nested files.
+ *
+ * @param filePath - The file path whose parents to clean
+ * @param rootDir - The workspace root to stop at
+ * @returns {void}
  */
 async function removeEmptyParents(filePath: string, rootDir: string) {
     let dir = dirname(filePath);
@@ -86,6 +94,7 @@ export const DELETE = apiHandler(DeleteBody, async ({ body, event }) => {
     // Resolve and validate the path stays within the workspace
     let filePath: string;
     try {
+        // oxlint-disable-next-line secure-coding/no-improper-sanitization -- path defense
         filePath = sanitizeAndResolvePath(workDir, body.path);
     } catch {
         return json({ error: "Invalid file path" }, { status: 400 });
@@ -99,20 +108,17 @@ export const DELETE = apiHandler(DeleteBody, async ({ body, event }) => {
 
     if (sandbox) {
         // Route the deletion through the sandbox so the snapshot records it.
-        // The baseline captures the file as existing, the incremental sees it
-        // gone after rm — so the diff shows the file as "Deleted".
-        //
-        // We use a dedicated file-management sandbox (not the agent's sandbox)
-        // so user file operations always succeed regardless of the agent's
-        // read/write restrictions.
+        // The baseline sees the file, the incremental sees it gone → "Deleted".
+
+        // Use a dedicated file-management sandbox (not the agent's)
+        // so user file ops always succeed regardless of agent restrictions.
         const result = await sandbox
             .exec("rm", [filePath])
             .output();
         if (result.code !== 0) {
             throw new Error(`Sandbox rm failed: ${result.stderr}`);
         }
-        // Clean up any empty parent directories left behind (done on host since
-        // rmdir on empty dirs doesn't need snapshot tracking)
+        // Clean up empty parent dirs (on host; rmdir doesn't need snapshot)
         await removeEmptyParents(filePath, resolvedWorkDir);
     } else {
         // No sandbox — delete directly

@@ -1,4 +1,7 @@
 <script lang="ts">
+    /**
+     * @file Standard page layout with optional back button and heading.
+     */
     import { Button } from "$lib/components/ui/button/index.js";
     import ArrowLeft from "@lucide/svelte/icons/arrow-left";
 

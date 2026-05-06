@@ -1,5 +1,5 @@
 /**
- * Adapter layer for pi-coding-agent internal API access.
+ * @file Adapter layer for pi-coding-agent internal API access.
  *
  * These functions access pi-coding-agent internal properties that are not
  * part of the public API. Each function includes a runtime guard that checks
@@ -99,6 +99,9 @@ function internalAccessError(objectName: string, propertyName: string): Error {
  * and sandboxed tool overrides.
  *
  * Runtime guard: throws if the property is undefined.
+ *
+ * @param session - The AgentSession instance
+ * @returns The internal tool registry map
  */
 export function getToolRegistry(session: PiAgentSession): Map<string, AnyAgentTool> {
     const registry = (session as unknown as InternalAgentSession)._toolRegistry;
@@ -117,6 +120,9 @@ export function getToolRegistry(session: PiAgentSession): Map<string, AnyAgentTo
  * Vessel-specific tools so they appear in tool listings and the agent-info API.
  *
  * Runtime guard: throws if the property is undefined.
+ *
+ * @param session - The AgentSession instance
+ * @returns The internal tool definitions map
  */
 export function getToolDefinitions(session: PiAgentSession): Map<string, ToolDefinitionRecord> {
     const definitions = (session as unknown as InternalAgentSession)._toolDefinitions;
@@ -135,6 +141,9 @@ export function getToolDefinitions(session: PiAgentSession): Map<string, ToolDef
  * internal refresh cycles.
  *
  * Runtime guard: throws if the property is undefined.
+ *
+ * @param session - The AgentSession instance
+ * @returns The internal base tool definitions map
  */
 export function getBaseToolDefinitions(session: PiAgentSession): Map<string, AnyAgentTool> {
     const definitions = (session as unknown as InternalAgentSession)._baseToolDefinitions;
@@ -158,6 +167,9 @@ export function getBaseToolDefinitions(session: PiAgentSession): Map<string, Any
  *
  * This is intentional: the extension runner is only needed for optional
  * MCP status reporting, not core functionality.
+ *
+ * @param session - The AgentSession instance
+ * @returns The extension runner, or undefined if not available
  */
 export function getExtensionRunner(session: PiAgentSession): ExtensionRunner | undefined {
     const runner = (session as unknown as InternalAgentSession).extensionRunner;
@@ -189,6 +201,9 @@ export interface ResourceLoaderAdapter {
  * custom and append system prompts.
  *
  * Runtime guard: throws if `resourceLoader` is undefined.
+ *
+ * @param session - The AgentSession instance
+ * @returns A typed adapter for the ResourceLoader's prompt properties
  */
 export function getResourceLoaderAdapter(session: PiAgentSession): ResourceLoaderAdapter {
     const rl = session.resourceLoader as unknown as InternalResourceLoader;
@@ -211,6 +226,9 @@ export function getResourceLoaderAdapter(session: PiAgentSession): ResourceLoade
  *
  * Runtime guard: throws if the property is undefined (the ModelRegistry
  * should always have a models array after initialization).
+ *
+ * @param registry - The ModelRegistry instance
+ * @returns The internal model list
  */
 export function getModelList(registry: ModelRegistry): Array<{ provider: string }> {
     const models = (registry as unknown as InternalModelRegistry).models;
@@ -228,6 +246,10 @@ export function getModelList(registry: ModelRegistry): Array<{ provider: string 
  * doesn't exist in Vessel's DB.
  *
  * Runtime guard: throws if the property doesn't exist on the registry object.
+ *
+ * @param registry - The ModelRegistry instance
+ * @param models - The filtered model list to set
+ * @returns {void}
  */
 export function setModelList(registry: ModelRegistry, models: Array<{ provider: string }>): void {
     if (!("models" in (registry as unknown as InternalModelRegistry))) {

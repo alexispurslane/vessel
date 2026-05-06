@@ -1,3 +1,7 @@
+/**
+ * @file Deep-partial theme type for svelte-streamdown customization.
+ */
+
 import type { Theme } from "svelte-streamdown";
 
 /**

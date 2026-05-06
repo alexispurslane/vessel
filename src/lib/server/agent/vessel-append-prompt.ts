@@ -1,5 +1,5 @@
 /**
- * The Vessel-specific system prompt appended to every conversation.
+ * @file The Vessel-specific system prompt appended to every conversation.
  *
  * This used to live in data/agent/VESSEL_APPEND.md, but embedding it in
  * source control keeps it versioned and avoids leaking other data/agent/

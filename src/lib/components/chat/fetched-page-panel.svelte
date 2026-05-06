@@ -1,4 +1,8 @@
 <script lang="ts">
+    /**
+     * @file Panel showing fetched page metadata.
+     */
+
     /* eslint-disable svelte/no-navigation-without-resolve -- this component renders external URLs, not SvelteKit routes */
     import ExternalLink from "@lucide/svelte/icons/external-link";
     import X from "@lucide/svelte/icons/x";

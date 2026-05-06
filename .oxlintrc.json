@@ -1,0 +1,207 @@
+{
+    "$schema": "./node_modules/oxlint/configuration_schema.json",
+    "plugins": [
+        "eslint",
+        "typescript",
+        "unicorn",
+        "oxc",
+        "jsdoc"
+    ],
+    "categories": {
+        "correctness": "error"
+    },
+    "jsPlugins": [
+        "eslint-plugin-sonarjs",
+        {
+            "name": "jsdoc-js",
+            "specifier": "eslint-plugin-jsdoc"
+        },
+        "./lint-rules/no-long-comment-paragraphs-plugin.js",
+        "eslint-plugin-jwt",
+        "eslint-plugin-secure-coding",
+        "eslint-plugin-ai-guard"
+    ],
+    "rules": {
+        "typescript/no-floating-promises": "error",
+        "typescript/no-misused-promises": "error",
+        "typescript/await-thenable": "error",
+        "typescript/no-unsafe-assignment": "error",
+        "typescript/no-unsafe-call": "error",
+        "typescript/no-unsafe-member-access": "error",
+        "typescript/no-unnecessary-type-assertion": "warn",
+        "typescript/no-dynamic-delete": "off",
+        "typescript/no-unused-vars": [
+            "error",
+            {
+                "args": "all",
+                "argsIgnorePattern": "^_",
+                "vars": "all",
+                "varsIgnorePattern": "^_",
+                "caughtErrors": "all",
+                "caughtErrorsIgnorePattern": "^_",
+                "destructuredArrayIgnorePattern": "^_"
+            }
+        ],
+        "eslint/max-params": [
+            "warn",
+            {
+                "max": 4
+            }
+        ],
+        "eslint/max-depth": [
+            "warn",
+            {
+                "max": 4
+            }
+        ],
+        "eslint/max-nested-callbacks": [
+            "warn",
+            {
+                "max": 4
+            }
+        ],
+        "eslint/max-statements": [
+            "warn",
+            {
+                "max": 30
+            }
+        ],
+        "eslint/max-lines": [
+            "warn",
+            {
+                "max": 1000
+            }
+        ],
+        "eslint/max-lines-per-function": [
+            "warn",
+            {
+                "max": 80
+            }
+        ],
+        "jsdoc-js/require-jsdoc": [
+            "error",
+            {
+                "contexts": [
+                    {
+                        "context": "ExportNamedDeclaration > FunctionDeclaration",
+                        "minLineCount": 10
+                    },
+                    {
+                        "context": "ExportDefaultDeclaration > FunctionDeclaration",
+                        "minLineCount": 10
+                    },
+                    {
+                        "context": "ExportNamedDeclaration > VariableDeclaration[kind=\"const\"] > VariableDeclarator > ArrowFunctionExpression",
+                        "minLineCount": 10
+                    },
+                    {
+                        "context": "ExportNamedDeclaration > VariableDeclaration[kind=\"const\"] > VariableDeclarator > FunctionExpression",
+                        "minLineCount": 10
+                    },
+                    {
+                        "context": "ExportDefaultDeclaration > ArrowFunctionExpression",
+                        "minLineCount": 10
+                    },
+                    {
+                        "context": "ExportDefaultDeclaration > FunctionExpression",
+                        "minLineCount": 10
+                    }
+                ],
+                "require": {
+                    "FunctionDeclaration": false,
+                    "ClassDeclaration": false,
+                    "ClassExpression": false
+                }
+            }
+        ],
+        "jsdoc-js/require-file-overview": [
+            "off",
+            {
+                "tags": {
+                    "file": {
+                        "mustExist": true,
+                        "preventDuplicates": true,
+                        "initialCommentsOnly": true
+                    }
+                }
+            }
+        ],
+        "jsdoc-js/require-param": "error",
+        "jsdoc-js/require-returns": "error",
+        "jsdoc-js/require-param-type": "off",
+        "jsdoc-js/require-returns-type": "off",
+        "jsdoc-js/require-description": "error",
+        "jsdoc-js/require-description-complete-sentence": "off",
+        "sonarjs/cognitive-complexity": [
+            "error",
+            15
+        ],
+        "sonarjs/cyclomatic-complexity": "off",
+        "sonarjs/max-lines-per-function": "off",
+        "sonarjs/max-lines": "off",
+        "sonarjs/no-nested-conditional": "off",
+        "sonarjs/no-unused-vars": "off",
+        "local/no-long-comment-paragraphs": "error",
+        "jwt/no-algorithm-none": "error",
+        "jwt/no-algorithm-confusion": "error",
+        "jwt/require-algorithm-whitelist": "warn",
+        "jwt/no-decode-without-verify": "warn",
+        "jwt/no-weak-secret": "error",
+        "jwt/no-hardcoded-secret": "error",
+        "jwt/no-timestamp-manipulation": "error",
+        "jwt/require-expiration": "warn",
+        "jwt/no-sensitive-payload": "warn",
+        "secure-coding/no-graphql-injection": "error",
+        "secure-coding/no-xxe-injection": "error",
+        "secure-coding/no-xpath-injection": "error",
+        "secure-coding/no-ldap-injection": "error",
+        "secure-coding/no-unsafe-deserialization": "error",
+        "secure-coding/detect-non-literal-regexp": "off",
+        "secure-coding/no-redos-vulnerable-regex": "off",
+        "secure-coding/no-unsafe-regex-construction": "off",
+        "secure-coding/detect-object-injection": "off",
+        "secure-coding/no-hardcoded-credentials": "error",
+        "secure-coding/no-insecure-comparison": "off",
+        "secure-coding/no-improper-sanitization": "error",
+        "secure-coding/no-missing-authentication": "warn",
+        "secure-coding/no-privilege-escalation": "warn",
+        "secure-coding/no-weak-password-recovery": "error",
+        "secure-coding/no-sensitive-data-exposure": "warn",
+        "secure-coding/no-unlimited-resource-allocation": "error",
+        "secure-coding/no-unchecked-loop-condition": "off"
+    },
+    "overrides": [
+        {
+            "files": [
+                "**/*.svelte"
+            ],
+            "rules": {
+                "eslint/no-undef": "off",
+                "typescript/no-confusing-void-expression": "off",
+                "sonarjs/no-use-of-empty-return-value": "off",
+                "sonarjs/deprecation": "off",
+                "typescript/no-deprecated": "off"
+            }
+        },
+        {
+            "files": [
+                "src/routes/api/**"
+            ],
+            "rules": {
+                "secure-coding/detect-object-injection": "warn"
+            }
+        }
+    ],
+    "ignorePatterns": [
+        ".svelte-kit/**",
+        "build/**",
+        "dist/**",
+        "node_modules/**",
+        "src/lib/components/ui/**",
+        "lint-rules/**"
+    ],
+    "options": {
+        "typeAware": true,
+        "typeCheck": true
+    }
+}

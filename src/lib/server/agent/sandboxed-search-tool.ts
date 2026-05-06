@@ -1,5 +1,5 @@
 /**
- * Web search tool — performs a web search using an Exa-compatible API.
+ * @file Web search tool — performs a web search using an Exa-compatible API.
  *
  * Supports both the Exa API (`https://api.exa.ai/search`) and the
  * Synthetic API (`https://api.synthetic.new/v2/search`) for testing.
@@ -90,6 +90,75 @@ function normalizeResults(data: unknown): SearchResult[] {
 
 // --- Format results as text ---
 
+/**
+ * Record search result URLs in the shared tracker so the fetch tool
+ * can skip re-fetching pages already seen in search results.
+ *
+ * @param results - The search results to track
+ * @param tracker - The shared Set of URLs, if any
+ */
+function trackSearchResultUrls(results: SearchResult[], tracker?: Set<string>): void {
+    if (!tracker) return;
+    for (const r of results) {
+        if (r.url) {
+            tracker.add(r.url);
+        }
+    }
+}
+
+/**
+ * Build the request body for the search API.
+ *
+ * Targets the intersection of Exa and Synthetic APIs:
+ * both accept `query`; Exa additionally supports `contents.text`.
+ *
+ * @param query - The search query string
+ * @param numResults - Optional max results count
+ * @param baseUrl - The API base URL (checked for Exa-specific features)
+ * @returns The request body object
+ */
+function buildSearchRequestBody(
+    query: string,
+    numResults: number | undefined,
+    baseUrl: string
+): Record<string, unknown> {
+    const requestBody: Record<string, unknown> = {
+        query,
+        numResults: Math.min(numResults ?? 10, 100),
+    };
+
+    // For Exa API, request full text of each page.
+    if (baseUrl.includes("exa.ai")) {
+        requestBody.contents = {
+            text: {
+                maxCharacters: 8000,
+                includeHtmlTags: false,
+            },
+        };
+    }
+
+    return requestBody;
+}
+
+/**
+ * Throw an error for a non-ok HTTP response, including status and body detail.
+ *
+ * @param response - The fetch Response object
+ */
+async function throwForNonOkResponse(response: Response): Promise<void> {
+    const statusText = response.statusText || "Unknown error";
+    let errorBody = "";
+    try {
+        errorBody = await response.text();
+    } catch {
+        // Ignore body read errors
+    }
+    const errorDetail = errorBody ? `: ${errorBody.slice(0, 500)}` : "";
+    throw new Error(
+        `Search API returned ${String(response.status)} ${statusText}${errorDetail}`
+    );
+}
+
 function formatResults(results: SearchResult[], query: string): string {
     if (results.length === 0) {
         return `No results found for: "${query}"`;
@@ -137,6 +206,9 @@ export interface SearchToolOptions {
  * Settings (base URL, API key) are provided at creation time. When the user
  * changes settings in the UI, all active sessions are restarted so they
  * pick up the new values.
+ *
+ * @param options - Optional configuration (base URL, API key, search result URL tracker)
+ * @returns The web search AgentTool
  */
 export function createSearchTool(options?: SearchToolOptions): AgentTool<typeof searchSchema, SearchToolDetails> {
     const baseUrl = options?.baseUrl || "https://api.exa.ai/search";
@@ -175,35 +247,14 @@ export function createSearchTool(options?: SearchToolOptions): AgentTool<typeof 
             }
 
             try {
-                // Build the request body targeting the intersection of Exa and Synthetic APIs.
-                // Both accept `query`. Exa supports `contents.highlights` for text extraction;
-                // Synthetic ignores unknown fields gracefully.
-                const requestBody: Record<string, unknown> = {
-                    query,
-                    numResults: Math.min(numResults ?? 10, 100),
-                };
-
-                // If this looks like an Exa API, request the full text content of each page.
-                // Exa's `text` mode returns the full page content as clean markdown — this is
-                // typically more complete than what the fetch tool can scrape (which uses
-                // happy-dom + defuddle). The model should prefer search result content over
-                // fetching individual pages.
-                if (baseUrl.includes("exa.ai")) {
-                    requestBody.contents = {
-                        text: {
-                            maxCharacters: 8000,
-                            includeHtmlTags: false,
-                        },
-                    };
-                }
+                const requestBody = buildSearchRequestBody(query, numResults, baseUrl);
 
                 const response = await fetch(baseUrl, {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
-                        // Exa supports both x-api-key and Authorization: Bearer.
-                        // Synthetic only supports Authorization: Bearer.
-                        // Using Bearer works for both.
+                        // Using Bearer works for both Exa (also supports x-api-key)
+                        // and Synthetic (only supports Bearer).
                         Authorization: `Bearer ${apiKey}`,
                     },
                     body: JSON.stringify(requestBody),
@@ -211,34 +262,14 @@ export function createSearchTool(options?: SearchToolOptions): AgentTool<typeof 
                 });
 
                 if (!response.ok) {
-                    const statusText = response.statusText || "Unknown error";
-                    let errorBody = "";
-                    try {
-                        errorBody = await response.text();
-                    } catch {
-                        // Ignore body read errors
-                    }
-                    const errorDetail = errorBody ? `: ${errorBody.slice(0, 500)}` : "";
-                    // Throwing causes the agent loop to mark the tool call as isError,
-                    // which is the correct semantic for a semantically failed search
-                    // (mirrors the fetch tool's behavior for HTTP 400+).
-                    throw new Error(
-                        `Search API returned ${String(response.status)} ${statusText}${errorDetail}`
-                    );
+                    // Throwing marks the tool call as isError — the correct
+                    // semantic for a semantically failed search.
+                    await throwForNonOkResponse(response);
                 }
 
                 const data: unknown = await response.json();
                 const results = normalizeResults(data);
-
-                // Record search result URLs in the shared tracker so the fetch tool
-                // can skip re-fetching pages the model already has excerpts from.
-                if (searchResultUrls) {
-                    for (const r of results) {
-                        if (r.url) {
-                            searchResultUrls.add(r.url);
-                        }
-                    }
-                }
+                trackSearchResultUrls(results, searchResultUrls);
 
                 const text = formatResults(results, query);
 

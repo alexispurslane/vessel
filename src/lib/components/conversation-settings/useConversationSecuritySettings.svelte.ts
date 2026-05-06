@@ -1,3 +1,6 @@
+/**
+ * @file Reactive store for per-conversation security and sandbox settings.
+ */
 import { SvelteSet } from "svelte/reactivity";
 import {
     getConversationSettings,
@@ -43,393 +46,377 @@ export interface ConversationSecuritySettingsState {
     saveSettings: () => Promise<void>;
 }
 
-export function useConversationSecuritySettings(conversationId: () => string): ConversationSecuritySettingsState {
-    // --- UI state ---
-    let loading = $state(false);
-    let saving = $state(false);
-    let saved = $state(false);
-    let error = $state<string | null>(null);
+// ---------------------------------------------------------------------------
+// Module-level helpers (pure or near-pure – no closure over state)
+// ---------------------------------------------------------------------------
 
-    // Tri-state for sandbox enabled: null = inherit global, true = on, false = off
-    let sandboxEnabledState: boolean | null = $state(null);
-    // Tri-state for allowNet: null = inherit global, true = on, false = off
-    let allowNetState: boolean | null = $state(null);
-    // Tri-state for allowAllDomains: null = inherit global, true = all domains, false = specific domains only
-    let allowAllDomainsState: boolean | null = $state(null);
-    // deleteWorkspaceWithConversation: boolean
-    let deleteWorkspaceWithConversation = $state(true);
+/**
+ * Populates a flag/items pair from a nullable array setting.
+ *
+ * @param value   The raw array from the server (null = inherit global)
+ * @param setFlag Callback to set the "use custom" flag
+ * @param setItems Callback to set the mapped items
+ * @param mapFn  Transform each raw element into a UI item
+ */
+function loadArraySetting<T, U>(
+    value: T[] | null | undefined,
+    setFlag: (v: boolean) => void,
+    setItems: (v: U[]) => void,
+    mapFn: (item: T) => U,
+): void {
+    if (value != null) {
+        setFlag(true);
+        setItems(value.map(mapFn));
+    } else {
+        setFlag(false);
+        setItems([]);
+    }
+}
 
-    // Pill-based lists — null = inherit from global
-    let useCustomReadPaths = $state(false);
-    let readPaths = $state<Array<{ path: string; editing?: boolean }>>([]);
+/**
+ * Populates a flag/items pair from a nullable record setting.
+ *
+ * @param value   The raw record from the server (null = inherit global)
+ * @param setFlag Callback to set the "use custom" flag
+ * @param setItems Callback to set the mapped items
+ * @param mapFn  Transform the entries array into UI items
+ */
+function loadRecordSetting<V, U>(
+    value: Record<string, V> | null | undefined,
+    setFlag: (v: boolean) => void,
+    setItems: (v: U[]) => void,
+    mapFn: (entries: [string, V][]) => U[],
+): void {
+    if (value != null) {
+        setFlag(true);
+        setItems(mapFn(Object.entries(value)));
+    } else {
+        setFlag(false);
+        setItems([]);
+    }
+}
 
-    let useCustomWritePaths = $state(false);
-    let writePaths = $state<Array<{ path: string; editing?: boolean }>>([]);
+/**
+ * Applies MCP server tri-state logic to the enabled set.
+ *
+ * @param enabledServers The persisted list (null = inherit, [] = off, else custom)
+ * @param servers        All available MCP servers
+ * @param mcpSet         The SvelteSet to mutate
+ * @returns The resolved tri-state value
+ */
+function loadMcpServerState(
+    enabledServers: string[] | null | undefined,
+    servers: McpServerInfo[],
+    mcpSet: SvelteSet<string>,
+): boolean | null {
+    if (enabledServers == null) {
+        mcpSet.clear();
+        for (const s of servers.filter((s) => s.config.defaultEnabled !== false)) {
+            mcpSet.add(s.name);
+        }
+        return null;
+    }
+    if (enabledServers.length === 0) {
+        mcpSet.clear();
+        return false;
+    }
+    mcpSet.clear();
+    for (const name of enabledServers) {
+        mcpSet.add(name);
+    }
+    return true;
+}
 
-    let useCustomDomains = $state(false);
-    let allowedDomains = $state<PillItem[]>([]);
+/**
+ * Maps UI items back to a plain string array for persistence.
+ *
+ * @param items The UI items
+ * @param mapFn Extracts the string value from each item
+ * @returns A filtered string array
+ */
+function saveCustomArraySetting<U>(items: U[], mapFn: (item: U) => string): string[] {
+    return items.map(mapFn).filter(Boolean);
+}
 
-    let useCustomEnvVars = $state(false);
-    let allowedEnvVars = $state<PillItem[]>([]);
+/**
+ * Builds a secrets record from UI items for persistence.
+ *
+ * @param useCustom Whether custom secrets are enabled
+ * @param secrets   The UI secret items
+ * @returns A record keyed by secret name, or null when inheriting
+ */
+function buildSecretsObject(
+    useCustom: boolean,
+    secrets: KeyValueItem[],
+): Record<string, { value: string; hosts: string[] }> | null {
+    if (!useCustom) return null;
+    const secretsObj: Record<string, { value: string; hosts: string[] }> = {};
+    for (const s of secrets) {
+        const key = s["key"] as string;
+        const value = s["value"] as string;
+        const hosts = s["hosts"] as string;
+        if (key.trim()) {
+            secretsObj[key.trim()] = {
+                value,
+                hosts: hosts
+                    .split(",")
+                    .map((h: string) => h.trim())
+                    .filter(Boolean),
+            };
+        }
+    }
+    return secretsObj;
+}
 
-    let useCustomSecrets = $state(false);
-    let secrets = $state<KeyValueItem[]>([]);
+// ---------------------------------------------------------------------------
+// Factory — creates a fresh state object wrapped in $state
+// ---------------------------------------------------------------------------
 
-    // Conversation mode: "agent" = all tools, "chat" = no tools, null = inherit global
-    let agentMode: "agent" | "chat" | null = $state(null);
-
-    // MCP server state — tri-state like sandbox/network:
-    //   null  = Inherit (use per-server defaultEnabled from global settings)
-    //   true  = On (custom selection of MCP servers, persisted as an explicit list)
-    //   false = Off (no MCP servers at all, persisted as empty array)
-    let mcpState: boolean | null = $state(null);
+/**
+ * Creates a new ConversationSecuritySettingsState with default values.
+ * The returned object is wrapped in `$state` so Svelte proxies handle
+ * reactivity — consumers can read/write properties directly.
+ *
+ * @returns A reactive settings state object
+ */
+export function createConversationSecuritySettings(): ConversationSecuritySettingsState {
     const enabledMcpServers = new SvelteSet<string>();
-    let availableMcpServers = $state<McpServerInfo[]>([]);
-    let mcpServerStatuses = $state<McpServerStatus[]>([]);
 
-    function toggleMcpServer(name: string) {
-        if (enabledMcpServers.has(name)) {
-            enabledMcpServers.delete(name);
-        } else {
-            enabledMcpServers.add(name);
-        }
-    }
-
-    // --- Helpers ---
-    function loadArraySetting<T, U>(
-        value: T[] | null | undefined,
-        setFlag: (v: boolean) => void,
-        setItems: (v: U[]) => void,
-        mapFn: (item: T) => U,
-    ): void {
-        if (value != null) {
-            setFlag(true);
-            setItems(value.map(mapFn));
-        } else {
-            setFlag(false);
-            setItems([]);
-        }
-    }
-
-    function loadRecordSetting<V, U>(
-        value: Record<string, V> | null | undefined,
-        setFlag: (v: boolean) => void,
-        setItems: (v: U[]) => void,
-        mapFn: (entries: [string, V][]) => U[],
-    ): void {
-        if (value != null) {
-            setFlag(true);
-            setItems(mapFn(Object.entries(value)));
-        } else {
-            setFlag(false);
-            setItems([]);
-        }
-    }
-
-    function loadMcpServerState(
-        enabledServers: string[] | null | undefined,
-        servers: McpServerInfo[],
-    ): void {
-        if (enabledServers == null) {
-            mcpState = null;
-            enabledMcpServers.clear();
-            for (const s of servers.filter((s) => s.config.defaultEnabled !== false)) {
-                enabledMcpServers.add(s.name);
-            }
-        } else if (enabledServers.length === 0) {
-            mcpState = false;
-            enabledMcpServers.clear();
-        } else {
-            mcpState = true;
-            enabledMcpServers.clear();
-            for (const name of enabledServers) {
+    return $state({
+        loading: false,
+        saving: false,
+        saved: false,
+        error: null as string | null,
+        sandboxEnabledState: null as TriState,
+        allowNetState: null as TriState,
+        allowAllDomainsState: null as TriState,
+        deleteWorkspaceWithConversation: true,
+        useCustomReadPaths: false,
+        readPaths: [] as Array<{ path: string; editing?: boolean }>,
+        useCustomWritePaths: false,
+        writePaths: [] as Array<{ path: string; editing?: boolean }>,
+        useCustomDomains: false,
+        allowedDomains: [] as PillItem[],
+        useCustomEnvVars: false,
+        allowedEnvVars: [] as PillItem[],
+        useCustomSecrets: false,
+        secrets: [] as KeyValueItem[],
+        agentMode: null as AgentMode,
+        mcpState: null as TriState,
+        enabledMcpServers,
+        availableMcpServers: [] as McpServerInfo[],
+        mcpServerStatuses: [] as McpServerStatus[],
+        toggleMcpServer(name: string) {
+            if (enabledMcpServers.has(name)) {
+                // SvelteSet.delete(), not a route handler
+                // oxlint-disable-next-line secure-coding/no-missing-authentication
+                enabledMcpServers.delete(name);
+            } else {
                 enabledMcpServers.add(name);
             }
-        }
-    }
+        },
+        async loadSettings() {
+            throw new Error("loadSettings not bound — use useConversationSecuritySettings");
+        },
+        async saveSettings() {
+            throw new Error("saveSettings not bound — use useConversationSecuritySettings");
+        },
+    });
+}
 
-    function saveCustomArraySetting<U>(items: U[], mapFn: (item: U) => string): string[] {
-        return items.map(mapFn).filter(Boolean);
-    }
+// ---------------------------------------------------------------------------
+// Module-level load / save (state + ID passed in — no closure needed)
+// ---------------------------------------------------------------------------
 
-    function buildSecretsObject(): Record<string, { value: string; hosts: string[] }> | null {
-        if (!useCustomSecrets) return null;
-        const secretsObj: Record<string, { value: string; hosts: string[] }> = {};
-        for (const s of secrets) {
-            const key = s["key"] as string;
-            const value = s["value"] as string;
-            const hosts = s["hosts"] as string;
-            if (key.trim()) {
-                secretsObj[key.trim()] = {
-                    value,
-                    hosts: hosts
-                        .split(",")
-                        .map((h: string) => h.trim())
-                        .filter(Boolean),
-                };
-            }
-        }
-        return secretsObj;
-    }
+/**
+ * Applies the scalar and array-based settings from the server response
+ * onto the reactive state object.
+ *
+ * @param s       The reactive state object
+ * @param settings The raw settings from the server
+ */
+function populateSettings(
+    s: ConversationSecuritySettingsState,
+    settings: ConversationSettings,
+): void {
+    s.sandboxEnabledState = settings.sandboxEnabled ?? null;
+    s.allowNetState = settings.allowNet ?? null;
+    s.allowAllDomainsState = settings.allowAllDomains ?? null;
+    s.deleteWorkspaceWithConversation =
+        settings.deleteWorkspaceWithConversation ?? true;
 
-    // --- Load / Save ---
-    async function loadSettings() {
-        loading = true;
-        error = null;
+    loadArraySetting(
+        settings.extraReadPaths,
+        (v) => (s.useCustomReadPaths = v),
+        (v) => (s.readPaths = v),
+        (p: string) => ({ path: p, editing: false }),
+    );
+
+    loadArraySetting(
+        settings.extraWritePaths,
+        (v) => (s.useCustomWritePaths = v),
+        (v) => (s.writePaths = v),
+        (p: string) => ({ path: p, editing: false }),
+    );
+
+    loadArraySetting(
+        settings.allowedNetDomains,
+        (v) => (s.useCustomDomains = v),
+        (v) => (s.allowedDomains = v),
+        (d: string) => ({ domain: d, editing: false }),
+    );
+
+    loadArraySetting(
+        settings.allowEnv,
+        (v) => (s.useCustomEnvVars = v),
+        (v) => (s.allowedEnvVars = v),
+        (e: string) => ({ name: e, editing: false }),
+    );
+
+    loadRecordSetting<{ value: string; hosts: string[] }, KeyValueItem>(
+        settings.secrets,
+        (v) => (s.useCustomSecrets = v),
+        (v) => (s.secrets = v),
+        (entries) =>
+            entries.map(([key, config]) => ({
+                key,
+                value: config.value,
+                hosts: config.hosts.join(","),
+                editing: false,
+            })),
+    );
+
+    s.agentMode = settings.agentMode ?? null;
+}
+
+/**
+ * Fetches conversation settings from the server and populates the state.
+ *
+ * @param s              The reactive state object
+ * @param conversationId A function returning the current conversation ID
+ */
+async function loadSettingsInto(
+    s: ConversationSecuritySettingsState,
+    conversationId: () => string,
+): Promise<void> {
+    s.loading = true;
+    s.error = null;
+    try {
+        const settings = await getConversationSettings(conversationId());
+
+        populateSettings(s, settings);
+
         try {
-            const settings = await getConversationSettings(conversationId());
-
-            sandboxEnabledState = settings.sandboxEnabled ?? null;
-            allowNetState = settings.allowNet ?? null;
-            allowAllDomainsState = settings.allowAllDomains ?? null;
-            deleteWorkspaceWithConversation = settings.deleteWorkspaceWithConversation ?? true;
-
-            loadArraySetting(
-                settings.extraReadPaths,
-                (v) => (useCustomReadPaths = v),
-                (v) => (readPaths = v),
-                (p: string) => ({ path: p, editing: false }),
-            );
-
-            loadArraySetting(
-                settings.extraWritePaths,
-                (v) => (useCustomWritePaths = v),
-                (v) => (writePaths = v),
-                (p: string) => ({ path: p, editing: false }),
-            );
-
-            loadArraySetting(
-                settings.allowedNetDomains,
-                (v) => (useCustomDomains = v),
-                (v) => (allowedDomains = v),
-                (d: string) => ({ domain: d, editing: false }),
-            );
-
-            loadArraySetting(
-                settings.allowEnv,
-                (v) => (useCustomEnvVars = v),
-                (v) => (allowedEnvVars = v),
-                (e: string) => ({ name: e, editing: false }),
-            );
-
-            loadRecordSetting<{ value: string; hosts: string[] }, KeyValueItem>(
-                settings.secrets,
-                (v) => (useCustomSecrets = v),
-                (v) => (secrets = v),
-                (entries) =>
-                    entries.map(([key, config]) => ({
-                        key,
-                        value: config.value,
-                        hosts: config.hosts.join(","),
-                        editing: false,
-                    })),
-            );
-
-            // Load agent mode
-            agentMode = settings.agentMode ?? null;
-
-            // Load MCP server state (tri-state: null=inherit, true=custom, false=off)
-            try {
-                availableMcpServers = await listMcpServers();
-            } catch {
-                availableMcpServers = [];
-            }
-
-            loadMcpServerState(settings.enabledMcpServers, availableMcpServers);
-
-            // Load MCP server connection statuses from the active session
-            try {
-                mcpServerStatuses = await getMcpServerStatus(conversationId());
-            } catch {
-                mcpServerStatuses = [];
-            }
-        } catch (e) {
-            error = e instanceof Error ? e.message : "Failed to load settings";
-        } finally {
-            loading = false;
+            s.availableMcpServers = await listMcpServers();
+        } catch {
+            s.availableMcpServers = [];
         }
-    }
 
-    async function saveSettings() {
-        saving = true;
-        error = null;
-        saved = false;
+        s.mcpState = loadMcpServerState(
+            settings.enabledMcpServers,
+            s.availableMcpServers,
+            s.enabledMcpServers,
+        );
+
         try {
-            const settings: ConversationSettings = {};
-
-            settings.sandboxEnabled = sandboxEnabledState;
-            settings.allowNet = allowNetState;
-            settings.allowAllDomains = allowAllDomainsState;
-            settings.deleteWorkspaceWithConversation = deleteWorkspaceWithConversation;
-
-            settings.extraReadPaths = useCustomReadPaths
-                ? saveCustomArraySetting(readPaths, (p) => p.path)
-                : null;
-            settings.extraWritePaths = useCustomWritePaths
-                ? saveCustomArraySetting(writePaths, (p) => p.path)
-                : null;
-            settings.allowedNetDomains = useCustomDomains
-                ? saveCustomArraySetting(allowedDomains, (d) => d["domain"] as string)
-                : null;
-            settings.allowEnv = useCustomEnvVars
-                ? saveCustomArraySetting(allowedEnvVars, (e) => e["name"] as string)
-                : null;
-            settings.secrets = buildSecretsObject();
-
-            // Save agent mode
-            settings.agentMode = agentMode;
-
-            // Save MCP server state (tri-state):
-            //   null  → null (inherit global defaults)
-            //   true  → explicit list of enabled server names
-            //   false → [] (off — no MCP servers at all)
-            settings.enabledMcpServers =
-                mcpState === null ? null : mcpState ? Array.from(enabledMcpServers) : [];
-
-            const result = await updateConversationSettings(conversationId(), settings);
-
-            if (result.restarted) {
-                reconnectStream();
-            }
-
-            saved = true;
-            setTimeout(() => {
-                saved = false;
-            }, 2000);
-        } catch (e) {
-            error = e instanceof Error ? e.message : "Failed to save settings";
-        } finally {
-            saving = false;
+            s.mcpServerStatuses = await getMcpServerStatus(conversationId());
+        } catch {
+            s.mcpServerStatuses = [];
         }
+    } catch (e) {
+        s.error = e instanceof Error ? e.message : "Failed to load settings";
+    } finally {
+        s.loading = false;
     }
+}
+
+/**
+ * Reads current state and persists it to the server.
+ *
+ * @param s              The reactive state object
+ * @param conversationId A function returning the current conversation ID
+ */
+async function saveSettingsFrom(
+    s: ConversationSecuritySettingsState,
+    conversationId: () => string,
+): Promise<void> {
+    s.saving = true;
+    s.error = null;
+    s.saved = false;
+    try {
+        const settings: ConversationSettings = {};
+
+        settings.sandboxEnabled = s.sandboxEnabledState;
+        settings.allowNet = s.allowNetState;
+        settings.allowAllDomains = s.allowAllDomainsState;
+        settings.deleteWorkspaceWithConversation =
+            s.deleteWorkspaceWithConversation;
+
+        settings.extraReadPaths = s.useCustomReadPaths
+            ? saveCustomArraySetting(s.readPaths, (p) => p.path)
+            : null;
+        settings.extraWritePaths = s.useCustomWritePaths
+            ? saveCustomArraySetting(s.writePaths, (p) => p.path)
+            : null;
+        settings.allowedNetDomains = s.useCustomDomains
+            ? saveCustomArraySetting(s.allowedDomains, (d) => d["domain"] as string)
+            : null;
+        settings.allowEnv = s.useCustomEnvVars
+            ? saveCustomArraySetting(s.allowedEnvVars, (e) => e["name"] as string)
+            : null;
+        settings.secrets = buildSecretsObject(s.useCustomSecrets, s.secrets);
+
+        settings.agentMode = s.agentMode;
+
+        // MCP tri-state: null→inherit, true→explicit list, false→off
+        settings.enabledMcpServers =
+            s.mcpState === null ? null : s.mcpState ? Array.from(s.enabledMcpServers) : [];
+
+        const result = await updateConversationSettings(
+            conversationId(),
+            settings,
+        );
+
+        if (result.restarted) {
+            reconnectStream();
+        }
+
+        s.saved = true;
+        setTimeout(() => {
+            s.saved = false;
+        }, 2000);
+    } catch (e) {
+        s.error = e instanceof Error ? e.message : "Failed to save settings";
+    } finally {
+        s.saving = false;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Hook — wires load/save to a specific conversation and auto-loads
+// ---------------------------------------------------------------------------
+
+/**
+ * Reactive store for per-conversation security and sandbox settings.
+ * Loads settings from the server and provides save/reload functions.
+ *
+ * @param conversationId - A function returning the current conversation ID
+ * @returns The conversation security settings state
+ */
+export function useConversationSecuritySettings(
+    conversationId: () => string,
+): ConversationSecuritySettingsState {
+    const s = createConversationSecuritySettings();
+
+    s.loadSettings = () => loadSettingsInto(s, conversationId);
+    s.saveSettings = () => saveSettingsFrom(s, conversationId);
 
     // Auto-load when conversationId changes
     $effect(() => {
         if (conversationId()) {
-            void loadSettings();
+            void s.loadSettings();
         }
     });
 
-    return {
-        get loading() {
-            return loading;
-        },
-        get saving() {
-            return saving;
-        },
-        get saved() {
-            return saved;
-        },
-        get error() {
-            return error;
-        },
-        get sandboxEnabledState() {
-            return sandboxEnabledState;
-        },
-        set sandboxEnabledState(v: boolean | null) {
-            sandboxEnabledState = v;
-        },
-        get allowNetState() {
-            return allowNetState;
-        },
-        set allowNetState(v: boolean | null) {
-            allowNetState = v;
-        },
-        get allowAllDomainsState() {
-            return allowAllDomainsState;
-        },
-        set allowAllDomainsState(v: boolean | null) {
-            allowAllDomainsState = v;
-        },
-        get deleteWorkspaceWithConversation() {
-            return deleteWorkspaceWithConversation;
-        },
-        set deleteWorkspaceWithConversation(v: boolean) {
-            deleteWorkspaceWithConversation = v;
-        },
-        get useCustomReadPaths() {
-            return useCustomReadPaths;
-        },
-        set useCustomReadPaths(v: boolean) {
-            useCustomReadPaths = v;
-        },
-        get readPaths() {
-            return readPaths;
-        },
-        set readPaths(v: Array<{ path: string; editing?: boolean }>) {
-            readPaths = v;
-        },
-        get useCustomWritePaths() {
-            return useCustomWritePaths;
-        },
-        set useCustomWritePaths(v: boolean) {
-            useCustomWritePaths = v;
-        },
-        get writePaths() {
-            return writePaths;
-        },
-        set writePaths(v: Array<{ path: string; editing?: boolean }>) {
-            writePaths = v;
-        },
-        get useCustomDomains() {
-            return useCustomDomains;
-        },
-        set useCustomDomains(v: boolean) {
-            useCustomDomains = v;
-        },
-        get allowedDomains() {
-            return allowedDomains;
-        },
-        set allowedDomains(v: PillItem[]) {
-            allowedDomains = v;
-        },
-        get useCustomEnvVars() {
-            return useCustomEnvVars;
-        },
-        set useCustomEnvVars(v: boolean) {
-            useCustomEnvVars = v;
-        },
-        get allowedEnvVars() {
-            return allowedEnvVars;
-        },
-        set allowedEnvVars(v: PillItem[]) {
-            allowedEnvVars = v;
-        },
-        get useCustomSecrets() {
-            return useCustomSecrets;
-        },
-        set useCustomSecrets(v: boolean) {
-            useCustomSecrets = v;
-        },
-        get secrets() {
-            return secrets;
-        },
-        set secrets(v: KeyValueItem[]) {
-            secrets = v;
-        },
-        get agentMode() {
-            return agentMode;
-        },
-        set agentMode(v: "agent" | "chat" | null) {
-            agentMode = v;
-        },
-        get mcpState() {
-            return mcpState;
-        },
-        set mcpState(v: boolean | null) {
-            mcpState = v;
-        },
-        get enabledMcpServers() {
-            return enabledMcpServers;
-        },
-        get availableMcpServers() {
-            return availableMcpServers;
-        },
-        get mcpServerStatuses() {
-            return mcpServerStatuses;
-        },
-        toggleMcpServer,
-        loadSettings,
-        saveSettings,
-    };
+    return s;
 }

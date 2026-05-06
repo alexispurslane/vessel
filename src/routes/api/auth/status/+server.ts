@@ -6,6 +6,10 @@ import { userExists, getUsername } from "$lib/server/auth/index.js";
  * GET /api/auth/status
  * Check if auth is set up and if the user is logged in.
  * Returns username even for unauthenticated users so the login page can auto-fill it.
+ *
+ * @param root0 - The request handler params
+ * @param root0.locals - The app locals (contains auth state)
+ * @returns JSON auth status response
  */
 export const GET: RequestHandler = ({ locals }) => {
     const setup = userExists();

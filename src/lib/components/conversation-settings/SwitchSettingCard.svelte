@@ -1,4 +1,7 @@
 <script lang="ts">
+    /**
+     * @file Settings card with a toggle switch.
+     */
     import { Switch } from "$lib/components/ui/switch/index.js";
     import { Label } from "$lib/components/ui/label/index.js";
 

@@ -1,5 +1,5 @@
 /**
- * Fetch tool — fetches the fully-rendered content of any web page using
+ * @file Fetch tool — fetches the fully-rendered content of any web page using
  * happy-dom, then extracts the main content as Markdown via defuddle.
  *
  * Two execution modes, both powered by the same JS code (built by `buildFetchJs`):
@@ -158,6 +158,10 @@ export interface FetchToolOptions {
  * Both `fetchPageLocally` and `fetchPageInSandbox` run the same JS code
  * (produced by `buildFetchJs`) and parse the same JSON result, so this
  * logic is shared.
+ *
+ * @param stdout - The raw stdout from the Node.js fetch process
+ * @param url - The URL that was fetched (for error messages)
+ * @returns Parsed content, title, captcha flag, and HTTP status
  */
 function parseFetchOutput(stdout: string, url: string): { content: string; title: string; captchaDetected: boolean; httpStatus: number } {
     if (!stdout.trim()) {
@@ -196,6 +200,10 @@ function parseFetchOutput(stdout: string, url: string): { content: string; title
  *
  * After happy-dom renders the page, the live Document object is passed
  * straight to defuddle which extracts the main content as Markdown.
+ *
+ * @param url - The URL to fetch
+ * @param timeoutSeconds - Timeout in seconds
+ * @returns The inline JS code string
  */
 function buildFetchJs(url: string, timeoutSeconds: number): string {
     const urlJson = JSON.stringify(url);
@@ -205,24 +213,8 @@ function buildFetchJs(url: string, timeoutSeconds: number): string {
     const secChUaJson = JSON.stringify(CHROME_SEC_CH_UA);
     const platformJson = JSON.stringify(CHROME_PLATFORM);
     const profileJson = JSON.stringify(IMPIT_BROWSER_PROFILE);
-    // The promise rejection is handled by the process — unhandled rejections
-    // cause a non-zero exit code, which we catch in fetchPageInSandbox.
-    //
-    // Fetch strategy: use impit (with browser: "chrome131") for the initial HTTP
-    // request so that the TLS handshake and HTTP/2 frames match a real Chrome
-    // browser. The chrome131 profile sets Sec-CH-UA brands correctly; we override
-    // User-Agent and Sec-CH-UA-Platform via instance headers to match our Windows
-    // UA string. Then we inject the fetched HTML into happy-dom via page.content /
-    // page.url setters instead of page.goto(), which would use Node's built-in
-    // fetch (and its generic TLS fingerprint that gets flagged by anti-bot
-    // services). A fetch.interceptor.beforeAsyncRequest hook routes all
-    // sub-requests made by happy-dom (JS, CSS, XHR, etc.) through impit too.
-    //
-    // Navigator patching: happy-dom's Navigator defaults are Firefox-like
-    // (vendor="", productSub="20100101"). We use beforeContentCallback to
-    // patch navigator.vendor, navigator.productSub, navigator.platform, and
-    // inject navigator.userAgentData so JS-level client hints match the
-    // HTTP-level Sec-CH-UA headers that impit sends.
+
+    // oxlint-disable-next-line secure-coding/no-graphql-injection -- JS, not GQL
     return `
 const path = require("path");
 const { Browser, BrowserErrorCaptureEnum } = require("happy-dom");
@@ -231,9 +223,8 @@ const { Impit } = require(path.join(process.env.NODE_PATH, "impit"));
 (async function __fetchPage() {
     let browser;
     try {
-        // Use impit to fetch the page with Chrome 131's TLS fingerprint and HTTP headers.
-        // The chrome131 profile gives us the right Sec-CH-UA brands; we override
-        // User-Agent and Sec-CH-UA-Platform via instance-level headers to match Windows.
+        // Use impit for Chrome 131's TLS fingerprint/headers. The chrome131 profile
+        // gives correct Sec-CH-UA brands; we override UA + platform via instance headers.
         const impit = new Impit({ browser: ${profileJson}, timeout: ${String(timeoutMs)}, headers: ${clientHintHeadersJson} });
         const impitResponse = await impit.fetch(${urlJson});
         const httpStatus = impitResponse.status;
@@ -244,21 +235,11 @@ const { Impit } = require(path.join(process.env.NODE_PATH, "impit"));
                 navigator: { userAgent: ${uaJson} },
                 navigation: {
                     beforeContentCallback: (win) => {
-                        // Patch Navigator properties that happy-dom gets wrong for Chrome.
-                        // Missing or mismatched values are a common anti-bot detection signal.
-                        //
-                        // navigator.vendor: Chrome returns "Google Inc.", happy-dom defaults to "" (Firefox)
-                        // navigator.productSub: Chrome returns "20030107", happy-dom defaults to "20100101" (Firefox)
-                        // navigator.platform: Should be "Win32" on 64-bit Windows, but happy-dom parses
-                        //   it from the UA string and gets "Windows NT 10.0; Win64; x64" instead.
-                        // navigator.userAgentData: Chrome implements the User-Agent Client Hints JS API
-                        //   (navigator.userAgentData.brands, .mobile, .platform), but happy-dom
-                        //   doesn't implement it at all. We inject a matching stub.
+
                         Object.defineProperty(win.Navigator.prototype, 'vendor', { get: () => 'Google Inc.', configurable: true });
                         Object.defineProperty(win.Navigator.prototype, 'productSub', { get: () => '20030107', configurable: true });
                         Object.defineProperty(win.Navigator.prototype, 'platform', { get: () => 'Win32', configurable: true });
-                        // Inject navigator.userAgentData to match the Sec-CH-UA headers impit sends.
-                        // Parse the Sec-CH-UA value into brand objects: "Google Chrome";v="131" → {brand:"Google Chrome",version:"131"}
+
                         const brands = ${secChUaJson}.split(', ').map(part => {
                             const m = part.match(/"([^"]+)";v="([^"]+)"/);
                             return m ? { brand: m[1], version: m[2] } : null;
@@ -397,6 +378,10 @@ const { Impit } = require(path.join(process.env.NODE_PATH, "impit"));
  * This eliminates all code duplication between the two paths — the navigator
  * patches, fetch interceptor, CAPTCHA detection, img/SVG replacement, and
  * defuddle extraction only exist in `buildFetchJs`.
+ *
+ * @param url - The URL to fetch
+ * @param timeout - Timeout in seconds (default: 30)
+ * @returns Parsed content, title, captcha flag, and HTTP status
  */
 async function fetchPageLocally(url: string, timeout: number = 30): Promise<{ content: string; title: string; captchaDetected: boolean; httpStatus: number }> {
     const jsCode = buildFetchJs(url, timeout);
@@ -424,18 +409,24 @@ async function fetchPageLocally(url: string, timeout: number = 30): Promise<{ co
 
 // --- Sandboxed fetch ---
 
+/**
+ * Fetch a page inside the zerobox sandbox.
+ *
+ * @param sandbox - The sandbox instance
+ * @param url - The URL to fetch
+ * @param timeout - Timeout in seconds (default: 30)
+ * @returns Parsed content, title, captcha flag, and HTTP status
+ */
 async function fetchPageInSandbox(sandbox: Sandbox, url: string, timeout: number = 30): Promise<{ content: string; title: string; captchaDetected: boolean; httpStatus: number }> {
     const jsCode = buildFetchJs(url, timeout);
-    // sandbox.exec is used instead of sandbox.js because we need to pass
-    // --use-env-proxy to the Node process. Node.js fetch doesn't respect
-    // HTTPS_PROXY by default — zerobox sets up the proxy for allowed domains
-    // and injects HTTPS_PROXY as an env var, but Node needs this flag to
-    // actually use it. Without it, Node tries to connect directly, DNS fails,
-    // and you get ENOTFOUND. sandbox.js doesn't support custom node flags.
-    const result: CommandOutput = await sandbox.exec("node", ["--use-env-proxy", "-e", jsCode]).output();
+    // Use sandbox.exec (not sandbox.js) to pass --use-env-proxy. Node ignores
+    // HTTPS_PROXY by default; this flag makes it use the var zerobox injects.
 
-    // Always include stderr in errors — happy-dom/defuddle logs diagnostics there
-    // (navigation errors, network failures, script errors, etc.).
+    // sandbox.js doesn't support custom node flags.
+
+    // Always include stderr in errors — happy-dom/defuddle logs diagnostics
+    // there (navigation errors, network failures, script errors, etc.).
+    const result: CommandOutput = await sandbox.exec("node", ["--use-env-proxy", "-e", jsCode]).output();
     const stderrSummary = result.stderr.trim()
         ? " (" + result.stderr.trim().split("\n").slice(-3).join("; ") + ")"
         : "";
@@ -455,6 +446,10 @@ const DEFAULT_MAX_CONTENT_CHARS = 500_000;
  * Truncate content to a maximum character count, appending a notice
  * if truncation occurred. Tries to truncate at a newline boundary for
  * cleaner output.
+ *
+ * @param content - The content to truncate
+ * @param maxChars - Maximum character count (default: 500,000)
+ * @returns The (possibly truncated) content and truncation flag
  */
 function truncateContent(content: string, maxChars: number = DEFAULT_MAX_CONTENT_CHARS): {
     content: string;
@@ -485,6 +480,9 @@ function truncateContent(content: string, maxChars: number = DEFAULT_MAX_CONTENT
  * provided in options, the browser runs inside the zerobox sandbox with its
  * network/filesystem policies enforced. Otherwise, runs directly in the
  * main process.
+ *
+ * @param options - Optional configuration (sandbox, search result URL tracker)
+ * @returns The fetch AgentTool
  */
 export function createFetchTool(options?: FetchToolOptions): AgentTool<typeof fetchSchema, FetchToolDetails> {
     const sandbox = options?.sandbox;

@@ -1,4 +1,7 @@
 <script lang="ts">
+    /**
+     * @file Generic settings card layout component.
+     */
     import { Label } from "$lib/components/ui/label/index.js";
 
     interface Props {

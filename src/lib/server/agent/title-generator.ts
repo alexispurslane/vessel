@@ -1,5 +1,5 @@
 /**
- * Title and tag generation for conversations.
+ * @file Title and tag generation for conversations.
  *
  * Uses the user's configured secondary model to auto-generate
  * a conversation title and tags after the first message exchange.
@@ -48,6 +48,7 @@ interface GenerateResult {
  *
  * @param conversationId - The conversation to generate a title for
  * @param force - If true, regenerate even if the conversation already has a title
+ * @returns Generated title and tags, or null if skipped
  */
 export async function generateTitleAndTags(
     conversationId: string,
@@ -111,6 +112,9 @@ export async function generateTitleAndTags(
 
 /**
  * Extract the first user message using getSessionHistory.
+ *
+ * @param conversationId - The conversation ID
+ * @returns The first user message content, or null
  */
 async function extractFirstUserMessage(conversationId: string): Promise<string | null> {
     try {
@@ -130,6 +134,8 @@ async function extractFirstUserMessage(conversationId: string): Promise<string |
  * Resolve which model to use for title generation.
  * Prefers the secondary model, falls back to the default model.
  * Uses findModelById (pi-ai ModelRegistry) as the single source of truth.
+ *
+ * @returns The resolved model, or null if none configured
  */
 function resolveTitleModel(): Model<Api> | null {
     const db = getDb();
@@ -176,6 +182,50 @@ const generateTitleTool: Tool = {
 };
 
 /**
+ * Resolve API-specific reasoning/thinking options to disable reasoning.
+ *
+ * Different providers use different option keys to control reasoning:
+ * - OpenAI/Azure: `reasoningEffort` (undefined → thinking off)
+ * - Anthropic: `thinkingEnabled` (false → thinking disabled)
+ * - Bedrock: `reasoning` (undefined → no thinking fields)
+ *
+ * @param model - The model whose API determines which option to use
+ * @returns Provider-specific options to disable reasoning
+ */
+function resolveReasoningOptions(model: Model<Api>): Record<string, unknown> {
+    const isOpenAi =
+        model.api === "openai-completions" ||
+        model.api === "openai-responses" ||
+        model.api === "azure-openai-responses";
+
+    if (isOpenAi) return { reasoningEffort: undefined };
+    if (model.api === "anthropic-messages") return { thinkingEnabled: false };
+    return { reasoning: undefined };
+}
+
+/**
+ * Extract the title and tags from a tool call result.
+ *
+ * Parses the tool call arguments, validates types, trims/normalizes
+ * values, and returns a structured result.
+ *
+ * @param toolCall - The tool call from the model response
+ * @returns Parsed title and tags
+ */
+function extractTitleFromToolCall(toolCall: ToolCall): GenerateResult {
+    const args = toolCall.arguments as { title?: string; tags?: unknown[] };
+    const title =
+        typeof args.title === "string" ? args.title.trim().slice(0, 80) : "New Chat";
+    const tags = Array.isArray(args.tags)
+        ? args.tags
+            .filter((t: unknown) => typeof t === "string")
+            .map((t: string) => t.trim().toLowerCase())
+            .slice(0, 5)
+        : [];
+    return { title, tags };
+}
+
+/**
  * Call the model via pi-ai's complete() to generate a title and tags.
  *
  * Uses structured tool-call output: instead of asking the model to
@@ -188,6 +238,11 @@ const generateTitleTool: Tool = {
  * resolve the key via ModelRegistry.getApiKeyAndHeaders() and pass it
  * in the options. (pi-coding-agent's AgentSession does this same
  * resolution internally before every request.)
+ *
+ * @param model - The model to use for generation
+ * @param userMessage - The first user message content
+ * @param existingTags - Tags already in use for reuse suggestions
+ * @returns Generated title and tags
  */
 async function callModelForTitle(model: Model<Api>, userMessage: string, existingTags: string[]): Promise<GenerateResult> {
     // Resolve API key and headers from ModelRegistry
@@ -216,22 +271,13 @@ async function callModelForTitle(model: Model<Api>, userMessage: string, existin
         tools: [generateTitleTool],
     };
 
-    // Force the model to call the tool. The tool_choice value differs by provider API:
-    // - OpenAI completions/responses uses "required"
-    // - Anthropic messages and Bedrock use "any"
-    const forcedToolChoice = model.api === "openai-completions" || model.api === "openai-responses" || model.api === "azure-openai-responses"
-        ? "required"
-        : "any";
-
-    // Disable reasoning/thinking for this call. Title generation is a simple task that
-    // doesn't benefit from reasoning tokens, which just waste tokens and latency.
-    // Provider-specific options are passed via ProviderStreamOptions (Record<string, unknown>).
-    const reasoningDisabled: Record<string, unknown> =
-        model.api === "openai-completions" || model.api === "openai-responses" || model.api === "azure-openai-responses"
-            ? { reasoningEffort: undefined }          // ZAI/Qwen: enable_thinking = !!reasoningEffort = false
-            : model.api === "anthropic-messages"
-                ? { thinkingEnabled: false }            // Anthropic: params.thinking = { type: "disabled" }
-                : { reasoning: undefined };             // Bedrock: !options.reasoning → no thinking fields
+    // Force the model to call the tool. tool_choice differs by provider API:
+    // OpenAI completions/responses uses "required"; Anthropic/Bedrock use "any".
+    const isOpenAi =
+        model.api === "openai-completions" ||
+        model.api === "openai-responses" ||
+        model.api === "azure-openai-responses";
+    const forcedToolChoice = isOpenAi ? "required" : "any";
 
     const assistantMessage = await complete(model, context, {
         maxTokens: 1024,
@@ -240,7 +286,7 @@ async function callModelForTitle(model: Model<Api>, userMessage: string, existin
         headers: auth.headers,
         signal: AbortSignal.timeout(30_000),
         toolChoice: forcedToolChoice,
-        ...reasoningDisabled,
+        ...resolveReasoningOptions(model),
     });
 
     // Extract the tool call from the response
@@ -249,16 +295,7 @@ async function callModelForTitle(model: Model<Api>, userMessage: string, existin
     );
 
     if (toolCall && toolCall.name === "generate_conversation_title") {
-        const args = toolCall.arguments as { title?: string; tags?: unknown[] };
-        const title =
-            typeof args.title === "string" ? args.title.trim().slice(0, 80) : "New Chat";
-        const tags = Array.isArray(args.tags)
-            ? args.tags
-                .filter((t: unknown) => typeof t === "string")
-                .map((t: string) => t.trim().toLowerCase())
-                .slice(0, 5)
-            : [];
-        return { title, tags };
+        return extractTitleFromToolCall(toolCall);
     }
 
     // Fallback: if the model didn't call the tool, try to parse any text content
@@ -280,6 +317,9 @@ async function callModelForTitle(model: Model<Api>, userMessage: string, existin
 /**
  * Fallback: parse free-form text response into a title and tags.
  * Used when a model doesn't support tool calling and responds with text instead.
+ *
+ * @param content - The raw text response from the model
+ * @returns Parsed title and tags
  */
 function parseModelResponse(content: string): GenerateResult {
     // Try to extract JSON from the response (may have markdown wrapping)

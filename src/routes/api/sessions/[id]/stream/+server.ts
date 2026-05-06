@@ -12,6 +12,12 @@ import { log } from "$lib/server/logger.js";
  *
  * SSE event stream for a session. EventSource-compatible.
  * Client connects once and receives all agent events in real-time.
+ *
+ * @param root0 - The request handler params
+ * @param root0.params - Route params (includes id)
+ * @param root0.request - The incoming request
+ * @param root0.url - The request URL
+ * @returns SSE response stream
  */
 export const GET: RequestHandler = async ({ params, request, url: _url }) => {
     const conversationId = params.id;

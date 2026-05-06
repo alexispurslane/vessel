@@ -1,4 +1,7 @@
 <script lang="ts">
+    /**
+     * @file Settings tab for agent configuration.
+     */
     import { onMount } from "svelte";
     import {
         Card,

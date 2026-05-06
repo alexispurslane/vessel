@@ -1,5 +1,5 @@
 /**
- * Central provider configuration.
+ * @file Central provider configuration.
  *
  * Single source of truth for all provider metadata: display names,
  * API types, default base URLs, and feature flags. Both frontend
@@ -116,22 +116,40 @@ export const PROVIDERS: ProviderConfig[] = [
 /** Lookup map from provider ID to its config */
 const providerById = new Map(PROVIDERS.map((p) => [p.id, p]));
 
-/** Get a provider config by ID, or undefined if not found */
+/**
+ * Get a provider config by ID, or undefined if not found.
+ *
+ * @param id - The provider ID
+ * @returns The provider config, or undefined
+ */
 export function getProviderConfig(id: string): ProviderConfig | undefined {
     return providerById.get(id);
 }
 
-/** Check if a provider uses an OpenAI-compatible API */
+/**
+ * Check if a provider uses an OpenAI-compatible API.
+ *
+ * @param id - The provider ID
+ * @returns Whether the provider is OpenAI-compatible
+ */
 export function isOpenAICompatibleProvider(id: string): boolean {
     return providerById.get(id)?.openaiCompatible ?? false;
 }
 
-/** Get the list of provider IDs for dropdowns */
+/**
+ * Get the list of provider IDs for dropdowns.
+ *
+ * @returns Array of provider ID strings
+ */
 export function getProviderIds(): string[] {
     return PROVIDERS.map((p) => p.id);
 }
 
-/** Get the list of distinct API types */
+/**
+ * Get the list of distinct API types.
+ *
+ * @returns Array of unique API type strings
+ */
 export function getApiTypes(): string[] {
     return [...new Set(PROVIDERS.map((p) => p.api))];
 }

@@ -1,5 +1,5 @@
 /**
- * SSE event formatting, message serialization, and broadcast.
+ * @file SSE event formatting, message serialization, and broadcast.
  *
  * All functions for formatting pi AgentSessionEvents into SSE payloads,
  * serializing messages, and broadcasting to subscribers.
@@ -11,6 +11,16 @@ import { log } from "$lib/server/logger.js";
 
 // --- Broadcast ---
 
+/** Context for broadcasting SSE events, passed in to avoid circular dependency on session-store. */
+export interface BroadcastContext {
+    /** Active session map keyed by conversation ID. */
+    sessions: Map<string, ActiveSession>;
+    /** Callback to schedule disposal of a session. */
+    scheduleDispose: (conversationId: string) => void;
+    /** Callback to dispose a session if it has no remaining subscribers. */
+    disposeIfIdle: (conversationId: string) => void;
+}
+
 /**
  * Broadcast an SSE event to all subscribers of a session.
  *
@@ -19,31 +29,26 @@ import { log } from "$lib/server/logger.js";
  * navigated away (no subscribers), the session was protected from disposal
  * while streaming — now it's safe to clean up.
  *
- * @param sessions - The sessions Map (passed in to avoid circular dependency on session-store)
- * @param _scheduleDisposeFn - Callback to schedule disposal (passed in to avoid circular dependency on session-store)
+ * @param ctx - Broadcast context with sessions map and disposal callbacks
  * @param conversationId - The conversation/session ID
  * @param event - The SSE event to broadcast
  */
 export function broadcast(
-    sessions: Map<string, ActiveSession>,
-    _scheduleDisposeFn: (conversationId: string) => void,
-    disposeIfIdleFn: (conversationId: string) => void,
+    ctx: BroadcastContext,
     conversationId: string,
     event: ChatSSEEvent
 ): void {
-    const session = sessions.get(conversationId);
+    const session = ctx.sessions.get(conversationId);
     if (!session) return;
 
     for (const [, subscriber] of session.subscribers) {
         subscriber.send(event);
     }
 
-    // After broadcasting an agent_end event, immediately try to dispose
-    // if there are no subscribers (user navigated away while generating).
-    // This prevents memory leaks where a finished session stays in memory
-    // until the 2-minute timer fires.
+    // After agent_end, try to dispose if no subscribers (user navigated away
+    // while generating). Prevents memory leaks from finished sessions.
     if (event.event === "agent_end" && session.subscribers.size === 0) {
-        disposeIfIdleFn(conversationId);
+        ctx.disposeIfIdle(conversationId);
     }
 }
 
@@ -52,6 +57,9 @@ export function broadcast(
 /**
  * Extract text output from a tool partial result (AgentToolResult).
  * The result has content: (TextContent | ImageContent)[] and details: T
+ *
+ * @param partialResult - The tool result object to extract text from.
+ * @returns Extracted text, or undefined if no text content found.
  */
 export function extractToolOutput(partialResult: unknown): string | undefined {
     if (!partialResult || typeof partialResult !== "object") return undefined;
@@ -70,6 +78,9 @@ export function extractToolOutput(partialResult: unknown): string | undefined {
 /**
  * Extract and categorize content blocks from an AssistantMessage content array.
  * Returns text parts, thinking parts, and tool call stubs.
+ *
+ * @param content - The content array from an AssistantMessage.
+ * @returns Categorized text, thinking, and tool call parts.
  */
 function extractContentBlocks(content: Record<string, unknown>[]): {
     textParts: string[];
@@ -100,6 +111,9 @@ function extractContentBlocks(content: Record<string, unknown>[]): {
 /**
  * Serialize an AssistantMessage for SSE transmission.
  * Extracts text content from the content array and strips non-serializable fields.
+ *
+ * @param msg - The AssistantMessage to serialize.
+ * @returns A serializable object with extracted text, thinking, and tool calls.
  */
 function serializeAssistantMessage(msg: Record<string, unknown>): unknown {
     const content = msg.content as Record<string, unknown>[] | undefined;
@@ -125,6 +139,9 @@ function serializeAssistantMessage(msg: Record<string, unknown>): unknown {
 
 /**
  * Serialize a UserMessage for SSE transmission.
+ *
+ * @param msg - The UserMessage to serialize.
+ * @returns A serializable object with role, content, and timestamp.
  */
 function serializeUserMessage(msg: Record<string, unknown>): unknown {
     return {
@@ -137,6 +154,9 @@ function serializeUserMessage(msg: Record<string, unknown>): unknown {
 /**
  * Serialize a pi AgentMessage for SSE transmission.
  * Extracts text content from the content array and strips non-serializable fields.
+ *
+ * @param message - The AgentMessage to serialize.
+ * @returns The serialized message, or the original if not an object.
  */
 export function serializeMessage(message: unknown): unknown {
     if (!message || typeof message !== "object") return message;
@@ -166,6 +186,7 @@ export function serializeMessage(message: unknown): unknown {
  *
  * @param streamingMessage  The partial AssistantMessage from AgentState.streamingMessage
  * @param allMessages       All messages in the current agent state (includes ToolResultMessages)
+ * @returns The serialized message with enriched tool call results.
  */
 export function serializeStreamingMessageForRecovery(
     streamingMessage: unknown,
@@ -232,6 +253,9 @@ export function serializeStreamingMessageForRecovery(
 /**
  * Format a message_update event for SSE.
  * Handles error logging and serialization for error-type assistant message events.
+ *
+ * @param event - The pi AgentSessionEvent to format.
+ * @returns A serializable payload for the SSE message_update event.
  */
 function formatMessageUpdate(event: PiAgentSessionEvent): unknown {
     const e = event as Record<string, unknown>;
@@ -250,6 +274,9 @@ function formatMessageUpdate(event: PiAgentSessionEvent): unknown {
 
 /**
  * Format a message_start or message_end event for SSE.
+ *
+ * @param event - The pi AgentSessionEvent to format.
+ * @returns A serializable payload with the serialized message.
  */
 function formatMessageStartOrEnd(event: PiAgentSessionEvent): unknown {
     const e = event as Record<string, unknown>;
@@ -259,6 +286,9 @@ function formatMessageStartOrEnd(event: PiAgentSessionEvent): unknown {
 /**
  * Format an agent_start or agent_end event for SSE.
  * Serializes the messages array if present.
+ *
+ * @param event - The pi AgentSessionEvent to format.
+ * @returns A serializable payload with type and optional serialized messages.
  */
 function formatAgentStartOrEnd(event: PiAgentSessionEvent): unknown {
     const messages = "messages" in event && Array.isArray(event.messages)
@@ -270,6 +300,9 @@ function formatAgentStartOrEnd(event: PiAgentSessionEvent): unknown {
 /**
  * Format a turn_start or turn_end event for SSE.
  * Includes optional message and toolResults fields.
+ *
+ * @param event - The pi AgentSessionEvent to format.
+ * @returns A serializable payload with type, message, and toolResults.
  */
 function formatTurnStartOrEnd(event: PiAgentSessionEvent): unknown {
     return {
@@ -281,6 +314,9 @@ function formatTurnStartOrEnd(event: PiAgentSessionEvent): unknown {
 
 /**
  * Format a tool_execution_start, tool_execution_update, or tool_execution_end event for SSE.
+ *
+ * @param event - The pi AgentSessionEvent to format.
+ * @returns A serializable payload with tool execution details.
  */
 function formatToolExecution(event: PiAgentSessionEvent): unknown {
     switch (event.type) {
@@ -297,6 +333,9 @@ function formatToolExecution(event: PiAgentSessionEvent): unknown {
 
 /**
  * Format a queue_update event for SSE.
+ *
+ * @param event - The pi AgentSessionEvent to format.
+ * @returns A serializable payload with steering and followUp fields.
  */
 function formatQueueUpdate(event: PiAgentSessionEvent): unknown {
     const e = event as Record<string, unknown>;
@@ -322,6 +361,9 @@ const EVENT_FORMATTERS: Record<string, EventFormatter> = {
 /**
  * Format pi AgentSessionEvent into a serializable payload for SSE.
  * Maps pi's generic event types to our chat-specific format.
+ *
+ * @param event - The pi AgentSessionEvent to format.
+ * @returns A serializable SSE payload.
  */
 export function formatEventPayload(event: PiAgentSessionEvent): unknown {
     if (Object.hasOwn(EVENT_FORMATTERS, event.type)) {

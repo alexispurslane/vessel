@@ -1,3 +1,6 @@
+/**
+ * @file Reactive media query hook for detecting mobile viewport width.
+ */
 import { MediaQuery } from "svelte/reactivity";
 
 const DEFAULT_MOBILE_BREAKPOINT = 768;

@@ -1,3 +1,6 @@
+/**
+ * @file Re-exports for pill list components and item types.
+ */
 export { default as PillList } from "./PillList.svelte";
 export { default as PathAutocompletePillList } from "./PathAutocompletePillList.svelte";
 export { default as PillKeyValueList } from "./PillKeyValueList.svelte";

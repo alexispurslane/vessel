@@ -1,4 +1,7 @@
-import type { Handle } from "@sveltejs/kit";
+/**
+ * @file SvelteKit server hook: auth, rate limiting, and route protection.
+ */
+import type { Handle, RequestEvent } from "@sveltejs/kit";
 import { validateSessionToken, SESSION_COOKIE_NAME, sessionCookie } from "$lib/server/auth/index.js";
 import { parse } from "cookie";
 
@@ -68,12 +71,17 @@ function rateLimitResponse(ip: string, max: number, windowMs: number): Response 
     return null;
 }
 
-// --- Main hook ---
-
-export const handle: Handle = async ({ event, resolve }) => {
-    const { url } = event;
-
-    // 1. Resolve session
+/**
+ * Resolve the current user's session from cookies.
+ *
+ * Checks both the current and legacy session cookie names,
+ * validates the token, and populates event.locals with
+ * authentication state.
+ *
+ * @param event - The SvelteKit request event
+ * @returns The session token and whether a legacy cookie was used
+ */
+async function resolveAuth(event: RequestEvent): Promise<{ token: string | undefined; hasLegacyCookie: boolean }> {
     const cookies = parse(event.request.headers.get("cookie") ?? "");
     const token = cookies[SESSION_COOKIE_NAME] ?? cookies[LEGACY_SESSION_COOKIE_NAME];
     const hasLegacyCookie = !cookies[SESSION_COOKIE_NAME] && !!cookies[LEGACY_SESSION_COOKIE_NAME];
@@ -90,12 +98,68 @@ export const handle: Handle = async ({ event, resolve }) => {
         event.locals.authenticated = false;
     }
 
-    // 2. Rate limit unauthenticated users
-    if (!event.locals.authenticated) {
-        const config = isAuthRoute(url.pathname) ? RATE_LIMIT_CONFIGS.auth : RATE_LIMIT_CONFIGS.general;
-        const blocked = rateLimitResponse(event.getClientAddress(), config.max, config.windowMs);
-        if (blocked) return blocked;
+    return { token, hasLegacyCookie };
+}
+
+/**
+ * Apply rate limiting for unauthenticated requests.
+ *
+ * Uses different limits for auth routes vs. general routes.
+ * Returns a 429 response if the limit is exceeded, or null if allowed.
+ *
+ * @param event - The SvelteKit request event
+ * @returns A blocked response, or null if the request is allowed
+ */
+function applyRateLimit(event: RequestEvent): Response | null {
+    if (event.locals.authenticated) return null;
+
+    const config = isAuthRoute(event.url.pathname)
+        ? RATE_LIMIT_CONFIGS.auth
+        : RATE_LIMIT_CONFIGS.general;
+    return rateLimitResponse(event.getClientAddress(), config.max, config.windowMs);
+}
+
+/**
+ * Migrate a legacy session cookie to the current cookie name.
+ *
+ * If the user authenticated via the legacy `talkai_session` cookie,
+ * we set the current `session` cookie and delete the legacy one.
+ *
+ * @param token - The validated session token
+ * @param hasLegacyCookie - Whether the request used the legacy cookie
+ * @param response - The response to attach set-cookie headers to
+ */
+function migrateLegacyCookie(token: string | undefined, hasLegacyCookie: boolean, response: Response): void {
+    if (hasLegacyCookie && token) {
+        response.headers.append("set-cookie", sessionCookie(token));
+        response.headers.append(
+            "set-cookie",
+            `${LEGACY_SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=0`,
+        );
     }
+}
+
+// --- Main hook ---
+
+/**
+ * SvelteKit server hook: auth, rate limiting, and route protection.
+ * Resolves session tokens, rate-limits unauthenticated requests,
+ * and redirects unauthenticated users to the login page.
+ *
+ * @param root0 - The hook params
+ * @param root0.event - The request event
+ * @param root0.resolve - The resolve function
+ * @returns The response
+ */
+export const handle: Handle = async ({ event, resolve }) => {
+    const { url } = event;
+
+    // 1. Resolve session
+    const { token, hasLegacyCookie } = await resolveAuth(event);
+
+    // 2. Rate limit unauthenticated users
+    const blocked = applyRateLimit(event);
+    if (blocked) return blocked;
 
     // 3. Auth routes always pass through
     if (isAuthRoute(url.pathname)) return resolve(event);
@@ -109,14 +173,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 
     // 5. Resolve and migrate legacy cookie
     const response = await resolve(event);
-
-    if (hasLegacyCookie && token) {
-        response.headers.append("set-cookie", sessionCookie(token));
-        response.headers.append(
-            "set-cookie",
-            `${LEGACY_SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=0`,
-        );
-    }
+    migrateLegacyCookie(token, hasLegacyCookie, response);
 
     return response;
 };

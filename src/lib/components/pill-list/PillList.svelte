@@ -1,5 +1,7 @@
 <script lang="ts">
     /**
+     * @file Generic pill/tag list component.
+     *
      * A reusable component that renders a list of editable "pills" (rounded badges).
      * Each pill can be edited inline or deleted. A "Add" button opens an inline input
      * for adding new items.
