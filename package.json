@@ -61,7 +61,7 @@
         "@anthropic-ai/sdk": ">=0.91.1"
     },
     "simple-git-hooks": {
-        "pre-push": "bun audit && bunx oxlint --quiet"
+        "pre-push": "bun audit && bun run lint --quiet"
     },
     "dependencies": {
         "@mariozechner/pi-agent-core": "^0.67.68",

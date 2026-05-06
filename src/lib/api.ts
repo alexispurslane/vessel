@@ -135,7 +135,7 @@ export async function getConversation(id: string): Promise<ConversationDetail> {
 
 export async function updateConversation(
     id: string,
-    updates: Partial<Pick<ConversationDetail, "title" | "tags" | "model_id" | "pinned">>
+    updates: Partial<Pick<ConversationDetail, "title" | "tags" | "model_id" | "pinned" | "archived">>
 ): Promise<{ success: boolean }> {
     return apiFetch<{ success: boolean }>(`/api/sessions/${id}`, {
         method: "PATCH",
@@ -149,12 +149,45 @@ export async function deleteConversation(id: string): Promise<{ success: boolean
     });
 }
 
+// --- Bulk Operations ---
+
+/** Action type for the bulk endpoint. */
+export type BulkAction = "archive" | "unarchive" | "delete" | "tag";
+
+/** Result returned by the bulk endpoint. */
+export interface BulkResult {
+    action: BulkAction;
+    succeeded: number;
+    failed: number;
+    failures?: Array<{ id: string; error: string }>;
+}
+
+/**
+ * Perform a batch action on multiple conversations.
+ *
+ * @param ids - Conversation IDs to act on (1–100)
+ * @param action - The bulk action to perform
+ * @param tags - Tags to add (required when action is "tag")
+ * @returns Result with success/failure counts
+ */
+export async function bulkConversationAction(
+    ids: string[],
+    action: BulkAction,
+    tags?: string[]
+): Promise<BulkResult> {
+    return apiFetch<BulkResult>("/api/sessions/bulk", {
+        method: "POST",
+        body: JSON.stringify({ ids, action, tags }),
+    });
+}
+
 // --- Search ---
 
 export interface ConversationSearchResult {
     id: string;
     title: string;
     tags: string[];
+    archived: boolean;
     updatedAt: string;
     matchSource: "title" | "content" | "both";
     snippets: Array<{ text: string; messageId: string | null }>;

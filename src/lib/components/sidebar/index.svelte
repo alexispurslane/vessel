@@ -23,6 +23,11 @@
     import Settings from "@lucide/svelte/icons/settings";
     import LogOut from "@lucide/svelte/icons/log-out";
     import Search from "@lucide/svelte/icons/search";
+    import Archive from "@lucide/svelte/icons/archive";
+    import ArchiveRestore from "@lucide/svelte/icons/archive-restore";
+    import Trash2 from "@lucide/svelte/icons/trash-2";
+    import TagIcon from "@lucide/svelte/icons/tag";
+    import X from "@lucide/svelte/icons/x";
     import MessageSquare from "@lucide/svelte/icons/message-square";
     import {
         Dialog,
@@ -43,7 +48,15 @@
         renameConversation,
         loadConversations,
         pinConversation,
+        archiveConversation,
+        unarchiveConversation,
+        bulkAction,
+        toggleSelection,
+        selectAllActive,
+        selectAllArchived,
+        clearSelection,
     } from "$lib/stores/conversations.svelte.js";
+    import type { BulkAction } from "$lib/api.js";
     import {
         updateConversation as apiUpdateConversation,
         generateTitle,
@@ -85,7 +98,7 @@
 
     let allTags = $derived.by(() => {
         const tagCounts = new SvelteMap<string, number>();
-        for (const conv of convs.list) {
+        for (const conv of convs.activeConvs) {
             for (const tag of conv.tags) {
                 tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
             }
@@ -96,8 +109,54 @@
             .map(([tag, count]) => ({ tag, count }));
     });
 
-    let pinnedConvs = $derived(convs.list.filter((c) => c.pinned));
-    let recentConvs = $derived(convs.list.filter((c) => !c.pinned));
+    let pinnedConvs = $derived(convs.activeConvs.filter((c) => c.pinned));
+    let recentConvs = $derived(convs.activeConvs.filter((c) => !c.pinned));
+    let archivedConvs = $derived(convs.archivedConvs);
+
+    // --- Bulk-select mode state ---
+    let selectMode = $state(false);
+    let bulkTagValue = $state("");
+    let showBulkTagDialog = $state(false);
+
+    function enterSelectMode(initialId: string) {
+        selectMode = true;
+        toggleSelection(initialId);
+    }
+
+    function exitSelectMode() {
+        selectMode = false;
+        clearSelection();
+    }
+
+    async function handleBulkAction(action: BulkAction) {
+        if (action === "tag") {
+            showBulkTagDialog = true;
+            return;
+        }
+        await bulkAction(action);
+        exitSelectMode();
+    }
+
+    async function commitBulkTag() {
+        const tags = bulkTagValue
+            .split(",")
+            .map((t) => t.trim())
+            .filter((t) => t.length > 0);
+        if (tags.length > 0) {
+            await bulkAction("tag", tags);
+        }
+        showBulkTagDialog = false;
+        bulkTagValue = "";
+        exitSelectMode();
+    }
+
+    function handleArchiveConversation(id: string, archived: boolean) {
+        if (archived) {
+            void archiveConversation(id);
+        } else {
+            void unarchiveConversation(id);
+        }
+    }
 
     function handleNewChat() {
         setActiveConversation(null);
@@ -410,12 +469,17 @@
                                     isActive={conv.id === convs.activeId}
                                     generatingTitle={generatingTitleForId === conv.id}
                                     hasDraft={draftIds.has(conv.id)}
+                                    {selectMode}
+                                    isSelected={convs.selectedIds.has(conv.id)}
                                     onSelect={handleSelectConversation}
                                     onDelete={handleDeleteConversation}
                                     onRename={handleRenameConversation}
                                     onTag={handleTagConversation}
                                     onGenerateTitle={handleGenerateTitle}
                                     onPin={handlePinConversation}
+                                    onArchive={handleArchiveConversation}
+                                    onToggleSelect={toggleSelection}
+                                    onEnterSelectMode={enterSelectMode}
                                 />
                             {/each}
                         </SidebarMenu>
@@ -443,12 +507,17 @@
                                         isActive={conv.id === convs.activeId}
                                         generatingTitle={generatingTitleForId === conv.id}
                                         hasDraft={draftIds.has(conv.id)}
+                                        {selectMode}
+                                        isSelected={convs.selectedIds.has(conv.id)}
                                         onSelect={handleSelectConversation}
                                         onDelete={handleDeleteConversation}
                                         onRename={handleRenameConversation}
                                         onTag={handleTagConversation}
                                         onGenerateTitle={handleGenerateTitle}
                                         onPin={handlePinConversation}
+                                        onArchive={handleArchiveConversation}
+                                        onToggleSelect={toggleSelection}
+                                        onEnterSelectMode={enterSelectMode}
                                     />
                                 {/each}
                             {/if}
@@ -456,12 +525,123 @@
                     </ScrollArea>
                 </SidebarGroupContent>
             </SidebarGroup>
+
+            {#if !convs.loading && archivedConvs.length > 0}
+                <SidebarGroup>
+                    <SidebarGroupLabel>Archived</SidebarGroupLabel>
+                    <SidebarGroupContent>
+                        <SidebarMenu>
+                            {#each archivedConvs as conv (conv.id)}
+                                <ConversationItem
+                                    {conv}
+                                    isActive={conv.id === convs.activeId}
+                                    generatingTitle={generatingTitleForId === conv.id}
+                                    hasDraft={draftIds.has(conv.id)}
+                                    {selectMode}
+                                    isSelected={convs.selectedIds.has(conv.id)}
+                                    onSelect={handleSelectConversation}
+                                    onDelete={handleDeleteConversation}
+                                    onRename={handleRenameConversation}
+                                    onTag={handleTagConversation}
+                                    onGenerateTitle={handleGenerateTitle}
+                                    onPin={handlePinConversation}
+                                    onArchive={handleArchiveConversation}
+                                    onToggleSelect={toggleSelection}
+                                    onEnterSelectMode={enterSelectMode}
+                                />
+                            {/each}
+                        </SidebarMenu>
+                    </SidebarGroupContent>
+                </SidebarGroup>
+            {/if}
         {/if}
 
         {#if convs.error}
             <p class="px-2 text-xs text-destructive">{convs.error}</p>
         {/if}
     </SidebarContent>
+
+    {#if selectMode}
+        <div class="border-t p-2 flex flex-col gap-2">
+            <div class="flex items-center justify-between text-xs text-muted-foreground">
+                <span>{String(convs.selectedIds.size)} selected</span>
+                <div class="flex gap-1">
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        class="h-6 px-2 text-xs"
+                        onclick={() => {
+                            if (
+                                archivedConvs.length > 0 &&
+                                recentConvs.length === 0 &&
+                                pinnedConvs.length === 0
+                            ) {
+                                selectAllArchived();
+                            } else {
+                                selectAllActive();
+                            }
+                        }}
+                    >
+                        Select all
+                    </Button>
+                </div>
+            </div>
+            <div class="flex flex-wrap gap-1">
+                {#if archivedConvs.length > 0 && [...convs.selectedIds].some( (id) => archivedConvs.some((c) => c.id === id) )}
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        class="h-7 px-2 text-xs"
+                        onclick={() => void handleBulkAction("unarchive")}
+                        disabled={convs.selectedIds.size === 0}
+                    >
+                        <ArchiveRestore class="h-3.5 w-3.5 mr-1" />
+                        Unarchive
+                    </Button>
+                {:else}
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        class="h-7 px-2 text-xs"
+                        onclick={() => void handleBulkAction("archive")}
+                        disabled={convs.selectedIds.size === 0}
+                    >
+                        <Archive class="h-3.5 w-3.5 mr-1" />
+                        Archive
+                    </Button>
+                {/if}
+                <Button
+                    variant="outline"
+                    size="sm"
+                    class="h-7 px-2 text-xs"
+                    onclick={() => void handleBulkAction("tag")}
+                    disabled={convs.selectedIds.size === 0}
+                >
+                    <TagIcon class="h-3.5 w-3.5 mr-1" />
+                    Tag
+                </Button>
+                <Button
+                    variant="outline"
+                    size="sm"
+                    class="h-7 px-2 text-xs text-destructive hover:text-destructive"
+                    onclick={() => void handleBulkAction("delete")}
+                    disabled={convs.selectedIds.size === 0}
+                >
+                    <Trash2 class="h-3.5 w-3.5 mr-1" />
+                    Delete
+                </Button>
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    class="h-7 px-2 text-xs ml-auto"
+                    onclick={exitSelectMode}
+                >
+                    <X class="h-3.5 w-3.5 mr-1" />
+                    Cancel
+                </Button>
+            </div>
+        </div>
+    {/if}
 
     <SidebarFooter>
         <SidebarMenu>
@@ -550,6 +730,40 @@
                 }}>Cancel</Button
             >
             <Button onclick={() => void commitTag()}>Save</Button>
+        </DialogFooter>
+    </DialogContent>
+</Dialog>
+
+<!-- Bulk Tag Dialog -->
+<Dialog
+    open={showBulkTagDialog}
+    onOpenChange={(open) => {
+        if (!open) {
+            showBulkTagDialog = false;
+            bulkTagValue = "";
+        }
+    }}
+>
+    <DialogContent>
+        <DialogHeader>
+            <DialogTitle>Add Tags to {String(convs.selectedIds.size)} Conversations</DialogTitle>
+        </DialogHeader>
+        <Input
+            bind:value={bulkTagValue}
+            placeholder="tag1, tag2, tag3"
+            onkeydown={(e: KeyboardEvent) => {
+                if (e.key === "Enter") void commitBulkTag();
+            }}
+        />
+        <DialogFooter>
+            <Button
+                variant="outline"
+                onclick={() => {
+                    showBulkTagDialog = false;
+                    bulkTagValue = "";
+                }}>Cancel</Button
+            >
+            <Button onclick={() => void commitBulkTag()}>Add Tags</Button>
         </DialogFooter>
     </DialogContent>
 </Dialog>

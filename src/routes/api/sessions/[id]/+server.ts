@@ -10,8 +10,9 @@ const PatchBody = z.object({
     tags: z.array(z.string()).optional(),
     model_id: z.string().optional(),
     pinned: z.boolean().optional(),
+    archived: z.boolean().optional(),
 }).refine(
-    (data) => data.title !== undefined || data.tags !== undefined || data.model_id !== undefined || data.pinned !== undefined,
+    (data) => data.title !== undefined || data.tags !== undefined || data.model_id !== undefined || data.pinned !== undefined || data.archived !== undefined,
     { message: "No fields to update" }
 );
 
@@ -25,7 +26,7 @@ export const GET = tryApi(({ params }) => {
     const db = getDb();
     const row = db
         .query(
-            "SELECT id, title, tags, model_provider, model_id, pinned, created_at, updated_at FROM conversations WHERE id = ?"
+            "SELECT id, title, tags, model_provider, model_id, pinned, archived, created_at, updated_at FROM conversations WHERE id = ?"
         )
         .get(id) as
         | {
@@ -35,6 +36,7 @@ export const GET = tryApi(({ params }) => {
             model_provider: string | null;
             model_id: string | null;
             pinned: number;
+            archived: number;
             created_at: string;
             updated_at: string;
         }
@@ -48,6 +50,7 @@ export const GET = tryApi(({ params }) => {
         ...row,
         tags: safeJsonParse(row.tags, stringArraySchema) ?? [],
         pinned: Boolean(row.pinned),
+        archived: Boolean(row.archived),
     });
 });
 
@@ -59,7 +62,7 @@ export const GET = tryApi(({ params }) => {
 export const PATCH = apiHandler(PatchBody, ({ body, event }) => {
     const id = event.params.id;
     if (!id) return notFound("Conversation not found");
-    const { title, tags, model_id, pinned } = body;
+    const { title, tags, model_id, pinned, archived } = body;
 
     const updates: string[] = [];
     const values: (string | number | null)[] = [];
@@ -85,6 +88,10 @@ export const PATCH = apiHandler(PatchBody, ({ body, event }) => {
     if (pinned !== undefined) {
         updates.push("pinned = ?");
         values.push(pinned ? 1 : 0);
+    }
+    if (archived !== undefined) {
+        updates.push("archived = ?");
+        values.push(archived ? 1 : 0);
     }
 
     // Safety check — the Zod refine should prevent this, but keep the guard

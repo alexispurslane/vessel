@@ -90,7 +90,7 @@ export function getConversationsByTag(tag: string): import("$lib/types.js").Conv
 
     const rows = db
         .query(
-            `SELECT id, title, tags, pinned, created_at, updated_at
+            `SELECT id, title, tags, pinned, archived, created_at, updated_at
              FROM conversations
              WHERE tags LIKE ?
              ORDER BY updated_at DESC`
@@ -100,6 +100,7 @@ export function getConversationsByTag(tag: string): import("$lib/types.js").Conv
             title: string;
             tags: string;
             pinned: number;
+            archived: number;
             created_at: string;
             updated_at: string;
         }[];
@@ -118,6 +119,7 @@ export function getConversationsByTag(tag: string): import("$lib/types.js").Conv
             title: row.title,
             tags: safeJsonParse(row.tags, stringArraySchema) ?? [],
             pinned: Boolean(row.pinned),
+            archived: Boolean(row.archived),
             createdAt: row.created_at,
             updatedAt: row.updated_at,
         }));

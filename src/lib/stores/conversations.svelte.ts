@@ -6,7 +6,9 @@ import {
     createConversation as apiCreate,
     deleteConversation as apiDelete,
     updateConversation as apiUpdate,
+    bulkConversationAction as apiBulk,
 } from "$lib/api.js";
+import type { BulkAction } from "$lib/api.js";
 import type { ConversationListItem } from "$lib/types.js";
 
 /**
@@ -46,9 +48,11 @@ let activeId = $state<string | null>(null);
 /** Incremented each time loadConversations is called, so stale async results are discarded. */
 let loadGeneration = 0;
 
+let selectedIds = $state<Set<string>>(new Set());
+
 /**
  * Return a reactive snapshot of the conversations state.
- * @returns An object with reactive list, loading, error, activeId, and activeConversation getters
+ * @returns An object with reactive list, loading, error, activeId, activeConversation, derived lists, and selectedIds getters
  */
 export function getConversations() {
     return {
@@ -66,6 +70,17 @@ export function getConversations() {
         },
         get activeConversation() {
             return conversations.find((c) => c.id === activeId) ?? null;
+        },
+        get activeConvs() {
+            // Non-archived conversations for the "Recent" sidebar section
+            return conversations.filter((c) => !c.archived);
+        },
+        get archivedConvs() {
+            // Archived conversations for the "Archived" sidebar section
+            return conversations.filter((c) => c.archived);
+        },
+        get selectedIds() {
+            return selectedIds;
         },
     };
 }
@@ -112,6 +127,7 @@ export async function createConversation(title?: string, modelId?: string): Prom
                 title: title ?? "New Chat",
                 tags: [],
                 pinned: false,
+                archived: false,
                 createdAt: isoNow(),
                 updatedAt: isoNow(),
             });
@@ -134,6 +150,11 @@ export async function deleteConversation(id: string): Promise<boolean> {
     try {
         await apiDelete(id);
         conversations = conversations.filter((c) => c.id !== id);
+        if (selectedIds.has(id)) {
+            const next = new Set(selectedIds);
+            next.delete(id);
+            selectedIds = next;
+        }
         if (activeId === id) {
             activeId = conversations[0]?.id ?? null;
         }
@@ -196,6 +217,100 @@ export async function pinConversation(id: string, pinned: boolean): Promise<bool
         error = e instanceof Error ? e.message : "Failed to update pin status";
         return false;
     }
+}
+
+/**
+ * Archive a conversation via the API and update the store.
+ * Archived conversations are hidden from the main list and shown in a separate section.
+ * @param id - The conversation ID to archive
+ * @returns Whether the archive succeeded
+ */
+export async function archiveConversation(id: string): Promise<boolean> {
+    error = null;
+    try {
+        await apiUpdate(id, { archived: true });
+        const conv = conversations.find((c) => c.id === id);
+        if (conv) {
+            conv.archived = true;
+            conv.pinned = false;
+        }
+        return true;
+    } catch (e) {
+        error = e instanceof Error ? e.message : "Failed to archive conversation";
+        return false;
+    }
+}
+
+/**
+ * Unarchive a conversation via the API and update the store.
+ * @param id - The conversation ID to unarchive
+ * @returns Whether the unarchive succeeded
+ */
+export async function unarchiveConversation(id: string): Promise<boolean> {
+    error = null;
+    try {
+        await apiUpdate(id, { archived: false });
+        const conv = conversations.find((c) => c.id === id);
+        if (conv) conv.archived = false;
+        return true;
+    } catch (e) {
+        error = e instanceof Error ? e.message : "Failed to unarchive conversation";
+        return false;
+    }
+}
+
+/**
+ * Perform a bulk action on selected conversations and refresh the store.
+ * @param action - The bulk action to perform
+ * @param tags - Tags to add (required for "tag" action)
+ * @returns Whether the action fully succeeded (no failures)
+ */
+export async function bulkAction(action: BulkAction, tags?: string[]): Promise<boolean> {
+    error = null;
+    const ids = [...selectedIds];
+    if (ids.length === 0) return false;
+
+    try {
+        const result = await apiBulk(ids, action, tags);
+        if (result.failed > 0) {
+            error = `${String(result.failed)} conversation(s) failed`;
+        }
+        selectedIds = new Set();
+        await loadConversations();
+        return result.failed === 0;
+    } catch (e) {
+        error = e instanceof Error ? e.message : "Bulk action failed";
+        return false;
+    }
+}
+
+/**
+ * Toggle a conversation in the selection set.
+ * @param id - The conversation ID to toggle
+ */
+export function toggleSelection(id: string): void {
+    const next = new Set(selectedIds);
+    if (next.has(id)) {
+        next.delete(id);
+    } else {
+        next.add(id);
+    }
+    selectedIds = next;
+}
+
+/** Select all non-archived conversations. */
+export function selectAllActive(): void {
+    selectedIds = new Set(conversations.filter((c) => !c.archived).map((c) => c.id));
+}
+
+/** Select all archived conversations. */
+export function selectAllArchived(): void {
+    selectedIds = new Set(conversations.filter((c) => c.archived).map((c) => c.id));
+}
+
+/** Clear the selection set. */
+export function clearSelection(): void {
+    selectedIds = new Set();
 }
 
 export function setActiveConversation(id: string | null): void {

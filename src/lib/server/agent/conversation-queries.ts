@@ -19,6 +19,7 @@ export interface ConversationSearchResult {
     id: string;
     title: string;
     tags: string[];
+    archived: boolean;
     updatedAt: string;
     /** Where the match was found */
     matchSource: "title" | "content" | "both";
@@ -33,6 +34,7 @@ interface ConversationRow {
     tags: string;
     session_file_path: string;
     pinned: number;
+    archived: number;
     created_at: string;
     updated_at: string;
 }
@@ -55,7 +57,7 @@ function fetchAllConversationRows(): ConversationRow[] {
     const db = getDb();
     return db
         .query(
-            `SELECT id, title, tags, session_file_path, pinned, created_at, updated_at FROM conversations ORDER BY updated_at DESC`
+            `SELECT id, title, tags, session_file_path, pinned, archived, created_at, updated_at FROM conversations ORDER BY updated_at DESC`
         )
         .all() as ConversationRow[];
 }
@@ -73,6 +75,7 @@ export function listConversations(): ConversationListItem[] {
         title: row.title,
         tags: safeJsonParse(row.tags, stringArraySchema) ?? [],
         pinned: Boolean(row.pinned),
+        archived: Boolean(row.archived),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
     }));
@@ -201,6 +204,7 @@ async function collectSnippetsFromSession(
  * @param row.id - Conversation ID.
  * @param row.title - Conversation title.
  * @param row.tags - JSON-encoded tags string.
+ * @param row.archived - Whether the conversation is archived.
  * @param row.updated_at - Last updated timestamp.
  * @param titleMatch - Whether the title matched the query.
  * @param contentSnippets - Snippets from message content matches.
@@ -208,7 +212,7 @@ async function collectSnippetsFromSession(
  * @returns A fully populated search result.
  */
 function buildSearchResult(
-    row: { id: string; title: string; tags: string; updated_at: string },
+    row: { id: string; title: string; tags: string; archived: number; updated_at: string },
     titleMatch: boolean,
     contentSnippets: Array<{ text: string; messageId: string | null }>,
     query: string,
@@ -232,6 +236,7 @@ function buildSearchResult(
         id: row.id,
         title: row.title,
         tags: safeJsonParse(row.tags, stringArraySchema) ?? [],
+        archived: Boolean(row.archived),
         updatedAt: row.updated_at,
         matchSource,
         snippets,
