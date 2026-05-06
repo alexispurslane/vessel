@@ -182,7 +182,7 @@ function buildSecretsObject(
 export function createConversationSecuritySettings(): ConversationSecuritySettingsState {
     const enabledMcpServers = new SvelteSet<string>();
 
-    return $state({
+    return {
         loading: false,
         saving: false,
         saved: false,
@@ -221,7 +221,7 @@ export function createConversationSecuritySettings(): ConversationSecuritySettin
         async saveSettings() {
             throw new Error("saveSettings not bound — use useConversationSecuritySettings");
         },
-    });
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -406,7 +406,7 @@ async function saveSettingsFrom(
 export function useConversationSecuritySettings(
     conversationId: () => string,
 ): ConversationSecuritySettingsState {
-    const s = createConversationSecuritySettings();
+    const s = $state(createConversationSecuritySettings());
 
     s.loadSettings = () => loadSettingsInto(s, conversationId);
     s.saveSettings = () => saveSettingsFrom(s, conversationId);
