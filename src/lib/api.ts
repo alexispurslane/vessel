@@ -334,18 +334,22 @@ export async function editAssistantMessage(
  * @param conversationId - The conversation ID
  * @param targetEntryId - The assistant message entry ID to regenerate
  * @param feedback - The user's critique/feedback text
+ * @param modelId - Optional model ID to use for regeneration (reverts after)
  * @returns Whether the regeneration was cancelled
  */
 export async function regenWithFeedback(
     conversationId: string,
     targetEntryId: string,
-    feedback: string
+    feedback: string,
+    modelId?: string
 ): Promise<{ cancelled: boolean }> {
+    const body: Record<string, unknown> = { targetEntryId, feedback };
+    if (modelId) body.model_id = modelId;
     return apiFetch<{ cancelled: boolean }>(
         `/api/sessions/${conversationId}/regen-with-feedback`,
         {
             method: "POST",
-            body: JSON.stringify({ targetEntryId, feedback }),
+            body: JSON.stringify(body),
         }
     );
 }

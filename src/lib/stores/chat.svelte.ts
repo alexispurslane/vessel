@@ -634,10 +634,11 @@ export async function editAssistantMessage(messageId: string, newContent: string
  * and triggers a new LLM turn for a corrected response.
  * @param messageId - The ID of the assistant message to regenerate
  * @param feedback - The user feedback/critique
+ * @param modelId - Optional model ID to use for regeneration (reverts after)
  * @returns {Promise<void>}
  */
-export async function regenWithFeedback(messageId: string, feedback: string): Promise<void> {
-    return _regenWithFeedback(state, messageId, feedback, abort);
+export async function regenWithFeedback(messageId: string, feedback: string, modelId?: string): Promise<void> {
+    return _regenWithFeedback(state, { messageId, feedback, abort, modelId });
 }
 
 /**

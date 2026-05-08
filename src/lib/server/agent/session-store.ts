@@ -1307,17 +1307,19 @@ export async function editAssistantMessage(
  * @param conversationId - The conversation ID to regenerate in
  * @param targetEntryId - The assistant entry ID to regenerate
  * @param feedback - The user's feedback on the original response
+ * @param modelId - Optional model ID to use for regeneration (reverts to previous model after)
  * @returns Object with cancelled status
  */
 export async function regenWithFeedback(
     conversationId: string,
     targetEntryId: string,
-    feedback: string
+    feedback: string,
+    modelId?: string
 ): Promise<{ cancelled: boolean }> {
     const agentSession = await getOrHydrateSession(conversationId);
     cancelDispose(conversationId);
 
-    return regenWithFeedbackSession(agentSession, targetEntryId, feedback);
+    return regenWithFeedbackSession(agentSession, targetEntryId, feedback, modelId);
 }
 
 /**

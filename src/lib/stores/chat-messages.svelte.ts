@@ -643,19 +643,24 @@ export async function editAssistantMessage(
  * response based on the feedback.
  *
  * @param s - The chat state
- * @param messageId - The ID of the assistant message to regenerate
- * @param feedback - The user's critique of what was wrong
- * @param abortFn - Callback to abort current generation
+ * @param args - The regeneration arguments
+ * @param args.messageId - The ID of the assistant message to regenerate
+ * @param args.feedback - The user's critique of what was wrong
+ * @param args.abort - Callback to abort current generation
+ * @param args.modelId - Optional model ID to use for regeneration (reverts after)
  */
 export async function regenWithFeedback(
     s: ChatState,
-    messageId: string,
-    feedback: string,
-    abortFn: () => Promise<void>
+    { messageId, feedback, abort, modelId }: {
+        messageId: string;
+        feedback: string;
+        abort: () => Promise<void>;
+        modelId?: string;
+    }
 ): Promise<void> {
     if (!s.currentConversationId) return;
 
-    await abortAndFinalize(s, abortFn, "regenWithFeedback");
+    await abortAndFinalize(s, abort, "regenWithFeedback");
 
     // Trim messages to remove target assistant msg and all after
     // it. Only the new response is visible during SSE streaming.
@@ -668,7 +673,7 @@ export async function regenWithFeedback(
     s.error = null;
 
     try {
-        await apiRegenWithFeedback(s.currentConversationId, messageId, feedback);
+        await apiRegenWithFeedback(s.currentConversationId, messageId, feedback, modelId);
         // Reload messages from server to reflect the new session state
         await reloadMessages(s);
     } catch (e) {

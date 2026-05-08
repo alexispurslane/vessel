@@ -36,6 +36,7 @@ export type {
 } from "./session-history.js";
 
 import { generateTitleAndTags } from "./title-generator.js";
+import { findModelById } from "./model-registry.js";
 import { getDb } from "../db/index.js";
 import { log } from "$lib/server/logger.js";
 import { extractMessageContent } from "./session-history.js";
@@ -255,12 +256,14 @@ export async function editSessionAssistantMessage(
  * @param agentSession - The PiAgentSession to operate on
  * @param targetEntryId - The entry ID of the assistant message to regenerate
  * @param feedback - The user's critique of what was wrong
+ * @param modelId - Optional model ID to use for regeneration (reverts to previous model after)
  * @returns Whether the operation was cancelled
  */
 export async function regenWithFeedback(
     agentSession: PiAgentSession,
     targetEntryId: string,
-    feedback: string
+    feedback: string,
+    modelId?: string
 ): Promise<{ cancelled: boolean }> {
     const sessionManager = agentSession.sessionManager;
     const entry = sessionManager.getEntry(targetEntryId);
@@ -271,7 +274,16 @@ export async function regenWithFeedback(
         throw new Error(`Entry ${targetEntryId} is not an assistant message`);
     }
 
-    // 1. Extract the original assistant message text before navigating away.
+    // 1. If a different model is requested, switch to it before regenerating.
+    //    We will restore the original model after the agent finishes.
+    let previousModel: Parameters<typeof agentSession.setModel>[0] | undefined;
+    if (modelId) {
+        const requestedModel = findModelById(modelId);
+        if (requestedModel) {
+            previousModel = agentSession.model;
+            await agentSession.setModel(requestedModel);
+        }
+    }
     const { textContent } = extractMessageContent(entry.message as unknown as Record<string, unknown>);
 
     // 2. Branch from the parent so the user message stays IN context but the
@@ -310,6 +322,11 @@ export async function regenWithFeedback(
     const sessionContext = sessionManager.buildSessionContext();
     agentSession.agent.state.messages = sessionContext.messages;
     await agentSession.agent.continue();
+
+    // 4. Restore the original model if we switched it.
+    if (previousModel) {
+        await agentSession.setModel(previousModel);
+    }
 
     return { cancelled: false };
 }

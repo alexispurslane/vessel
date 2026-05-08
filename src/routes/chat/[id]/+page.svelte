@@ -743,8 +743,8 @@
         void editAssistantMessage(messageId, newText);
     }
 
-    function handleRegenWithFeedback(messageId: string, feedback: string) {
-        void regenWithFeedback(messageId, feedback);
+    function handleRegenWithFeedback(messageId: string, feedback: string, modelId?: string) {
+        void regenWithFeedback(messageId, feedback, modelId);
     }
 
     /**
@@ -1248,6 +1248,8 @@
                                                             onsearchclick={handleSearchClick}
                                                             onpageclick={handlePageClick}
                                                             conversationId={id}
+                                                            models={availableModels}
+                                                            {selectedModelId}
                                                         />
                                                     </div>
                                                 </div>

@@ -6,6 +6,7 @@ import { regenWithFeedback } from "$lib/server/agent/session-store.js";
 const PostBody = z.object({
     targetEntryId: z.string().min(1),
     feedback: z.string().min(1),
+    model_id: z.string().optional(),
 });
 
 /**
@@ -26,6 +27,6 @@ const PostBody = z.object({
 export const POST = apiHandler(PostBody, async ({ body, event }) => {
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const id = event.params.id!;
-    const result = await regenWithFeedback(id, body.targetEntryId, body.feedback);
+    const result = await regenWithFeedback(id, body.targetEntryId, body.feedback, body.model_id);
     return json(result);
 });

@@ -30,12 +30,22 @@
         TooltipProvider,
         TooltipTrigger,
     } from "$lib/components/ui/tooltip/index.js";
-    import type { ChatMessage as ChatMessageType } from "$lib/types.js";
+    import type { ChatMessage as ChatMessageType, ModelInfo } from "$lib/types.js";
     import type { SearchResultItem } from "$lib/types.js";
     import type { Tokens } from "marked";
     import { getCodeBlocks } from "$lib/api.js";
     import { langToExt, generateId } from "$lib/utils/code-block.js";
     import { strToU8, zipSync } from "fflate";
+    import Cpu from "@lucide/svelte/icons/cpu";
+    import {
+        Select,
+        SelectContent,
+        SelectGroup,
+        SelectItem,
+        SelectLabel,
+        SelectTrigger,
+        SelectValue,
+    } from "$lib/components/ui/select/index.js";
 
     interface Props {
         /** The chat message data */
@@ -52,8 +62,8 @@
         onedit?: (messageId: string, role: string, newText?: string) => void;
         /** Callback for in-place edit of an assistant message (no AI re-prompt, just modifies the stored text) */
         oneditassistant?: (messageId: string, newText: string) => void;
-        /** Callback to regenerate an assistant message with user feedback */
-        onregenfeedback?: (messageId: string, feedback: string) => void;
+        /** Callback to regenerate an assistant message with user feedback and optional model override */
+        onregenfeedback?: (messageId: string, feedback: string, modelId?: string) => void;
         /** Whether a navigation operation is in progress */
         navigating?: boolean;
         /** Callback when a search source is clicked, to open search results panel */
@@ -62,6 +72,10 @@
         onpageclick?: (url: string, title: string, content: string) => void;
         /** The conversation ID, used for API calls like extracting code blocks */
         conversationId: string;
+        /** Available models for the regeneration model dropdown */
+        models?: ModelInfo[];
+        /** The currently selected model ID in the page */
+        selectedModelId?: string;
     }
 
     let {
@@ -77,6 +91,8 @@
         onsearchclick,
         onpageclick,
         conversationId,
+        models = [],
+        selectedModelId = "",
     }: Props = $props();
 
     /** Theme override for user messages — needs text-primary-foreground instead of text-foreground */
@@ -175,6 +191,7 @@
     let editText = $state("");
     let showFeedbackPopup = $state(false);
     let feedbackText = $state("");
+    let feedbackModelId = $state("");
     let showCodeBlockPopup = $state(false);
     let pendingCodeBlocks: { lang: string; text: string }[] = $state([]);
     let zipping = $state(false);
@@ -368,6 +385,7 @@
 
     function handleFeedbackOpen() {
         feedbackText = "";
+        feedbackModelId = selectedModelId;
         showFeedbackPopup = true;
     }
 
@@ -375,12 +393,14 @@
         const trimmed = feedbackText.trim();
         if (!trimmed) return;
         showFeedbackPopup = false;
-        onregenfeedback?.(msg.id, trimmed);
+        const modelChanged = feedbackModelId !== selectedModelId;
+        onregenfeedback?.(msg.id, trimmed, modelChanged ? feedbackModelId : undefined);
     }
 
     function handleFeedbackCancel() {
         showFeedbackPopup = false;
         feedbackText = "";
+        feedbackModelId = "";
     }
 
     function handleFeedbackKeydown(e: KeyboardEvent) {
@@ -741,6 +761,44 @@
                         class="w-full text-sm bg-background border border-border rounded px-2 py-1.5 resize-none focus:outline-none focus:ring-1 focus:ring-ring min-h-[60px]"
                         rows={2}
                     ></textarea>
+                    {#if models.length > 0}
+                        <div class="flex items-center gap-1.5">
+                            <Cpu class="size-3.5 text-muted-foreground shrink-0" />
+                            <Select
+                                type="single"
+                                value={feedbackModelId}
+                                onValueChange={(v: string) => (feedbackModelId = v)}
+                            >
+                                <SelectTrigger
+                                    class="h-7 text-xs flex-1 min-w-0"
+                                    aria-label="Model for regeneration"
+                                >
+                                    <SelectValue placeholder="Same as current" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {#each Object.entries((() => {
+                                            const groups: Record<string, ModelInfo[]> = {};
+                                            for (const m of models) {
+                                                if (!(m.provider in groups)) groups[m.provider] = [];
+                                                groups[m.provider].push(m);
+                                            }
+                                            return groups;
+                                        })()) as [provider, providerModels] (provider)}
+                                        <SelectGroup>
+                                            <SelectLabel class="text-xs text-muted-foreground"
+                                                >{provider}</SelectLabel
+                                            >
+                                            {#each providerModels as model (model.id)}
+                                                <SelectItem value={model.id} class="text-xs"
+                                                    >{model.name}</SelectItem
+                                                >
+                                            {/each}
+                                        </SelectGroup>
+                                    {/each}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    {/if}
                     <div class="flex justify-end gap-1.5">
                         <button
                             onclick={handleFeedbackCancel}
