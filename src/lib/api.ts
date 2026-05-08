@@ -579,6 +579,24 @@ export async function setSessionLeaf(conversationId: string, targetEntryId: stri
     });
 }
 
+/**
+ * Fork a conversation before a specific entry.
+ *
+ * Creates a new conversation whose session contains the history
+ * from root up to and including the parent of the specified entry,
+ * capturing any custom messages (fetched sources, etc.) in between.
+ *
+ * @param conversationId - The conversation ID to fork from
+ * @param beforeEntryId - The entry ID to fork before (its parent becomes the fork leaf)
+ * @returns The new conversation ID
+ */
+export async function forkConversation(conversationId: string, beforeEntryId: string): Promise<{ id: string }> {
+    return apiFetch<{ id: string }>(`/api/sessions/${conversationId}/fork`, {
+        method: "POST",
+        body: JSON.stringify({ beforeEntryId }),
+    });
+}
+
 export interface MessageHistoryItem {
     id: string;
     role: string;

@@ -11,7 +11,7 @@
         regenWithFeedback,
         reloadMessages,
     } from "$lib/stores/chat.svelte.js";
-    import { getConversations } from "$lib/stores/conversations.svelte.js";
+    import { getConversations, loadConversations } from "$lib/stores/conversations.svelte.js";
     import { getAuth } from "$lib/stores/auth.svelte.js";
     import { getSettingsStore } from "$lib/stores/settings.svelte.js";
     import {
@@ -19,6 +19,7 @@
         ChatMessage,
         ChatInput,
         ThinkingGroup,
+        ForkHere,
     } from "$lib/components/chat/index.js";
     import { ScrollArea } from "$lib/components/ui/scroll-area";
     import Bot from "@lucide/svelte/icons/bot";
@@ -30,6 +31,7 @@
         downloadWorkspaceFile,
         listWorkspaceFiles,
         exportConversation,
+        forkConversation as apiForkConversation,
     } from "$lib/api.js";
     import type { ExportFormat, ExportOptions } from "$lib/api.js";
     import type {
@@ -53,6 +55,8 @@
     import FileType from "@lucide/svelte/icons/file-type";
     import { onMount, untrack } from "svelte";
     import { fade } from "svelte/transition";
+    import { goto } from "$app/navigation";
+    import { resolve } from "$app/paths";
     import { ContextUsageRing } from "$lib/components/ui/context-usage-ring";
     import ArrowUp from "@lucide/svelte/icons/arrow-up";
     import ArrowDown from "@lucide/svelte/icons/arrow-down";
@@ -203,6 +207,9 @@
     let availableModels = $state<ModelInfo[]>([]);
     let selectedModelId = $state(""); // Just the model ID — provider is resolved automatically
     let thinkingOpen = $state<Record<string, boolean>>({}); // item id -> whether thinking is expanded
+
+    /** The entry ID of the message being forked, or null */
+    let forkingEntryId = $state<string | null>(null);
 
     // Shared side panel state: only one panel can be open at a time
     // Initialized from localStorage per conversation (see effect below)
@@ -719,6 +726,36 @@
         void regenWithFeedback(messageId, feedback);
     }
 
+    /**
+     * Fork the conversation before the message with the given entry ID.
+     *
+     * Creates a new conversation containing history from root up to and
+     * including the parent of the specified entry (so custom messages
+     * like fetched sources between the previous and next message are
+     * preserved). Then navigates to the new conversation.
+     *
+     * @param beforeEntryId - The entry ID to fork before
+     * @returns {void}
+     */
+    async function handleFork(beforeEntryId: string) {
+        if (!id || forkingEntryId) return;
+        forkingEntryId = beforeEntryId;
+        try {
+            const result = await apiForkConversation(id, beforeEntryId);
+            // Refresh sidebar to include the new conversation
+            await loadConversations();
+            // Disconnect from current conversation before navigating
+            disconnectStream();
+            // Navigate to the new forked conversation
+            void goto(resolve(`/chat/${result.id}`));
+        } catch (e) {
+            console.error("Failed to fork conversation:", e);
+            chat.setError(e instanceof Error ? e.message : "Failed to fork conversation");
+        } finally {
+            forkingEntryId = null;
+        }
+    }
+
     function handleSearchClick(query: string, results: SearchResultItem[]) {
         searchResultsQuery = query;
         searchResultsData = results;
@@ -1015,14 +1052,10 @@
                             <span>JSON</span>
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
-                        <DropdownMenuCheckboxItem
-                            bind:checked={exportIncludeThinking}
-                        >
+                        <DropdownMenuCheckboxItem bind:checked={exportIncludeThinking}>
                             Include thinking
                         </DropdownMenuCheckboxItem>
-                        <DropdownMenuCheckboxItem
-                            bind:checked={exportIncludeToolCalls}
-                        >
+                        <DropdownMenuCheckboxItem bind:checked={exportIncludeToolCalls}>
                             Include tool calls
                         </DropdownMenuCheckboxItem>
                     </DropdownMenuContent>
@@ -1147,6 +1180,20 @@
                                                     </div>
                                                 </div>
                                             </div>
+                                        {/if}
+
+                                        <!-- Fork-here indicator between messages -->
+                                        {#if i < renderItems.length - 1 && !chat.generating && !chat.navigating}
+                                            {@const nextItem = renderItems[i + 1]}
+                                            {@const beforeEntryId =
+                                                nextItem.type === "thinkingGroup"
+                                                    ? nextItem.messageIds[0]
+                                                    : nextItem.msg.id}
+                                            <ForkHere
+                                                entryId={beforeEntryId}
+                                                onfork={handleFork}
+                                                forking={forkingEntryId === beforeEntryId}
+                                            />
                                         {/if}
                                     {/each}
 

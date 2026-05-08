@@ -240,6 +240,81 @@ export async function createConversation(title?: string, modelId?: string): Prom
 }
 
 /**
+ * Fork a conversation before a specific entry.
+ *
+ * Creates a new conversation whose session contains the history from root
+ * up to and including the parent of the specified entry. This ensures any
+ * custom messages (fetched sources, etc.) between the last displayed message
+ * and the specified entry are also included in the fork.
+ *
+ * Uses the pi-coding-agent SessionManager's createBranchedSession to extract
+ * the path from root to the resolved leaf entry into a new JSONL file.
+ *
+ * @param sourceConversationId - The conversation ID to fork from
+ * @param beforeEntryId - The entry ID to fork before (its parent becomes the leaf)
+ * @returns The new conversation ID
+ */
+export async function forkConversation(
+    sourceConversationId: string,
+    beforeEntryId: string
+): Promise<string> {
+    const db = getDb();
+
+    // Look up the source conversation's session file path and model info
+    const row = db
+        .query(
+            "SELECT session_file_path, title, model_provider, model_id FROM conversations WHERE id = ?"
+        )
+        .get(sourceConversationId) as
+        | { session_file_path: string; title: string; model_provider: string | null; model_id: string | null }
+        | undefined;
+
+    if (!row || !row.session_file_path) {
+        throw new Error(`Conversation ${sourceConversationId} not found`);
+    }
+
+    // createBranchedSession only reads the JSONL file — safe to call
+    // while the in-memory AgentSession is active (append-only file).
+    const sourceManager = SessionManager.open(row.session_file_path, SESSIONS_DIR);
+
+    // Use parent of beforeEntryId as leaf so custom messages
+    // (sources, model changes) between displayed msgs are included.
+    const beforeEntry = sourceManager.getEntry(beforeEntryId);
+    if (!beforeEntry) {
+        throw new Error(
+            `Entry ${beforeEntryId} not found in conversation ${sourceConversationId}`
+        );
+    }
+
+    // beforeEntry.parentId is the leaf — includes all intermediate
+    // entries. No parent means root, which would produce an empty fork.
+    const leafId = beforeEntry.parentId;
+    if (!leafId) {
+        throw new Error(
+            `Cannot fork before root entry ${beforeEntryId} in conversation ${sourceConversationId}`
+        );
+    }
+
+    const forkedSessionPath = sourceManager.createBranchedSession(leafId);
+
+    if (!forkedSessionPath) {
+        throw new Error(
+            `Failed to create branched session from entry ${leafId} in conversation ${sourceConversationId}`
+        );
+    }
+
+    // Create a new conversation DB row pointing to the forked session file
+    const newId = randomUUID();
+    const forkTitle = `${row.title} (fork)`;
+
+    db.prepare(
+        "INSERT INTO conversations (id, title, session_file_path, model_provider, model_id) VALUES (?, ?, ?, ?, ?)"
+    ).run(newId, forkTitle, forkedSessionPath, row.model_provider, row.model_id);
+
+    return newId;
+}
+
+/**
  * Fully destroy a conversation: dispose in-memory session, delete the
  * pi session file, delete the workspace directory (if configured), and remove the DB row.
  * Only called when the user explicitly hits the trash icon.
