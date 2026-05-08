@@ -37,6 +37,8 @@ import { log } from "$lib/server/logger.js";
 
 // --- Constants ---
 
+const IS_LINUX = process.platform === "linux";
+
 const DATA_DIR = resolve(process.cwd(), "data");
 const SESSIONS_DIR = resolve(DATA_DIR, "sessions");
 
@@ -72,6 +74,58 @@ const SANDBOX_DEPS_PACKAGES: Record<string, string> = {
     "defuddle": "^0.18.1",
     "impit": "^0.13.1",
 };
+
+// --- Linux bash config workaround ---
+
+/**
+ * System-level bash config paths on Linux.
+ *
+ * These are always available at fixed paths regardless of the user's HOME.
+ */
+const LINUX_SYSTEM_BASH_CONFIGS: readonly string[] = [
+    "/etc/profile",
+    "/etc/bash.bashrc",
+    "/etc/profile.d",
+];
+
+/**
+ * Basenames of user-level bash config files under $HOME.
+ *
+ * These are joined with HOME at runtime to produce absolute paths.
+ */
+const USER_BASH_CONFIG_BASENAMES: readonly string[] = [
+    ".bashrc",
+    ".bash_profile",
+    ".profile",
+    ".bash_login",
+    ".bash_logout",
+];
+
+/**
+ * Return bash configuration file paths for the current platform.
+ *
+ * On Linux, returns system-level paths (e.g. `/etc/profile`) and user-level
+ * paths under $HOME (e.g. `$HOME/.bashrc`) so the sandboxed child process
+ * can read them directly from the filesystem in read-only mode. This avoids
+ * a race condition in Codex's sandbox runtime where file descriptors passed
+ * by the parent process can become invalid during the policy handoff
+ * (see openai/codex#18337).
+ *
+ * On non-Linux platforms, returns an empty array — macOS uses Seatbelt which
+ * doesn't have this race condition.
+ *
+ * @returns Array of absolute paths to bash config files (Linux only).
+ */
+function linuxBashConfigPaths(): string[] {
+    if (!IS_LINUX) return [];
+
+    const home = process.env.HOME;
+    const userPaths = home
+        ? USER_BASH_CONFIG_BASENAMES.map((name) => resolve(home, name))
+        : [];
+
+    return [...LINUX_SYSTEM_BASH_CONFIGS, ...userPaths];
+}
 
 // --- DB settings keys ---
 
@@ -415,9 +469,9 @@ export async function createSessionSandbox(
 
     const sandbox = Sandbox.create({
         cwd: sessionWorkDir,
-        // Allow reads from the sandbox deps directory and session workspace.
-        // NOT from process.cwd() — sandboxes should not read Vessel's source.
-        allowRead: [SANDBOX_DEPS_DIR, sessionWorkDir, ...(policy.extraReadPaths ?? [])],
+        // Allow reads from sandbox deps dir + session workspace (not Vessel source).
+        // Linux: bash configs read directly to avoid parent-FD race (openai/codex#18337).
+        allowRead: [SANDBOX_DEPS_DIR, sessionWorkDir, ...linuxBashConfigPaths(), ...(policy.extraReadPaths ?? [])],
         // Allow writes only to the session workspace (plus any extra paths)
         allowWrite: [sessionWorkDir, ...(policy.extraWritePaths ?? [])],
         // Network: configured by policy (false, true, or specific domains)
@@ -473,8 +527,9 @@ export async function createFileManagementSandbox(
 
     return Sandbox.create({
         cwd: sessionWorkDir,
-        // Full read/write access to the workspace — user file ops are never restricted
-        allowRead: [sessionWorkDir],
+        // Full read/write access to the workspace — user file ops are never restricted.
+        // Linux: include bash config paths for FD-race workaround (openai/codex#18337).
+        allowRead: [sessionWorkDir, ...linuxBashConfigPaths()],
         allowWrite: [sessionWorkDir],
         // No network needed for file management
         allowNet: false,
