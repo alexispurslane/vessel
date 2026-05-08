@@ -25,6 +25,14 @@ import type {
     LsOperations,
 } from "@mariozechner/pi-coding-agent";
 
+/** Image MIME types that the pi-coding-agent read tool can send to models. */
+const SUPPORTED_IMAGE_MIME_TYPES = new Set([
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+]);
+
 // --- Bash ---
 
 /**
@@ -64,12 +72,13 @@ export function createSandboxedBashOps(sandbox: Sandbox): BashOperations {
 export function createSandboxedReadOps(sandbox: Sandbox): ReadOperations {
     return {
         async readFile(absolutePath: string): Promise<Buffer> {
-            // Use cat inside the sandbox to read the file
-            const output = await sandbox.exec("cat", [absolutePath]).output();
+            // Use base64 inside the sandbox so binary data (images, etc.)
+            // survives the string-based stdout pipe without corruption.
+            const output = await sandbox.exec("base64", [absolutePath]).output();
             if (output.code !== 0) {
                 throw new Error(`Failed to read ${absolutePath}: ${output.stderr}`);
             }
-            return Buffer.from(output.stdout);
+            return Buffer.from(output.stdout, "base64");
         },
         async access(absolutePath: string): Promise<void> {
             // oxlint-disable-next-line secure-coding/no-hardcoded-credentials
@@ -77,6 +86,17 @@ export function createSandboxedReadOps(sandbox: Sandbox): ReadOperations {
             if (result.code !== 0) {
                 throw new Error(`File not readable: ${absolutePath}`);
             }
+        },
+        async detectImageMimeType(absolutePath: string): Promise<string | null> {
+            // Use the file command inside the sandbox to detect MIME type.
+            const output = await sandbox
+                .exec("file", ["--mime-type", "-b", absolutePath])
+                .output();
+            if (output.code !== 0) {
+                return null;
+            }
+            const mime = output.stdout.trim();
+            return SUPPORTED_IMAGE_MIME_TYPES.has(mime) ? mime : null;
         },
     };
 }

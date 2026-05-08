@@ -32,6 +32,7 @@
     } from "$lib/components/ui/tooltip/index.js";
     import type { ChatMessage as ChatMessageType } from "$lib/types.js";
     import type { SearchResultItem } from "$lib/types.js";
+    import type { Tokens } from "marked";
     import { getCodeBlocks } from "$lib/api.js";
     import { langToExt, generateId } from "$lib/utils/code-block.js";
     import { strToU8, zipSync } from "fflate";
@@ -110,6 +111,7 @@
         tr: { base: "border-primary-foreground/15 border-b" },
         th: { base: "px-3 py-2 text-xs font-semibold text-primary-foreground min-w-0" },
         td: { base: "px-3 py-2 text-xs text-primary-foreground min-w-0 break-words" },
+        image: { base: "my-2 mx-auto", image: "max-w-full rounded-lg" },
     };
 
     /** Theme override for assistant messages — constrain widths, use serif font, compact spacing */
@@ -131,6 +133,7 @@
         code: {
             base: "my-2 w-full overflow-hidden rounded-lg border border-border flex flex-col max-w-full",
         },
+        image: { base: "my-2 mx-auto", image: "max-w-full rounded-lg" },
     };
 
     /** Theme override for thinking block — very compact */
@@ -146,7 +149,21 @@
         code: {
             base: "my-1 w-full overflow-hidden rounded border border-border flex flex-col max-w-full text-[0.7rem]",
         },
+        image: { base: "my-1 mx-auto", image: "max-w-full rounded" },
     };
+
+    /**
+     * Sanitize HTML tokens for Streamdown, only rendering safe img tags.
+     * Strips potentially dangerous HTML (script, iframe, etc.) from
+     * AI-generated content while preserving image embeds.
+     *
+     * @param token - The HTML token from marked's lexer
+     * @returns The HTML string to render, or empty string to suppress
+     */
+    function sanitizeHtml(token: Tokens.HTML | Tokens.Tag): string {
+        if (/^<img\s/i.test(token.raw)) return token.raw;
+        return "";
+    }
 
     let thinkingEl: HTMLDivElement | undefined = $state();
     let msgEl: HTMLDivElement | undefined = $state();
@@ -411,6 +428,8 @@
                     content={preprocessedThinking}
                     baseTheme="shadcn"
                     theme={thinkingTheme}
+                    allowedImagePrefixes={["*", "data:"]}
+                    renderHtml={sanitizeHtml}
                     parseIncompleteMarkdown={msg.thinkingStreaming ?? false}
                     components={{
                         math: MathComponent,
@@ -453,6 +472,8 @@
                             content={preprocessedContent}
                             baseTheme="shadcn"
                             theme={userMsgTheme}
+                            allowedImagePrefixes={["*", "data:"]}
+                            renderHtml={sanitizeHtml}
                             parseIncompleteMarkdown={false}
                             components={{
                                 math: MathComponent,
@@ -467,6 +488,8 @@
                             content={preprocessedContent}
                             baseTheme="shadcn"
                             theme={assistantMsgTheme}
+                            allowedImagePrefixes={["*", "data:"]}
+                            renderHtml={sanitizeHtml}
                             parseIncompleteMarkdown={msg.streaming ?? false}
                             components={{
                                 math: MathComponent,

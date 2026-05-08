@@ -58,6 +58,9 @@ export function broadcast(
  * Extract text output from a tool partial result (AgentToolResult).
  * The result has content: (TextContent | ImageContent)[] and details: T
  *
+ * ImageContent blocks are converted to markdown image syntax with data URIs
+ * so that the frontend can render them as embedded images.
+ *
  * @param partialResult - The tool result object to extract text from.
  * @returns Extracted text, or undefined if no text content found.
  */
@@ -66,10 +69,18 @@ export function extractToolOutput(partialResult: unknown): string | undefined {
     const result = partialResult as Record<string, unknown>;
 
     if (Array.isArray(result.content)) {
-        return (result.content as Record<string, unknown>[])
-            .filter((block) => block.type === "text" && typeof block.text === "string")
-            .map((block) => block.text as string)
-            .join("");
+        const parts = (result.content as Record<string, unknown>[])
+            .map((block) => {
+                if (block.type === "text" && typeof block.text === "string") {
+                    return block.text;
+                }
+                if (block.type === "image" && typeof block.data === "string" && typeof block.mimeType === "string") {
+                    return `![image](data:${block.mimeType};base64,${block.data})`;
+                }
+                return null;
+            })
+            .filter((part): part is string => part !== null);
+        return parts.length > 0 ? parts.join("") : undefined;
     }
 
     return undefined;
@@ -77,7 +88,11 @@ export function extractToolOutput(partialResult: unknown): string | undefined {
 
 /**
  * Extract and categorize content blocks from an AssistantMessage content array.
- * Returns text parts, thinking parts, and tool call stubs.
+ * Returns text parts (including image blocks converted to markdown),
+ * thinking parts, and tool call stubs.
+ *
+ * ImageContent blocks are converted to markdown image syntax with data URIs
+ * so that the frontend can render them as embedded images.
  *
  * @param content - The content array from an AssistantMessage.
  * @returns Categorized text, thinking, and tool call parts.
@@ -94,6 +109,8 @@ function extractContentBlocks(content: Record<string, unknown>[]): {
     for (const block of content) {
         if (block.type === "text" && typeof block.text === "string") {
             textParts.push(block.text);
+        } else if (block.type === "image" && typeof block.data === "string" && typeof block.mimeType === "string") {
+            textParts.push(`![image](data:${block.mimeType};base64,${block.data})`);
         } else if (block.type === "thinking" && typeof block.thinking === "string") {
             thinkingParts.push(block.thinking);
         } else if (block.type === "toolCall") {

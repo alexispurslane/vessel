@@ -13,6 +13,7 @@
     import ChevronDown from "@lucide/svelte/icons/chevron-down";
     import Trash2 from "@lucide/svelte/icons/trash-2";
     import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
+    import type { Tokens } from "marked";
     import ToolCall from "$lib/components/chat/tool-call.svelte";
     import type { ThinkingGroup } from "$lib/types.js";
 
@@ -58,7 +59,19 @@
         codespan: { base: "bg-muted/50 px-1 py-0.5 rounded text-[0.8rem]" },
         blockquote: { base: "border-l-2 border-muted pl-3 my-1" },
         hr: { base: "border-border my-2" },
+        image: { base: "my-1 mx-auto", image: "max-w-full rounded" },
     };
+
+    /**
+     * Sanitize HTML tokens for Streamdown, only rendering safe img tags.
+     *
+     * @param token - The HTML token from marked's lexer
+     * @returns The HTML string to render, or empty string to suppress
+     */
+    function sanitizeHtml(token: Tokens.HTML | Tokens.Tag): string {
+        if (/^<img\s/i.test(token.raw)) return token.raw;
+        return "";
+    }
 
     let thinkingEl: HTMLDivElement | undefined = $state();
     let confirmDelete = $state(false);
@@ -157,6 +170,8 @@
                             content={preprocessMathMarkdown(step.thinking)}
                             baseTheme="shadcn"
                             theme={thinkingTheme}
+                            allowedImagePrefixes={["*", "data:"]}
+                            renderHtml={sanitizeHtml}
                             parseIncompleteMarkdown={step.streaming ?? false}
                             components={{
                                 math: MathComponent,
