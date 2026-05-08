@@ -20,6 +20,7 @@
         ChatInput,
         ThinkingGroup,
         ForkHere,
+        FileDropZone,
     } from "$lib/components/chat/index.js";
     import { ScrollArea } from "$lib/components/ui/scroll-area";
     import Bot from "@lucide/svelte/icons/bot";
@@ -1136,45 +1137,150 @@
     {/if}
 
     <!-- Content area below the top bar -->
-    <div class="flex-1 min-w-0 overflow-hidden">
-        <ResizablePaneGroup
-            direction="horizontal"
-            class="h-full"
-            autoSaveId={id ? `chat-panes-${id}` : undefined}
-        >
-            <!-- Main chat area -->
-            <ResizablePane defaultSize={sidePanel ? 75 : 100} minSize={50}>
-                <div class="h-full flex flex-col overflow-hidden max-w-[100ch] mx-auto">
-                    <!-- Message area (hidden when input is fullscreen) -->
-                    {#if !inputFullscreen}
-                        <ScrollArea
-                            class="flex-1 min-h-0 overflow-hidden"
-                            bind:viewportRef={viewportEl}
-                        >
-                            <div class="flex flex-col gap-6 p-6">
-                                {#if displayMessages.length === 0}
-                                    <div class="flex items-center justify-center py-24">
-                                        <div
-                                            class="flex flex-col items-center gap-4 text-muted-foreground"
-                                        >
-                                            <div class="rounded-full bg-muted p-4">
-                                                <Bot class="size-8 opacity-60" />
-                                            </div>
-                                            <div class="text-center">
-                                                <p class="text-sm font-medium">
-                                                    Start a conversation
-                                                </p>
-                                                <p class="text-xs mt-1 opacity-70">
-                                                    Send a message to begin chatting with the AI
-                                                    assistant.
-                                                </p>
+    <FileDropZone bind:pendingFiles>
+        <div class="flex-1 min-w-0 overflow-hidden">
+            <ResizablePaneGroup
+                direction="horizontal"
+                class="h-full"
+                autoSaveId={id ? `chat-panes-${id}` : undefined}
+            >
+                <!-- Main chat area -->
+                <ResizablePane defaultSize={sidePanel ? 75 : 100} minSize={50}>
+                    <div class="h-full flex flex-col overflow-hidden max-w-[100ch] mx-auto">
+                        <!-- Message area (hidden when input is fullscreen) -->
+                        {#if !inputFullscreen}
+                            <ScrollArea
+                                class="flex-1 min-h-0 overflow-hidden"
+                                bind:viewportRef={viewportEl}
+                            >
+                                <div class="flex flex-col gap-6 p-6">
+                                    {#if displayMessages.length === 0}
+                                        <div class="flex items-center justify-center py-24">
+                                            <div
+                                                class="flex flex-col items-center gap-4 text-muted-foreground"
+                                            >
+                                                <div class="rounded-full bg-muted p-4">
+                                                    <Bot class="size-8 opacity-60" />
+                                                </div>
+                                                <div class="text-center">
+                                                    <p class="text-sm font-medium">
+                                                        Start a conversation
+                                                    </p>
+                                                    <p class="text-xs mt-1 opacity-70">
+                                                        Send a message to begin chatting with the AI
+                                                        assistant.
+                                                    </p>
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                {:else}
-                                    {#each renderItems as item, i (item.type === "thinkingGroup" ? item.id : item.msg.id)}
-                                        {#if item.type === "thinkingGroup"}
-                                            <!-- Grouped thinking + tool calls -->
+                                    {:else}
+                                        {#each renderItems as item, i (item.type === "thinkingGroup" ? item.id : item.msg.id)}
+                                            {#if item.type === "thinkingGroup"}
+                                                <!-- Grouped thinking + tool calls -->
+                                                <div class="flex w-full justify-start">
+                                                    <div
+                                                        class="flex gap-3 w-[min(75%,65ch)] font-serif"
+                                                    >
+                                                        <ChatAvatar
+                                                            role="assistant"
+                                                            isConsecutive={false}
+                                                            model={item.model}
+                                                            modelProvider={item.modelProvider}
+                                                            {getModelDisplayName}
+                                                            hasContent={true}
+                                                        />
+                                                        <div class="min-w-0 flex-1">
+                                                            <ThinkingGroup
+                                                                group={item}
+                                                                thinkingIsOpen={thinkingOpen[
+                                                                    item.id
+                                                                ]}
+                                                                onthinkingtoggle={(open: boolean) =>
+                                                                    (thinkingOpen[item.id] = open)}
+                                                                ondelete={handleDeleteMessage}
+                                                                onregenerate={handleEditMessage}
+                                                                navigating={chat.navigating}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            {:else}
+                                                {@const msg = item.msg as ChatMessageType}
+                                                {@const nextItem = renderItems[i + 1]}
+                                                {@const isLastConsecutive =
+                                                    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime: `renderItems[i+1]` can be undefined for the last item
+                                                    !nextItem ||
+                                                    nextItem.type !== "message" ||
+                                                    nextItem.msg.role !== msg.role}
+                                                <div
+                                                    class="flex w-full {msg.role === 'user'
+                                                        ? 'justify-end'
+                                                        : 'justify-start'} {!isLastConsecutive
+                                                        ? '-mt-4'
+                                                        : ''}"
+                                                >
+                                                    <div
+                                                        class="flex gap-3 w-max-[65ch] font-serif {msg.role ===
+                                                        'user'
+                                                            ? 'flex-row-reverse items-end'
+                                                            : ''}"
+                                                    >
+                                                        <!-- Avatar -->
+                                                        <ChatAvatar
+                                                            role={msg.role}
+                                                            isConsecutive={!isLastConsecutive}
+                                                            username={auth.username}
+                                                            model={msg.model}
+                                                            modelProvider={msg.modelProvider}
+                                                            {getModelDisplayName}
+                                                            hasContent={!!(
+                                                                msg.content || msg.thinking
+                                                            )}
+                                                        />
+
+                                                        <!-- Message bubble and tool calls -->
+                                                        <div class="min-w-0 flex-1">
+                                                            <ChatMessage
+                                                                {msg}
+                                                                thinkingIsOpen={thinkingOpen[
+                                                                    msg.id
+                                                                ]}
+                                                                onthinkingtoggle={(open: boolean) =>
+                                                                    (thinkingOpen[msg.id] = open)}
+                                                                scrollContainer={viewportEl}
+                                                                ondelete={handleDeleteMessage}
+                                                                onedit={handleEditMessage}
+                                                                oneditassistant={handleEditAssistantMessage}
+                                                                onregenfeedback={handleRegenWithFeedback}
+                                                                navigating={chat.navigating}
+                                                                onsearchclick={handleSearchClick}
+                                                                onpageclick={handlePageClick}
+                                                                conversationId={id}
+                                                                models={availableModels}
+                                                                {selectedModelId}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            {/if}
+
+                                            <!-- Fork-here indicator between messages -->
+                                            {#if i < renderItems.length - 1 && !chat.generating && !chat.navigating}
+                                                {@const nextItem = renderItems[i + 1]}
+                                                {@const beforeEntryId =
+                                                    nextItem.type === "thinkingGroup"
+                                                        ? nextItem.messageIds[0]
+                                                        : nextItem.msg.id}
+                                                <ForkHere
+                                                    entryId={beforeEntryId}
+                                                    onfork={handleFork}
+                                                    forking={forkingEntryId === beforeEntryId}
+                                                />
+                                            {/if}
+                                        {/each}
+
+                                        <!-- Skeleton placeholder while waiting for model to start responding -->
+                                        {#if waitingForResponse}
                                             <div class="flex w-full justify-start">
                                                 <div
                                                     class="flex gap-3 w-[min(75%,65ch)] font-serif"
@@ -1182,269 +1288,176 @@
                                                     <ChatAvatar
                                                         role="assistant"
                                                         isConsecutive={false}
-                                                        model={item.model}
-                                                        modelProvider={item.modelProvider}
+                                                        model={selectedModelId || undefined}
+                                                        modelProvider={undefined}
                                                         {getModelDisplayName}
-                                                        hasContent={true}
+                                                        hasContent={false}
                                                     />
-                                                    <div class="min-w-0 flex-1">
-                                                        <ThinkingGroup
-                                                            group={item}
-                                                            thinkingIsOpen={thinkingOpen[item.id]}
-                                                            onthinkingtoggle={(open: boolean) =>
-                                                                (thinkingOpen[item.id] = open)}
-                                                            ondelete={handleDeleteMessage}
-                                                            onregenerate={handleEditMessage}
-                                                            navigating={chat.navigating}
-                                                        />
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        {:else}
-                                            {@const msg = item.msg as ChatMessageType}
-                                            {@const nextItem = renderItems[i + 1]}
-                                            {@const isLastConsecutive =
-                                                // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime: `renderItems[i+1]` can be undefined for the last item
-                                                !nextItem ||
-                                                nextItem.type !== "message" ||
-                                                nextItem.msg.role !== msg.role}
-                                            <div
-                                                class="flex w-full {msg.role === 'user'
-                                                    ? 'justify-end'
-                                                    : 'justify-start'} {!isLastConsecutive
-                                                    ? '-mt-4'
-                                                    : ''}"
-                                            >
-                                                <div
-                                                    class="flex gap-3 w-max-[65ch] font-serif {msg.role ===
-                                                    'user'
-                                                        ? 'flex-row-reverse items-end'
-                                                        : ''}"
-                                                >
-                                                    <!-- Avatar -->
-                                                    <ChatAvatar
-                                                        role={msg.role}
-                                                        isConsecutive={!isLastConsecutive}
-                                                        username={auth.username}
-                                                        model={msg.model}
-                                                        modelProvider={msg.modelProvider}
-                                                        {getModelDisplayName}
-                                                        hasContent={!!(msg.content || msg.thinking)}
-                                                    />
-
-                                                    <!-- Message bubble and tool calls -->
-                                                    <div class="min-w-0 flex-1">
-                                                        <ChatMessage
-                                                            {msg}
-                                                            thinkingIsOpen={thinkingOpen[msg.id]}
-                                                            onthinkingtoggle={(open: boolean) =>
-                                                                (thinkingOpen[msg.id] = open)}
-                                                            scrollContainer={viewportEl}
-                                                            ondelete={handleDeleteMessage}
-                                                            onedit={handleEditMessage}
-                                                            oneditassistant={handleEditAssistantMessage}
-                                                            onregenfeedback={handleRegenWithFeedback}
-                                                            navigating={chat.navigating}
-                                                            onsearchclick={handleSearchClick}
-                                                            onpageclick={handlePageClick}
-                                                            conversationId={id}
-                                                            models={availableModels}
-                                                            {selectedModelId}
-                                                        />
+                                                    <div
+                                                        class="min-w-0 flex-1 flex flex-col gap-2 py-1"
+                                                    >
+                                                        <Skeleton class="h-4 w-3/4" />
+                                                        <Skeleton class="h-4 w-1/2" />
                                                     </div>
                                                 </div>
                                             </div>
                                         {/if}
 
-                                        <!-- Fork-here indicator between messages -->
-                                        {#if i < renderItems.length - 1 && !chat.generating && !chat.navigating}
-                                            {@const nextItem = renderItems[i + 1]}
-                                            {@const beforeEntryId =
-                                                nextItem.type === "thinkingGroup"
-                                                    ? nextItem.messageIds[0]
-                                                    : nextItem.msg.id}
-                                            <ForkHere
-                                                entryId={beforeEntryId}
-                                                onfork={handleFork}
-                                                forking={forkingEntryId === beforeEntryId}
-                                            />
-                                        {/if}
-                                    {/each}
-
-                                    <!-- Skeleton placeholder while waiting for model to start responding -->
-                                    {#if waitingForResponse}
-                                        <div class="flex w-full justify-start">
-                                            <div class="flex gap-3 w-[min(75%,65ch)] font-serif">
-                                                <ChatAvatar
-                                                    role="assistant"
-                                                    isConsecutive={false}
-                                                    model={selectedModelId || undefined}
-                                                    modelProvider={undefined}
-                                                    {getModelDisplayName}
-                                                    hasContent={false}
-                                                />
+                                        <!-- File upload progress -->
+                                        {#if uploadProgress}
+                                            <div class="flex w-full justify-end">
                                                 <div
-                                                    class="min-w-0 flex-1 flex flex-col gap-2 py-1"
-                                                >
-                                                    <Skeleton class="h-4 w-3/4" />
-                                                    <Skeleton class="h-4 w-1/2" />
-                                                </div>
-                                            </div>
-                                        </div>
-                                    {/if}
-
-                                    <!-- File upload progress -->
-                                    {#if uploadProgress}
-                                        <div class="flex w-full justify-end">
-                                            <div class="w-[min(75%,65ch)] flex flex-col gap-1.5">
-                                                <div
-                                                    class="flex items-center gap-2 text-xs text-muted-foreground"
-                                                >
-                                                    <span
-                                                        >Uploading {uploadProgress.currentFile}</span
-                                                    >
-                                                    <span class="text-muted-foreground/60"
-                                                        >({uploadProgress.fileIndex +
-                                                            1}/{uploadProgress.totalFiles})</span
-                                                    >
-                                                </div>
-                                                <div
-                                                    class="h-1.5 rounded-full bg-muted overflow-hidden"
+                                                    class="w-[min(75%,65ch)] flex flex-col gap-1.5"
                                                 >
                                                     <div
-                                                        class="h-full rounded-full bg-primary transition-[width] duration-200"
-                                                        style="width: {uploadProgress.fraction *
-                                                            100}%"
-                                                    ></div>
+                                                        class="flex items-center gap-2 text-xs text-muted-foreground"
+                                                    >
+                                                        <span
+                                                            >Uploading {uploadProgress.currentFile}</span
+                                                        >
+                                                        <span class="text-muted-foreground/60"
+                                                            >({uploadProgress.fileIndex +
+                                                                1}/{uploadProgress.totalFiles})</span
+                                                        >
+                                                    </div>
+                                                    <div
+                                                        class="h-1.5 rounded-full bg-muted overflow-hidden"
+                                                    >
+                                                        <div
+                                                            class="h-full rounded-full bg-primary transition-[width] duration-200"
+                                                            style="width: {uploadProgress.fraction *
+                                                                100}%"
+                                                        ></div>
+                                                    </div>
                                                 </div>
                                             </div>
-                                        </div>
+                                        {/if}
                                     {/if}
+                                </div>
+                            </ScrollArea>
+                        {/if}
+
+                        <!-- Input area -->
+                        <div
+                            class="px-4 py-3 bg-background {inputFullscreen
+                                ? 'flex-1 min-h-0 pt-12 flex flex-col'
+                                : 'shrink-0'}"
+                        >
+                            {#if showDraftBanner}
+                                <div
+                                    class="flex items-center gap-2 mb-2 px-3 py-1.5 rounded-md bg-muted/50 text-xs text-muted-foreground border border-muted/50"
+                                    transition:fade={{ duration: 150 }}
+                                >
+                                    <Undo2 class="size-3 shrink-0" />
+                                    <span class="flex-1">Restored unsent message</span>
+                                    <button
+                                        class="hover:text-foreground transition-colors cursor-pointer"
+                                        onclick={clearDraft}
+                                        aria-label="Clear draft"
+                                    >
+                                        Clear
+                                    </button>
+                                    <button
+                                        class="hover:text-foreground transition-colors cursor-pointer"
+                                        onclick={dismissDraftBanner}
+                                        aria-label="Dismiss"
+                                    >
+                                        <X class="size-3" />
+                                    </button>
+                                </div>
+                            {/if}
+                            <ChatInput
+                                bind:value={inputText}
+                                bind:pendingFiles
+                                {sandboxFiles}
+                                placeholder={chat.connected ? "Type a message..." : "Connecting..."}
+                                disabled={!chat.connected || uploadProgress !== null}
+                                generating={chat.generating}
+                                connected={chat.connected}
+                                models={availableModels}
+                                bind:selectedModelId
+                                {conversationDefaultModelId}
+                                globalDefaultModelId={settingsStore.defaultModel}
+                                onsend={handleSend}
+                                onabort={handleAbort}
+                                onremovesandboxfile={handleRemoveSandboxFile}
+                                ondownloadsandboxfile={handleDownloadSandboxFile}
+                                hasPendingStatus={pendingStatusUpdates.length > 0}
+                                onsetconversationdefault={handleSetConversationDefault}
+                                onswitchtoglobaldefault={handleSwitchToGlobalDefault}
+                            />
+                            <!-- Connection status / error -->
+                            <div class="flex items-center gap-1.5 mt-1.5 min-h-4">
+                                {#if chat.error}
+                                    <p class="text-xs text-destructive">{chat.error}</p>
+                                {:else if !chat.connected}
+                                    <span
+                                        class="flex items-center gap-1.5 text-xs text-muted-foreground"
+                                    >
+                                        <span
+                                            class="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-pulse"
+                                        ></span>
+                                        Connecting...
+                                    </span>
                                 {/if}
                             </div>
-                        </ScrollArea>
-                    {/if}
+                        </div>
+                    </div></ResizablePane
+                >
 
-                    <!-- Input area -->
-                    <div
-                        class="px-4 py-3 bg-background {inputFullscreen
-                            ? 'flex-1 min-h-0 pt-12 flex flex-col'
-                            : 'shrink-0'}"
-                    >
-                        {#if showDraftBanner}
-                            <div
-                                class="flex items-center gap-2 mb-2 px-3 py-1.5 rounded-md bg-muted/50 text-xs text-muted-foreground border border-muted/50"
-                                transition:fade={{ duration: 150 }}
-                            >
-                                <Undo2 class="size-3 shrink-0" />
-                                <span class="flex-1">Restored unsent message</span>
-                                <button
-                                    class="hover:text-foreground transition-colors cursor-pointer"
-                                    onclick={clearDraft}
-                                    aria-label="Clear draft"
-                                >
-                                    Clear
-                                </button>
-                                <button
-                                    class="hover:text-foreground transition-colors cursor-pointer"
-                                    onclick={dismissDraftBanner}
-                                    aria-label="Dismiss"
-                                >
-                                    <X class="size-3" />
-                                </button>
-                            </div>
-                        {/if}
-                        <ChatInput
-                            bind:value={inputText}
-                            bind:pendingFiles
-                            {sandboxFiles}
-                            placeholder={chat.connected ? "Type a message..." : "Connecting..."}
-                            disabled={!chat.connected || uploadProgress !== null}
-                            generating={chat.generating}
-                            connected={chat.connected}
-                            models={availableModels}
-                            bind:selectedModelId
-                            {conversationDefaultModelId}
-                            globalDefaultModelId={settingsStore.defaultModel}
-                            onsend={handleSend}
-                            onabort={handleAbort}
-                            onremovesandboxfile={handleRemoveSandboxFile}
-                            ondownloadsandboxfile={handleDownloadSandboxFile}
-                            hasPendingStatus={pendingStatusUpdates.length > 0}
-                            onsetconversationdefault={handleSetConversationDefault}
-                            onswitchtoglobaldefault={handleSwitchToGlobalDefault}
-                        />
-                        <!-- Connection status / error -->
-                        <div class="flex items-center gap-1.5 mt-1.5 min-h-4">
-                            {#if chat.error}
-                                <p class="text-xs text-destructive">{chat.error}</p>
-                            {:else if !chat.connected}
-                                <span
-                                    class="flex items-center gap-1.5 text-xs text-muted-foreground"
-                                >
-                                    <span
-                                        class="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-pulse"
-                                    ></span>
-                                    Connecting...
-                                </span>
+                <!-- Resizable side panel -->
+                {#if sidePanel && id}
+                    <ResizableHandle withHandle />
+                    <ResizablePane defaultSize={25} minSize={15} maxSize={50}>
+                        <div class="h-full bg-background flex flex-col">
+                            {#if sidePanel === "security"}
+                                <ConversationSecurityPanel conversationId={id} />
+                            {:else if sidePanel === "history"}
+                                <MessageDag
+                                    nodes={dagNodes}
+                                    leafId={dagLeafId}
+                                    onnavigateto={handleDagNavigate}
+                                    navigating={chat.navigating}
+                                />
+                            {:else if sidePanel === "agent"}
+                                <AgentInfoPanel conversationId={id} />
                             {/if}
                         </div>
-                    </div>
-                </div></ResizablePane
-            >
+                    </ResizablePane>
+                {/if}
+            </ResizablePaneGroup>
 
-            <!-- Resizable side panel -->
-            {#if sidePanel && id}
-                <ResizableHandle withHandle />
-                <ResizablePane defaultSize={25} minSize={15} maxSize={50}>
-                    <div class="h-full bg-background flex flex-col">
-                        {#if sidePanel === "security"}
-                            <ConversationSecurityPanel conversationId={id} />
-                        {:else if sidePanel === "history"}
-                            <MessageDag
-                                nodes={dagNodes}
-                                leafId={dagLeafId}
-                                onnavigateto={handleDagNavigate}
-                                navigating={chat.navigating}
-                            />
-                        {:else if sidePanel === "agent"}
-                            <AgentInfoPanel conversationId={id} />
-                        {/if}
-                    </div>
-                </ResizablePane>
+            <!-- Non-resizable overlay panels (search results, fetched pages) -->
+            {#if searchResultsOpen}
+                <div
+                    class="absolute right-0 top-0 bottom-0 w-96 border-l bg-background flex flex-col shrink-0 z-10"
+                >
+                    <SearchResultsPanel
+                        query={searchResultsQuery}
+                        results={searchResultsData}
+                        onclose={() => {
+                            searchResultsOpen = false;
+                        }}
+                        onresultclick={(url: string, title: string, content: string) => {
+                            handlePageClick(url, title, content);
+                        }}
+                    />
+                </div>
             {/if}
-        </ResizablePaneGroup>
-
-        <!-- Non-resizable overlay panels (search results, fetched pages) -->
-        {#if searchResultsOpen}
-            <div
-                class="absolute right-0 top-0 bottom-0 w-96 border-l bg-background flex flex-col shrink-0 z-10"
-            >
-                <SearchResultsPanel
-                    query={searchResultsQuery}
-                    results={searchResultsData}
-                    onclose={() => {
-                        searchResultsOpen = false;
-                    }}
-                    onresultclick={(url: string, title: string, content: string) => {
-                        handlePageClick(url, title, content);
-                    }}
-                />
-            </div>
-        {/if}
-        {#if fetchedPageOpen}
-            <div
-                class="absolute right-0 top-0 bottom-0 w-2xl border-l bg-background flex flex-col shrink-0 z-10"
-            >
-                <FetchedPagePanel
-                    url={fetchedPageUrl}
-                    title={fetchedPageTitle}
-                    content={fetchedPageContent}
-                    onclose={() => {
-                        fetchedPageOpen = false;
-                    }}
-                />
-            </div>
-        {/if}
-    </div>
+            {#if fetchedPageOpen}
+                <div
+                    class="absolute right-0 top-0 bottom-0 w-2xl border-l bg-background flex flex-col shrink-0 z-10"
+                >
+                    <FetchedPagePanel
+                        url={fetchedPageUrl}
+                        title={fetchedPageTitle}
+                        content={fetchedPageContent}
+                        onclose={() => {
+                            fetchedPageOpen = false;
+                        }}
+                    />
+                </div>
+            {/if}
+        </div>
+    </FileDropZone>
 </div>

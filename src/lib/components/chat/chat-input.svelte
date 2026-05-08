@@ -254,72 +254,6 @@
             !disabled &&
             (value.trim().length > 0 || pendingFiles.length > 0 || hasPendingStatus)
     );
-
-    // Derive accepted file types from the selected model's input modalities.
-    // Maps modalities to MIME type / extension groups for the <input accept> attribute.
-    let acceptedFileTypes = $derived.by(() => {
-        const selectedModel = models.find((m) => m.id === selectedModelId);
-        const modalities = new Set(selectedModel?.input ?? ["text"]);
-
-        const types: string[] = [];
-
-        if (modalities.has("text")) {
-            // Common text-based file types the agent can read in its sandbox
-            types.push(
-                ".txt",
-                ".md",
-                ".csv",
-                ".json",
-                ".xml",
-                ".yaml",
-                ".yml",
-                ".html",
-                ".css",
-                ".js",
-                ".ts",
-                ".py",
-                ".rb",
-                ".go",
-                ".rs",
-                ".java",
-                ".c",
-                ".cpp",
-                ".h",
-                ".hpp",
-                ".sh",
-                ".bash",
-                ".toml",
-                ".ini",
-                ".cfg",
-                ".conf",
-                ".log",
-                ".env",
-                ".sql",
-                ".graphql",
-                ".proto",
-                ".diff",
-                ".patch",
-                ".tex",
-                ".rst",
-                ".org",
-                ".adoc",
-                "text/*"
-            );
-        }
-
-        if (modalities.has("image")) {
-            // All standard image types
-            types.push("image/*");
-        }
-
-        if (modalities.has("video")) {
-            // All standard video types
-            types.push("video/*");
-        }
-
-        // If no modalities matched (shouldn't happen), allow anything
-        return types.length > 0 ? types.join(",") : undefined;
-    });
 </script>
 
 <!-- Hidden file input for attaching files -->
@@ -328,7 +262,6 @@
     type="file"
     multiple
     class="hidden"
-    accept={acceptedFileTypes}
     onchange={handleFileInputChange}
 />
 
