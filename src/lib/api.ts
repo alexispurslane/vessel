@@ -943,3 +943,38 @@ export async function fsComplete(partial: string, type?: "file" | "directory" | 
         body: JSON.stringify({ partial, type }),
     });
 }
+
+/** Supported export formats */
+export type ExportFormat = "pdf" | "markdown" | "json";
+
+/** Options controlling what content is included in an export. */
+export interface ExportOptions {
+    /** Whether to include thinking/reasoning content from assistant messages */
+    includeThinking?: boolean;
+    /** Whether to include tool call details */
+    includeToolCalls?: boolean;
+}
+
+/**
+ * Trigger a download of a conversation in the specified format.
+ *
+ * Creates a temporary anchor element pointing to the server-side
+ * export endpoint and clicks it, causing the browser to download
+ * the file. The anchor is removed immediately after.
+ *
+ * @param conversationId - The conversation to export
+ * @param format - The export format: "pdf", "markdown", or "json"
+ * @param options - Export content options (thinking, tool calls)
+ */
+export function exportConversation(conversationId: string, format: ExportFormat, options: ExportOptions = {}): void {
+    const params = new URLSearchParams({ format });
+    if (options.includeThinking) params.set("includeThinking", "true");
+    if (options.includeToolCalls) params.set("includeToolCalls", "true");
+    const url = `/api/sessions/${conversationId}/export?${params.toString()}`;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}

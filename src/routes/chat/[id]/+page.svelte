@@ -29,7 +29,9 @@
         deleteWorkspaceFile,
         downloadWorkspaceFile,
         listWorkspaceFiles,
+        exportConversation,
     } from "$lib/api.js";
+    import type { ExportFormat, ExportOptions } from "$lib/api.js";
     import type {
         ChatMessage as ChatMessageType,
         ModelInfo,
@@ -46,6 +48,9 @@
     import GitBranch from "@lucide/svelte/icons/git-branch";
     import Shield from "@lucide/svelte/icons/shield";
     import FileText from "@lucide/svelte/icons/file-text";
+    import Download from "@lucide/svelte/icons/download";
+    import FileJson from "@lucide/svelte/icons/file-json";
+    import FileType from "@lucide/svelte/icons/file-type";
     import { onMount, untrack } from "svelte";
     import { fade } from "svelte/transition";
     import { ContextUsageRing } from "$lib/components/ui/context-usage-ring";
@@ -59,6 +64,14 @@
         TooltipProvider,
         TooltipTrigger,
     } from "$lib/components/ui/tooltip";
+    import {
+        DropdownMenu,
+        DropdownMenuCheckboxItem,
+        DropdownMenuContent,
+        DropdownMenuItem,
+        DropdownMenuSeparator,
+        DropdownMenuTrigger,
+    } from "$lib/components/ui/dropdown-menu/index.js";
     import { Skeleton } from "$lib/components/ui/skeleton";
     import ConversationSecurityPanel from "$lib/components/conversation-settings/ConversationSecurityPanel.svelte";
     import AgentInfoPanel from "$lib/components/conversation-settings/AgentInfoPanel.svelte";
@@ -719,6 +732,24 @@
         fetchedPageOpen = true;
     }
 
+    /** Export option toggles — persisted across dropdown opens. */
+    let exportIncludeThinking = $state(false);
+    let exportIncludeToolCalls = $state(false);
+
+    /**
+     * Handle exporting the conversation in the given format.
+     *
+     * @param format - The export format: "pdf", "markdown", or "json"
+     */
+    function handleExport(format: ExportFormat) {
+        if (!id) return;
+        const options: ExportOptions = {
+            includeThinking: exportIncludeThinking,
+            includeToolCalls: exportIncludeToolCalls,
+        };
+        exportConversation(id, format, options);
+    }
+
     async function toggleDag() {
         if (sidePanel === "history") {
             sidePanel = null;
@@ -943,6 +974,59 @@
                         <TooltipContent>Agent configuration</TooltipContent>
                     </Tooltip>
                 </TooltipProvider>
+                <DropdownMenu>
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger>
+                                {#snippet child({ props })}
+                                    <DropdownMenuTrigger
+                                        {...props}
+                                        class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
+                                        aria-label="Export conversation"
+                                    >
+                                        <Download class="size-3" />
+                                        <span>Export</span>
+                                    </DropdownMenuTrigger>
+                                {/snippet}
+                            </TooltipTrigger>
+                            <TooltipContent>Export conversation</TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                    <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                            onclick={() => handleExport("pdf")}
+                            class="flex items-center gap-2"
+                        >
+                            <FileType class="size-4" />
+                            <span>PDF</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                            onclick={() => handleExport("markdown")}
+                            class="flex items-center gap-2"
+                        >
+                            <FileText class="size-4" />
+                            <span>Markdown</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                            onclick={() => handleExport("json")}
+                            class="flex items-center gap-2"
+                        >
+                            <FileJson class="size-4" />
+                            <span>JSON</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuCheckboxItem
+                            bind:checked={exportIncludeThinking}
+                        >
+                            Include thinking
+                        </DropdownMenuCheckboxItem>
+                        <DropdownMenuCheckboxItem
+                            bind:checked={exportIncludeToolCalls}
+                        >
+                            Include tool calls
+                        </DropdownMenuCheckboxItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
             </div>
         </div>
     {/if}
