@@ -40,6 +40,7 @@
     import Plus from "@lucide/svelte/icons/plus";
     import X from "@lucide/svelte/icons/x";
     import FileIcon from "@lucide/svelte/icons/file";
+    import ImageIcon from "@lucide/svelte/icons/image";
     import type { ModelInfo } from "$lib/types.js";
 
     interface PendingFile {
@@ -147,12 +148,49 @@
         }
     }
 
+    /**
+     * Handle native paste events on the textarea.
+     * If the clipboard contains image data, the image is captured as a
+     * File and added to pendingFiles.
+     * Text content from the same paste is also inserted so nothing is lost.
+     * @param e - The native clipboard paste event
+     */
+    function handleTextareaPaste(e: ClipboardEvent) {
+        if (!e.clipboardData) return;
+
+        const imageItems = [...e.clipboardData.items].filter((item) =>
+            item.type.startsWith("image/")
+        );
+
+        if (imageItems.length > 0) {
+            e.preventDefault();
+
+            // Capture image files into pendingFiles
+            for (const item of imageItems) {
+                const file = item.getAsFile();
+                if (!file) continue;
+                pendingFiles = [
+                    ...pendingFiles,
+                    {
+                        file,
+                        id: `pasted-image-${String(Date.now())}-${crypto.randomUUID().slice(0, 8)}`,
+                    },
+                ];
+            }
+
+            // If there is also plain text in the clipboard, insert it manually
+            // so mixed text+image pastes don't lose the text portion.
+            const text = e.clipboardData.getData("text/plain");
+            if (text) {
+                document.execCommand("insertText", false, text);
+            }
+        }
+    }
+
     async function handlePaste() {
         try {
             const text = await navigator.clipboard.readText();
             if (text) {
-                // document.execCommand('insertText') is deprecated but the only
-                // reliable way to insert text at the cursor in a contentEditable.
                 document.execCommand("insertText", false, text);
             }
         } catch {
@@ -306,7 +344,11 @@
                 <div
                     class="flex items-center gap-1.5 rounded-md border border-primary/40 bg-background px-2 py-1 text-xs text-foreground max-w-50"
                 >
-                    <FileIcon class="size-3 shrink-0" />
+                    {#if pf.file.type.startsWith("image/")}
+                        <ImageIcon class="size-3 shrink-0" />
+                    {:else}
+                        <FileIcon class="size-3 shrink-0" />
+                    {/if}
                     <span class="truncate">{pf.file.name}</span>
                     <span class="shrink-0 text-muted-foreground/60"
                         >({formatFileSize(pf.file.size)})</span
@@ -448,6 +490,7 @@
                     class="border-0 bg-transparent dark:bg-transparent focus-visible:ring-0 resize-none py-1 w-full overflow-hidden min-h-0 max-h-50"
                     onkeydown={handleKeydown}
                     oninput={adjustTextareaHeight}
+                    onpaste={handleTextareaPaste}
                     {disabled}
                 />
             </ContextMenuTrigger>
