@@ -71,6 +71,7 @@
     import { getAuth, doLogout } from "$lib/stores/auth.svelte.js";
     import ConversationItem from "./conversation-item.svelte";
     import { onMount, onDestroy } from "svelte";
+    import { SHORTCUT_EVENT_TYPE, type ShortcutEventDetail } from "$lib/utils/keyboard.js";
 
     let { currentPath }: { currentPath: string } = $props();
 
@@ -112,6 +113,82 @@
     let pinnedConvs = $derived(convs.activeConvs.filter((c) => c.pinned));
     let recentConvs = $derived(convs.activeConvs.filter((c) => !c.pinned));
     let archivedConvs = $derived(convs.archivedConvs);
+
+    // --- Arrow-key navigation state ---
+    let focusedConvId: string | null = $state(null);
+
+    /** Combined list of navigable conversation IDs (matches visual order: pinned → recent → archived). */
+    let navigableIds = $derived.by(() => {
+        const ids: string[] = [];
+        for (const c of pinnedConvs) ids.push(c.id);
+        for (const c of recentConvs) ids.push(c.id);
+        for (const c of archivedConvs) ids.push(c.id);
+        return ids;
+    });
+
+    /**
+     * Move the focused conversation index in the given direction.
+     * @param direction - 1 for down, -1 for up
+     */
+    function moveFocus(direction: 1 | -1) {
+        if (navigableIds.length === 0) return;
+        if (!focusedConvId) {
+            focusedConvId =
+                direction === 1 ? navigableIds[0]! : navigableIds[navigableIds.length - 1]!;
+            return;
+        }
+        const idx = navigableIds.indexOf(focusedConvId);
+        if (idx === -1) {
+            focusedConvId = navigableIds[0]!;
+            return;
+        }
+        const next = idx + direction;
+        if (next >= 0 && next < navigableIds.length) {
+            focusedConvId = navigableIds[next]!;
+        }
+    }
+
+    /** Scroll the currently focused sidebar conversation into view. */
+    function scrollFocusedIntoView() {
+        if (!focusedConvId) return;
+        requestAnimationFrame(() => {
+            document
+                .getElementById(`sidebar-conv-${focusedConvId}`)
+                ?.scrollIntoView({ block: "nearest" });
+        });
+    }
+
+    function handleSidebarKeydown(e: KeyboardEvent) {
+        if (e.key === "ArrowDown") {
+            e.preventDefault();
+            e.stopPropagation();
+            moveFocus(1);
+            scrollFocusedIntoView();
+        } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            e.stopPropagation();
+            moveFocus(-1);
+            scrollFocusedIntoView();
+        } else if (e.key === "Enter" && focusedConvId) {
+            e.preventDefault();
+            e.stopPropagation();
+            handleSelectConversation(focusedConvId);
+            focusedConvId = null;
+        } else if (e.key === "Escape" && focusedConvId) {
+            e.stopPropagation();
+            focusedConvId = null;
+        }
+    }
+
+    // Clear focus when conversation list changes significantly
+    $effect(() => {
+        // Re-read navigableIds to establish dependency
+        void navigableIds.length;
+        // Don't clear if the focused ID is still in the list
+        if (focusedConvId && !navigableIds.includes(focusedConvId)) {
+            focusedConvId = null;
+        }
+    });
 
     // --- Bulk-select mode state ---
     let selectMode = $state(false);
@@ -295,18 +372,34 @@
         }
     }
 
-    // Cmd/Ctrl+F focuses the sidebar search input
+    // ⌘F focuses the sidebar search input directly;
+    // ⌘P goes through the shortcut event system (search-conversations action)
     onMount(() => {
+        function focusSearch() {
+            searchInputRef?.focus();
+        }
+
         function handleKeyDown(e: KeyboardEvent) {
             if ((e.metaKey || e.ctrlKey) && e.key === "f") {
                 const tag = (e.target as HTMLElement | null)?.tagName;
                 if (tag === "INPUT" || tag === "TEXTAREA") return;
                 e.preventDefault();
-                searchInputRef?.focus();
+                focusSearch();
             }
         }
+
+        function handleShortcut(e: CustomEvent<ShortcutEventDetail>) {
+            if (e.detail.action === "search-conversations") {
+                focusSearch();
+            }
+        }
+
         window.addEventListener("keydown", handleKeyDown);
-        return () => window.removeEventListener("keydown", handleKeyDown);
+        window.addEventListener(SHORTCUT_EVENT_TYPE, handleShortcut as EventListener);
+        return () => {
+            window.removeEventListener("keydown", handleKeyDown);
+            window.removeEventListener(SHORTCUT_EVENT_TYPE, handleShortcut as EventListener);
+        };
     });
 
     let generatingTitleForId = $state<string | null>(null);
@@ -326,7 +419,7 @@
     }
 </script>
 
-<Sidebar>
+<Sidebar onkeydown={handleSidebarKeydown}>
     <SidebarHeader>
         <SidebarMenu>
             <SidebarMenuItem>
@@ -360,7 +453,7 @@
                         <kbd
                             class="pointer-events-none inline-flex h-5 items-center gap-0.5 rounded border bg-muted px-1 font-mono text-[10px] font-medium text-muted-foreground"
                         >
-                            ⌘F
+                            ⌘P
                         </kbd>
                     {/if}
                 </div>
@@ -467,6 +560,7 @@
                                 <ConversationItem
                                     {conv}
                                     isActive={conv.id === convs.activeId}
+                                    isFocused={conv.id === focusedConvId}
                                     generatingTitle={generatingTitleForId === conv.id}
                                     hasDraft={draftIds.has(conv.id)}
                                     {selectMode}
@@ -505,6 +599,7 @@
                                     <ConversationItem
                                         {conv}
                                         isActive={conv.id === convs.activeId}
+                                        isFocused={conv.id === focusedConvId}
                                         generatingTitle={generatingTitleForId === conv.id}
                                         hasDraft={draftIds.has(conv.id)}
                                         {selectMode}
@@ -535,6 +630,7 @@
                                 <ConversationItem
                                     {conv}
                                     isActive={conv.id === convs.activeId}
+                                    isFocused={conv.id === focusedConvId}
                                     generatingTitle={generatingTitleForId === conv.id}
                                     hasDraft={draftIds.has(conv.id)}
                                     {selectMode}

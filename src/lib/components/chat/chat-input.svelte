@@ -85,6 +85,8 @@
         onsetconversationdefault?: () => void;
         /** Callback when user switches the selector to the global default */
         onswitchtoglobaldefault?: () => void;
+        /** Whether to autofocus the input on mount */
+        autofocus?: boolean;
     }
 
     let {
@@ -106,10 +108,18 @@
         onabort,
         onsetconversationdefault,
         onswitchtoglobaldefault,
+        autofocus = false,
     }: Props = $props();
 
     let textareaRef: HTMLTextAreaElement | null = $state(null);
     let fileInputRef: HTMLInputElement | null = $state(null);
+
+    // Autofocus the textarea on mount when requested
+    $effect(() => {
+        if (autofocus && textareaRef) {
+            textareaRef.focus();
+        }
+    });
 
     function handleKeydown(e: KeyboardEvent) {
         if (e.key === "Enter" && !e.shiftKey) {

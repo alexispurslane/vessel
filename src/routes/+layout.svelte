@@ -25,6 +25,15 @@
     import { hashHue } from "$lib/utils.js";
     import { resolve } from "$app/paths";
     import AppSidebar from "$lib/components/sidebar/index.svelte";
+    import ShortcutsHelp from "$lib/components/shortcuts-help/ShortcutsHelp.svelte";
+    import {
+        handleGlobalKeydown,
+        SHORTCUT_EVENT_TYPE,
+        type ShortcutEventDetail,
+    } from "$lib/utils/keyboard.js";
+    import { abort, clearMessages, disconnectStream } from "$lib/stores/chat.svelte.js";
+    import { exportConversation } from "$lib/api.js";
+    import { goto } from "$app/navigation";
     import type { AuthStatus } from "$lib/types.js";
     const auth = getAuth();
     const convs = getConversations();
@@ -111,9 +120,42 @@
 
         window.addEventListener("beforeunload", handleBeforeUnload);
 
+        // Global keyboard shortcuts
+        window.addEventListener("keydown", handleGlobalKeydown);
+
+        function handleShortcut(e: CustomEvent<ShortcutEventDetail>) {
+            const chat = getChat();
+            switch (e.detail.action) {
+                case "new-chat": {
+                    setActiveConversation(null);
+                    clearMessages();
+                    disconnectStream();
+                    void goto(resolve("/"));
+                    break;
+                }
+                case "copy-conversation": {
+                    const convId = chat.conversationId;
+                    if (convId) {
+                        exportConversation(convId, "markdown");
+                    }
+                    break;
+                }
+                case "abort": {
+                    // Only abort if we're actually generating
+                    if (chat.generating) {
+                        void abort();
+                    }
+                    break;
+                }
+            }
+        }
+        window.addEventListener(SHORTCUT_EVENT_TYPE, handleShortcut as EventListener);
+
         return () => {
             window.removeEventListener("beforeunload", handleBeforeUnload);
             document.removeEventListener("visibilitychange", handleVisibilityChange);
+            window.removeEventListener("keydown", handleGlobalKeydown);
+            window.removeEventListener(SHORTCUT_EVENT_TYPE, handleShortcut as EventListener);
         };
     });
 
@@ -137,6 +179,8 @@
 {:else}
     <SidebarProvider class="h-svh overflow-hidden">
         <AppSidebar {currentPath} />
+
+        <ShortcutsHelp />
 
         <SidebarInset class="min-h-0 overflow-hidden">
             <header class="flex h-12 shrink-0 items-center gap-2 border-b px-4">

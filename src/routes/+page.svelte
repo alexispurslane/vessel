@@ -223,6 +223,7 @@
                     conversationDefaultModelId={settingsStore.defaultModel}
                     globalDefaultModelId={settingsStore.defaultModel}
                     onsend={handleStartChat}
+                    autofocus
                 />
 
                 <!-- Sandbox quick-toggle buttons -->

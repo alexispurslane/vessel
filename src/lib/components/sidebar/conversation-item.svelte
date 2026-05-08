@@ -23,6 +23,7 @@
     import ArchiveRestore from "@lucide/svelte/icons/archive-restore";
     import CheckSquare from "@lucide/svelte/icons/check-square";
     import { hashHue } from "$lib/utils.js";
+    import { cn } from "$lib/utils.js";
     import { resolve } from "$app/paths";
 
     interface Conversation {
@@ -36,6 +37,7 @@
     let {
         conv,
         isActive,
+        isFocused = false,
         generatingTitle,
         hasDraft = false,
         selectMode = false,
@@ -52,6 +54,7 @@
     }: {
         conv: Conversation;
         isActive: boolean;
+        isFocused?: boolean;
         generatingTitle: boolean;
         hasDraft?: boolean;
         selectMode?: boolean;
@@ -68,7 +71,10 @@
     } = $props();
 </script>
 
-<SidebarMenuItem>
+<SidebarMenuItem
+    id="sidebar-conv-{conv.id}"
+    class={cn(isFocused && "ring-2 ring-ring ring-offset-1 rounded-md")}
+>
     <ContextMenu>
         <ContextMenuTrigger>
             <SidebarMenuButton
