@@ -324,7 +324,6 @@ export function createConnectStreamHandler(ctx: ChatHandlerContext) {
         await chat.waitForConnected();
         void send(initialMessage, modelId);
         sessionStorage.removeItem(ctx.draftKey(currentId));
-        window.history.replaceState({}, "", `/chat/${currentId}`);
     }
 
     /**
@@ -361,6 +360,9 @@ export function createConnectStreamHandler(ctx: ChatHandlerContext) {
         const initialMessage = url.searchParams.get("initialMessage");
         const initialModel = url.searchParams.get("initialModel");
         if (initialMessage) {
+            // Strip params synchronously before the async send;
+            // HMR re-runs $effect and would re-send the message.
+            window.history.replaceState({}, "", `/chat/${currentId}`);
             void sendInitialMessage(currentId, initialMessage, initialModel);
         }
     }
