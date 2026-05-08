@@ -104,7 +104,7 @@
         if (!inputValue.trim() || isCreating) return;
         isCreating = true;
         const messageText = inputValue.trim();
-        const id = await createConversation();
+        const id = await createConversation(undefined, selectedModelId || undefined);
         if (id) {
             // Navigate to chat page with the initial message and model selection
             // as URL params. The chat page sends after connecting to the SSE stream.
@@ -221,7 +221,8 @@
                     generating={false}
                     models={availableModels}
                     bind:selectedModelId
-                    defaultModelId={settingsStore.defaultModel}
+                    conversationDefaultModelId={settingsStore.defaultModel}
+                    globalDefaultModelId={settingsStore.defaultModel}
                     onsend={handleStartChat}
                 />
 

@@ -2,6 +2,7 @@ import type { PageServerLoad } from "./$types.js";
 import { getSessionHistory } from "$lib/server/agent/session-store.js";
 import { getSessionWorkDir } from "$lib/server/agent/sandbox-factory.js";
 import { messageHistoryToChatMessages } from "$lib/chat-history.js";
+import { getDb } from "$lib/server/db/index.js";
 import { resolve, relative } from "path";
 import { readdir } from "node:fs/promises";
 
@@ -46,12 +47,22 @@ export const load: PageServerLoad = async ({ params }) => {
         const workDir = getSessionWorkDir(conversationId);
         const sandboxFiles = (await Bun.file(workDir).exists()) ? await listFilesRecursive(workDir, workDir) : [];
 
+        // Fetch the conversation's default model from the DB.
+        // Every conversation gets an explicit default at creation time.
+        const db = getDb();
+        const convRow = db
+            .query("SELECT model_provider, model_id FROM conversations WHERE id = ?")
+            .get(conversationId) as { model_provider: string | null; model_id: string | null } | undefined;
+        const conversationDefaultModel = convRow?.model_id
+            ? { provider: convRow.model_provider, modelId: convRow.model_id }
+            : null;
+
         return {
             messageHistory: history,
             // Pre-converted ChatMessage[] for SSR rendering — avoids the client
             // having to do any conversion before first paint.
             messages: messageHistoryToChatMessages(history),
-            lastModel: history.model,
+            conversationDefaultModel,
             timing: history.timing ?? null,
             sandboxFiles,
         };
@@ -62,7 +73,7 @@ export const load: PageServerLoad = async ({ params }) => {
         return {
             messageHistory: { messages: [], model: null },
             messages: [],
-            lastModel: null,
+            conversationDefaultModel: null,
             timing: null,
             sandboxFiles: [],
         };

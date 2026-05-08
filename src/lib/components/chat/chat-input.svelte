@@ -34,6 +34,9 @@
     import ClipboardPaste from "@lucide/svelte/icons/clipboard-paste";
     import Eraser from "@lucide/svelte/icons/eraser";
     import Check from "@lucide/svelte/icons/check";
+    import CheckCircle from "@lucide/svelte/icons/check-circle";
+    import Undo2 from "@lucide/svelte/icons/undo-2";
+    import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
     import Plus from "@lucide/svelte/icons/plus";
     import X from "@lucide/svelte/icons/x";
     import FileIcon from "@lucide/svelte/icons/file";
@@ -59,8 +62,10 @@
         models?: ModelInfo[];
         /** The currently selected model ID (two-way bindable) */
         selectedModelId?: string;
-        /** The user's default model ID — a dot is shown on the selector when a non-default model is picked */
-        defaultModelId?: string;
+        /** The conversation's default model ID — a dot appears when the selected model differs */
+        conversationDefaultModelId?: string;
+        /** The global default model ID — used by the "reset to global" action */
+        globalDefaultModelId?: string;
         /** Pending files to upload (two-way bindable) */
         pendingFiles?: PendingFile[];
         /** Names of files already uploaded to the sandbox (read-only display) */
@@ -75,6 +80,10 @@
         onsend?: () => void;
         /** Callback when abort button is clicked */
         onabort?: () => void;
+        /** Callback when user sets the current model as the conversation default */
+        onsetconversationdefault?: () => void;
+        /** Callback when user switches the selector to the global default */
+        onswitchtoglobaldefault?: () => void;
     }
 
     let {
@@ -85,7 +94,8 @@
         connected = true,
         models = [],
         selectedModelId = $bindable(""),
-        defaultModelId = "",
+        conversationDefaultModelId = "",
+        globalDefaultModelId = "",
         pendingFiles = $bindable<PendingFile[]>([]),
         sandboxFiles = [],
         ondownloadsandboxfile,
@@ -93,6 +103,8 @@
         hasPendingStatus = false,
         onsend,
         onabort,
+        onsetconversationdefault,
+        onswitchtoglobaldefault,
     }: Props = $props();
 
     let textareaRef: HTMLTextAreaElement | null = $state(null);
@@ -222,9 +234,18 @@
         return groups;
     });
 
-    // Whether the selected model differs from the user's default
+    // Whether the selected model differs from the conversation's default
     let modelIsNonDefault = $derived(
-        selectedModelId && defaultModelId && selectedModelId !== defaultModelId
+        selectedModelId &&
+            conversationDefaultModelId &&
+            selectedModelId !== conversationDefaultModelId
+    );
+
+    // Whether the conversation's default differs from the global default
+    let conversationDefaultDiffersFromGlobal = $derived(
+        conversationDefaultModelId &&
+            globalDefaultModelId &&
+            conversationDefaultModelId !== globalDefaultModelId
     );
 
     const canSend = $derived(
@@ -420,6 +441,65 @@
                     {/each}
                 </DropdownMenuContent>
             </DropdownMenu>
+
+            <!-- Model action buttons: visible when selected model differs from conversation default -->
+            {#if modelIsNonDefault}
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger>
+                            {#snippet child({ props })}
+                                <button
+                                    {...props}
+                                    class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-green-600 hover:bg-green-500/10 transition-colors cursor-pointer"
+                                    onclick={onsetconversationdefault}
+                                    aria-label="Set as conversation default"
+                                >
+                                    <CheckCircle class="size-3.5" />
+                                </button>
+                            {/snippet}
+                        </TooltipTrigger>
+                        <TooltipContent>Set as conversation default</TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger>
+                            {#snippet child({ props })}
+                                <button
+                                    {...props}
+                                    class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+                                    onclick={() => (selectedModelId = conversationDefaultModelId)}
+                                    aria-label="Restore conversation default"
+                                >
+                                    <Undo2 class="size-3.5" />
+                                </button>
+                            {/snippet}
+                        </TooltipTrigger>
+                        <TooltipContent>Restore to conversation default</TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+            {/if}
+
+            <!-- Reset conversation default to global default -->
+            {#if conversationDefaultDiffersFromGlobal}
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger>
+                            {#snippet child({ props })}
+                                <button
+                                    {...props}
+                                    class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+                                    onclick={onswitchtoglobaldefault}
+                                    aria-label="Switch to global default"
+                                >
+                                    <RotateCcw class="size-3.5" />
+                                </button>
+                            {/snippet}
+                        </TooltipTrigger>
+                        <TooltipContent>Switch to global default</TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+            {/if}
         {:else}
             <div class="shrink-0 w-8"></div>
         {/if}

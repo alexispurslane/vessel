@@ -62,7 +62,7 @@ export interface ChatState {
     navigating: boolean;
     titleGenerationRequested: boolean;
     insideThinkingTag: boolean;
-    lastModel: { provider: string; modelId: string } | null;
+    conversationDefaultModel: { provider: string; modelId: string } | null;
     /** Aggregate timing statistics (avg TTFT, avg TPS) across all timed turns */
     timing: SessionTiming | null;
     /** Resolves when the SSE 'connected' event arrives. Reset on each connectStream. */
@@ -85,7 +85,7 @@ const state = $state<ChatState>({
     navigating: false,
     titleGenerationRequested: false,
     insideThinkingTag: false,
-    lastModel: null,
+    conversationDefaultModel: null,
     timing: null,
     connectPromise: null,
     resolveConnect: null,
@@ -393,8 +393,8 @@ export function getChat() {
             if (state.connected) return;
             await state.connectPromise;
         },
-        get lastModel() {
-            return state.lastModel;
+        get conversationDefaultModel() {
+            return state.conversationDefaultModel;
         },
         /**
                  * Whether a navigate (delete/edit) operation is in progress.
@@ -541,7 +541,7 @@ export function disconnectStream(): void {
     setStreamingMessageId(state, null, "disconnectStream");
     state.currentConversationId = null;
     state.insideThinkingTag = false;
-    state.lastModel = null;
+    state.conversationDefaultModel = null;
     state.recoveryTurnGeneration = null;
 }
 

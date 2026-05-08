@@ -226,17 +226,21 @@ export async function createConversation(title?: string, modelId?: string): Prom
     sessionManager.newSession({ id });
     const sessionFilePath = sessionManager.getSessionFile();
 
-    // Resolve the provider from the model ID if a model is specified
+    // Use the provided model, or fall back to the global default.
+    // Every conversation always has an explicit default model.
+    const db = getDb();
+    const effectiveModelId = modelId ?? readGlobalSetting("defaultModel") ?? null;
+
+    // Resolve the provider from the model ID
     let modelProvider: string | null = null;
-    if (modelId) {
-        modelProvider = resolveModelProvider(modelId);
+    if (effectiveModelId) {
+        modelProvider = resolveModelProvider(effectiveModelId);
     }
 
     // Save metadata to our DB
-    const db = getDb();
     db.prepare(
         "INSERT INTO conversations (id, title, session_file_path, model_provider, model_id) VALUES (?, ?, ?, ?, ?)"
-    ).run(id, title ?? "New Chat", sessionFilePath ?? "", modelProvider, modelId ?? null);
+    ).run(id, title ?? "New Chat", sessionFilePath ?? "", modelProvider, effectiveModelId);
 
     return id;
 }
@@ -907,11 +911,11 @@ export async function sendMessage(conversationId: string, content: string, statu
 }
 
 /**
- * Switch the model for an active session.
- * If the session is already in memory, switch the model.
- * If not, this is a no-op (the model will be set when the session is created).
+ * Switch the model for an active session (live only — does NOT update the conversation's default model).
  *
- * Only requires a model ID — the provider is resolved automatically.
+ * This is called when a user sends a message with a model override. The live session
+ * switches to process the message, but the conversation's default model in the DB
+ * is only changed via an explicit "set as default" action (PATCH /api/sessions/[id] with model_id).
  *
  * @param conversationId - The conversation ID to switch model for
  * @param modelId - The model ID to switch to
@@ -923,13 +927,7 @@ export async function switchSessionModel(conversationId: string, modelId: string
         throw new Error(`Model ${modelId} not found`);
     }
 
-    // Always update the conversation metadata in DB
-    const db = getDb();
-    db.prepare(
-        `UPDATE conversations SET model_provider = ?, model_id = ?, updated_at = datetime('now') WHERE id = ?`
-    ).run(model.provider, modelId, conversationId);
-
-    // If the session is in memory, also switch the live model
+    // Only switch the live session model — the conversation default stays unchanged
     const session = sessions.get(conversationId);
     if (!session) return;
 

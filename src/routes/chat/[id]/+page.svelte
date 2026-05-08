@@ -32,6 +32,7 @@
         listWorkspaceFiles,
         exportConversation,
         forkConversation as apiForkConversation,
+        updateConversation,
     } from "$lib/api.js";
     import type { ExportFormat, ExportOptions } from "$lib/api.js";
     import type {
@@ -477,10 +478,11 @@
         }
     });
 
-    // Initialize model selector: set the default model once settings load,
-    // or fall back to the first available model. We only apply the default
-    // once to avoid overwriting a manual user selection or conversation model.
-    let defaultApplied = $state(false);
+    // Initialize model selector from the conversation's default model.
+    // Every conversation has an explicit default (set at creation time from the global default).
+    // The selector reflects this default; the user can override per-message without changing it.
+    let conversationDefaultModelId = $state("");
+    let modelInitialized = $state(false);
     let conversationTitle = $state("New Chat");
 
     $effect(() => {
@@ -491,20 +493,15 @@
     });
 
     $effect(() => {
-        // When models are loaded and no model is selected yet, use the fallback
-        if (availableModels.length > 0 && !selectedModelId && !defaultApplied) {
+        // When SSR provides the conversation's default model, use it for the selector
+        if (!modelInitialized && pageData.conversationDefaultModel?.modelId) {
+            selectedModelId = pageData.conversationDefaultModel.modelId;
+            conversationDefaultModelId = pageData.conversationDefaultModel.modelId;
+            modelInitialized = true;
+        }
+        // Fallback: use first available model if nothing is selected
+        if (!modelInitialized && availableModels.length > 0 && !selectedModelId) {
             selectedModelId = availableModels[0]?.id || "";
-        }
-        // When the default model setting becomes available, override the fallback
-        if (!defaultApplied && settingsStore.defaultModel) {
-            selectedModelId = settingsStore.defaultModel;
-            defaultApplied = true;
-        }
-        // When SSR provides a lastModel and no model is selected yet, use it
-        // (this runs before connectStream, so chat.lastModel is still empty)
-        if (!defaultApplied && pageData.lastModel) {
-            selectedModelId = pageData.lastModel.modelId;
-            defaultApplied = true;
         }
     });
 
@@ -667,8 +664,10 @@
         getSelectedModelId: () => selectedModelId,
         setHydrated: (v: boolean) => (hydrated = v),
         getHydrated: () => hydrated,
-        setDefaultApplied: (v: boolean) => (defaultApplied = v),
-        getDefaultApplied: () => defaultApplied,
+        setConversationDefaultModelId: (v: string) => (conversationDefaultModelId = v),
+        getConversationDefaultModelId: () => conversationDefaultModelId,
+        setModelInitialized: (v: boolean) => (modelInitialized = v),
+        getModelInitialized: () => modelInitialized,
         setDraftRestored: (v: boolean) => (draftRestored = v),
         setDraftRestoredForId: (v: string | null) => (draftRestoredForId = v),
         scrollToHashMessage,
@@ -701,6 +700,26 @@
     function handleDownloadSandboxFile(path: string) {
         if (!id) return;
         downloadWorkspaceFile(id, path);
+    }
+
+    /**
+     * Set the currently selected model as the conversation's default model.
+     * Persists to DB so it survives page reloads.
+     */
+    function handleSetConversationDefault() {
+        if (!id || !selectedModelId) return;
+        conversationDefaultModelId = selectedModelId;
+        void updateConversation(id, { model_id: selectedModelId });
+    }
+
+    /**
+     * Switch the selector to the global default model.
+     * Does NOT change the conversation's stored default —
+     * the user is just choosing to use the global default for this session.
+     */
+    function handleSwitchToGlobalDefault() {
+        if (!settingsStore.defaultModel) return;
+        selectedModelId = settingsStore.defaultModel;
     }
 
     // Look up a model's display name from the available models list.
@@ -954,17 +973,17 @@
                                     >
                                         <Timer class="size-3" />
                                         <span
-                                            >{chat.timing.avgTtftMs !== null
-                                                ? `${(chat.timing.avgTtftMs / 1000).toFixed(1)}s`
+                                            >{chat.timing?.avgTtftMs != null
+                                                ? `${((chat.timing?.avgTtftMs ?? 0) / 1000).toFixed(1)}s`
                                                 : "—"}</span
                                         >
                                     </div>
                                 {/snippet}
                             </TooltipTrigger>
                             <TooltipContent
-                                >Avg TTFT: {chat.timing.avgTtftMs !== null
-                                    ? `${chat.timing.avgTtftMs.toFixed(0)}ms`
-                                    : "n/a"} ({chat.timing.ttftCount} turns)</TooltipContent
+                                >Avg TTFT: {chat.timing?.avgTtftMs != null
+                                    ? `${(chat.timing?.avgTtftMs ?? 0).toFixed(0)}ms`
+                                    : "n/a"} ({chat.timing?.ttftCount ?? 0} turns)</TooltipContent
                             >
                         </Tooltip>
                     </TooltipProvider>
@@ -978,17 +997,17 @@
                                     >
                                         <Gauge class="size-3" />
                                         <span
-                                            >{chat.timing.avgTps !== null
-                                                ? `${chat.timing.avgTps.toFixed(0)}`
+                                            >{chat.timing?.avgTps != null
+                                                ? `${(chat.timing?.avgTps ?? 0).toFixed(0)}`
                                                 : "—"}</span
                                         >
                                     </div>
                                 {/snippet}
                             </TooltipTrigger>
                             <TooltipContent
-                                >Avg TPS: {chat.timing.avgTps !== null
-                                    ? `${chat.timing.avgTps.toFixed(1)}`
-                                    : "n/a"} ({chat.timing.tpsCount} turns)</TooltipContent
+                                >Avg TPS: {chat.timing?.avgTps != null
+                                    ? `${(chat.timing?.avgTps ?? 0).toFixed(1)}`
+                                    : "n/a"} ({chat.timing?.tpsCount ?? 0} turns)</TooltipContent
                             >
                         </Tooltip>
                     </TooltipProvider>
@@ -1256,8 +1275,8 @@
                                                 <ChatAvatar
                                                     role="assistant"
                                                     isConsecutive={false}
-                                                    model={chat.lastModel?.modelId}
-                                                    modelProvider={chat.lastModel?.provider}
+                                                    model={selectedModelId || undefined}
+                                                    modelProvider={undefined}
                                                     {getModelDisplayName}
                                                     hasContent={false}
                                                 />
@@ -1342,12 +1361,15 @@
                             connected={chat.connected}
                             models={availableModels}
                             bind:selectedModelId
-                            defaultModelId={settingsStore.defaultModel}
+                            {conversationDefaultModelId}
+                            globalDefaultModelId={settingsStore.defaultModel}
                             onsend={handleSend}
                             onabort={handleAbort}
                             onremovesandboxfile={handleRemoveSandboxFile}
                             ondownloadsandboxfile={handleDownloadSandboxFile}
                             hasPendingStatus={pendingStatusUpdates.length > 0}
+                            onsetconversationdefault={handleSetConversationDefault}
+                            onswitchtoglobaldefault={handleSwitchToGlobalDefault}
                         />
                         <!-- Connection status / error -->
                         <div class="flex items-center gap-1.5 mt-1.5 min-h-4">

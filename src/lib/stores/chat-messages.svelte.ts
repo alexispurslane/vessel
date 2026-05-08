@@ -336,7 +336,7 @@ export function stripThinkingTagsFromText(text: string): string {
 /**
  * Populate the messages array from a MessageHistory payload.
  * Uses the shared messageHistoryToChatMessages for the pure conversion,
- * then applies store-specific side effects (lastModel, title generation).
+ * then applies store-specific side effects (conversationDefaultModel, title generation).
  * @param s - The chat state
  * @param history - The message history from the server
  * @param conversationId - The conversation ID for title generation
@@ -349,9 +349,9 @@ export function populateFromHistory(s: ChatState, history: MessageHistory, conve
         s.messages.push(msg);
     }
     console.log(`[chat-lifecycle] populateFromHistory: done, messages.length=${String(s.messages.length)}`);
-    // Set the last model used from the history
+    // Set the conversation's default model from the history
     if (history.model) {
-        s.lastModel = history.model;
+        s.conversationDefaultModel = history.model;
     }
     if (history.timing) {
         s.timing = history.timing;
@@ -386,7 +386,7 @@ export function clearMessages(s: ChatState): void {
     s.generating = false;
     s.error = null;
     s.insideThinkingTag = false;
-    s.lastModel = null;
+    s.conversationDefaultModel = null;
     s.timing = null;
     s.titleGenerationRequested = false;
     s.recoveryTurnGeneration = null;
@@ -428,7 +428,7 @@ export async function reloadMessages(s: ChatState): Promise<void> {
             thinkingStreaming: false,
         }));
         if (history.model) {
-            s.lastModel = history.model;
+            s.conversationDefaultModel = history.model;
         }
         if (history.timing) {
             s.timing = history.timing;

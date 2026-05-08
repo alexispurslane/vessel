@@ -68,10 +68,14 @@ export interface ChatHandlerContext {
     setHydrated: (v: boolean) => void;
     /** Getter for hydrated flag */
     getHydrated: () => boolean;
-    /** Setter for defaultApplied flag */
-    setDefaultApplied: (v: boolean) => void;
-    /** Getter for defaultApplied flag */
-    getDefaultApplied: () => boolean;
+    /** Setter for conversation's default model ID */
+    setConversationDefaultModelId: (v: string) => void;
+    /** Getter for conversation's default model ID */
+    getConversationDefaultModelId: () => string;
+    /** Setter for model initialized flag */
+    setModelInitialized: (v: boolean) => void;
+    /** Getter for model initialized flag */
+    getModelInitialized: () => boolean;
     /** Setter for draftRestored flag */
     setDraftRestored: (v: boolean) => void;
     /** Setter for the conversation ID the draft was restored for */
@@ -346,9 +350,17 @@ export function createConnectStreamHandler(ctx: ChatHandlerContext) {
 
         ctx.scrollToHashMessage();
 
-        if (chat.lastModel) {
-            ctx.setSelectedModelId(chat.lastModel.modelId);
-            ctx.setDefaultApplied(true);
+        // Sync the model selector from the conversation's default.
+        // The selector always reflects the conversation's default on (re)connect.
+        if (chat.conversationDefaultModel && !ctx.getModelInitialized()) {
+            const defaultModelId = ctx.getConversationDefaultModelId();
+            if (defaultModelId) {
+                ctx.setSelectedModelId(defaultModelId);
+            } else {
+                ctx.setSelectedModelId(chat.conversationDefaultModel.modelId);
+                ctx.setConversationDefaultModelId(chat.conversationDefaultModel.modelId);
+            }
+            ctx.setModelInitialized(true);
         }
 
         const saved = sessionStorage.getItem(ctx.draftKey(currentId));
