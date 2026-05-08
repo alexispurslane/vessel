@@ -4,7 +4,7 @@
  * Wraps Bun file operations (delete file, delete directory) with existence checks,
  * try/catch, and structured logging — so callers don't need to nest error handling.
  */
-import { rm } from "node:fs/promises";
+import { rm, stat } from "node:fs/promises";
 import { log } from "$lib/server/logger.js";
 
 /**
@@ -33,8 +33,7 @@ export async function safeDeleteFile(path: string, label: string): Promise<void>
  * @returns {void}
  */
 export async function safeDeleteDir(path: string, label: string): Promise<void> {
-    const dirExists = await Bun.file(path).exists();
-    if (!dirExists) return;
+    try { await stat(path); } catch { return; }
     try {
         await rm(path, { recursive: true });
         log.info("session-store", `Deleted ${label}: ${path}`);

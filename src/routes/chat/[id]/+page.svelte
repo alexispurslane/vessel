@@ -597,6 +597,9 @@
                 // a dependency of this $effect, causing re-runs
                 // (disconnecting/reconnecting SSE) on $page.data changes.
                 sandboxFiles = pageData.sandboxFiles;
+                console.log(
+                    `[chat-lifecycle] sandboxFiles from pageData: length=${String(sandboxFiles.length)}, files=${JSON.stringify(sandboxFiles)}`
+                );
                 // Apply initial settings (sandbox toggles from URL params)
                 // BEFORE connecting the SSE stream. If we wait until after
 

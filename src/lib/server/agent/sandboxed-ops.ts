@@ -72,9 +72,10 @@ export function createSandboxedBashOps(sandbox: Sandbox): BashOperations {
 export function createSandboxedReadOps(sandbox: Sandbox): ReadOperations {
     return {
         async readFile(absolutePath: string): Promise<Buffer> {
-            // Use base64 inside the sandbox so binary data (images, etc.)
-            // survives the string-based stdout pipe without corruption.
-            const output = await sandbox.exec("base64", [absolutePath]).output();
+            // macOS base64 needs stdin, not positional args.
+            // Pipe via cat with single-quote escaping for spaces.
+            const escaped = absolutePath.replace(/'/g, "'\\''");
+            const output = await sandbox.exec("sh", ["-c", `cat '${escaped}' | base64`]).output();
             if (output.code !== 0) {
                 throw new Error(`Failed to read ${absolutePath}: ${output.stderr}`);
             }

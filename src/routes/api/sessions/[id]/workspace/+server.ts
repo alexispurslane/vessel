@@ -4,7 +4,7 @@ import { apiHandler, tryApi, badRequest, notFound } from "$lib/server/api-errors
 import { getSessionWorkDir, createFileManagementSandbox } from "$lib/server/agent/sandbox-factory.js";
 import { sanitizeAndResolvePath } from "$lib/server/fs-security.js";
 import { resolve, relative, dirname } from "path";
-import { readdir, rm } from "node:fs/promises";
+import { readdir, rm, stat } from "node:fs/promises";
 
 /**
  * Recursively list files in a directory, returning paths relative to the base.
@@ -15,7 +15,7 @@ import { readdir, rm } from "node:fs/promises";
  */
 async function listFilesRecursive(dir: string, base: string): Promise<string[]> {
     const results: string[] = [];
-    if (!(await Bun.file(dir).exists())) return results;
+    try { await stat(dir); } catch { return results; }
 
     const entries = await readdir(dir, { withFileTypes: true });
     for (const entry of entries) {
@@ -68,11 +68,9 @@ export const GET = tryApi(async ({ params }) => {
     const id = params.id;
     if (!id) return badRequest("Missing session id");
     const workDir = getSessionWorkDir(id);
-    if (!(await Bun.file(workDir).exists())) {
-        return json({ files: [] });
-    }
 
     const files = await listFilesRecursive(workDir, workDir);
+    console.log(`[workspace] GET files for ${id}: workDir=${workDir}, files=${JSON.stringify(files)}`);
     return json({ files });
 });
 

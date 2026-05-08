@@ -9,6 +9,7 @@ import {
 import {
     uploadFile,
     updateConversationSettings,
+    listWorkspaceFiles,
 } from "$lib/api.js";
 import type { ConversationSettings } from "$lib/types.js";
 import type { PageData } from "./$types.js";
@@ -344,9 +345,6 @@ export function createConnectStreamHandler(ctx: ChatHandlerContext) {
             `[chat-lifecycle] $effect: connectStream resolved, chat.messages.length=${String(chat.messages.length)}, connected=${String(chat.connected)}, generating=${String(chat.generating)}`
         );
         ctx.setHydrated(true);
-        console.log(
-            `[chat-lifecycle] $effect: hydrated=true, chat.messages.length=${String(chat.messages.length)}`
-        );
 
         ctx.scrollToHashMessage();
 
@@ -362,6 +360,15 @@ export function createConnectStreamHandler(ctx: ChatHandlerContext) {
             }
             ctx.setModelInitialized(true);
         }
+
+        // Refresh sandbox files from the server now that the
+        // session is hydrated and the workspace is accessible.
+        listWorkspaceFiles(currentId)
+            .then((result) => {
+                console.log(`[chat-lifecycle] sandboxFiles from API: length=${String(result.files.length)}, files=${JSON.stringify(result.files)}`);
+                ctx.setSandboxFiles(result.files);
+            })
+            .catch(() => { /* non-critical */ });
 
         const saved = sessionStorage.getItem(ctx.draftKey(currentId));
         if (saved) ctx.setInputText(saved);

@@ -37,15 +37,13 @@
     let mcpServersOn = $state(true);
     let agentMode: "agent" | "chat" = $state("agent");
 
-    // Persist toggle states to localStorage whenever they change
-    $effect(() => {
-        if (typeof localStorage !== "undefined") {
-            localStorage.setItem("home_sandboxOn", String(sandboxOn));
-            localStorage.setItem("home_netAllDomainsOn", String(netAllDomainsOn));
-            localStorage.setItem("home_mcpServersOn", String(mcpServersOn));
-            localStorage.setItem("home_agentMode", agentMode);
-        }
-    });
+    /** Persist the current toggle states to localStorage */
+    function persistToggles() {
+        localStorage.setItem("home_sandboxOn", String(sandboxOn));
+        localStorage.setItem("home_netAllDomainsOn", String(netAllDomainsOn));
+        localStorage.setItem("home_mcpServersOn", String(mcpServersOn));
+        localStorage.setItem("home_agentMode", agentMode);
+    }
     let availableModels = $state<ModelInfo[]>([]);
     let providers = $state<ProviderInfo[]>([]);
     let isSetupLoading = $state(true);
@@ -120,6 +118,7 @@
             url += `&netAllDomainsOn=${String(netAllDomainsOn)}`;
             url += `&mcpServersOn=${String(mcpServersOn)}`;
             url += `&agentMode=${agentMode}`;
+            persistToggles();
             // @ts-expect-error
             // dynamic URL with query params can't satisfy SvelteKit typed routes
             void goto(resolve(url));

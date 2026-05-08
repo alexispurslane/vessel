@@ -518,6 +518,7 @@ async function createSessionInfrastructure(
  * Register Vessel-specific tools (fetch, search, sandboxed tools) and set active tools.
  *
  * @param agentSession - The agent session to register tools on
+ * @param conversationId - The conversation ID (used to resolve workspace path)
  * @param conversationSettings - Per-conversation settings for tool resolution
  * @param sandbox - Optional sandbox instance for sandboxed tools
  * @param searchResultUrls - Set to collect search result URLs
@@ -525,6 +526,7 @@ async function createSessionInfrastructure(
  */
 function registerVesselTools(
     agentSession: PiAgentSession,
+    conversationId: string,
     conversationSettings: ConversationSettings | null,
     sandbox: Sandbox | null,
     searchResultUrls: Set<string>
@@ -581,7 +583,7 @@ function registerVesselTools(
     });
     baseToolDefinitions.set(searchTool.name, searchTool);
 
-    const sessionWorkDir = sandbox ? getSessionWorkDir(agentSession.sessionId) : process.cwd();
+    const sessionWorkDir = sandbox ? getSessionWorkDir(conversationId) : process.cwd();
 
     if (sandbox) {
         const sandboxedTools = createSandboxedCodingTools(sessionWorkDir, sandbox, { searchResultUrls });
@@ -804,7 +806,7 @@ export async function getOrHydrateSession(conversationId: string): Promise<PiAge
 
     // Register Vessel-specific tools and set active tools
     const searchResultUrls = new Set<string>();
-    registerVesselTools(agentSession, conversationSettings, sandbox, searchResultUrls);
+    registerVesselTools(agentSession, conversationId, conversationSettings, sandbox, searchResultUrls);
 
     // Apply custom/append system prompt overrides
     applySystemPromptOverrides(agentSession, conversationSettings);

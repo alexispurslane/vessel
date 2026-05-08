@@ -4,7 +4,7 @@ import { getSessionWorkDir } from "$lib/server/agent/sandbox-factory.js";
 import { messageHistoryToChatMessages } from "$lib/chat-history.js";
 import { getDb } from "$lib/server/db/index.js";
 import { resolve, relative } from "path";
-import { readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 
 /**
  * Recursively list files in a directory, returning paths relative to the base.
@@ -15,7 +15,7 @@ import { readdir } from "node:fs/promises";
  */
 async function listFilesRecursive(dir: string, base: string): Promise<string[]> {
     const results: string[] = [];
-    if (!(await Bun.file(dir).exists())) return results;
+    try { await stat(dir); } catch { return results; }
 
     const entries = await readdir(dir, { withFileTypes: true });
     for (const entry of entries) {
@@ -45,7 +45,8 @@ export const load: PageServerLoad = async ({ params }) => {
         // List files in the sandbox workspace so the UI can show
         // what's already been uploaded when the conversation loads.
         const workDir = getSessionWorkDir(conversationId);
-        const sandboxFiles = (await Bun.file(workDir).exists()) ? await listFilesRecursive(workDir, workDir) : [];
+        const sandboxFiles = await listFilesRecursive(workDir, workDir);
+        console.log(`[SSR] sandboxFiles for ${conversationId}: workDir=${workDir}, files=${JSON.stringify(sandboxFiles)}`);
 
         // Fetch the conversation's default model from the DB.
         // Every conversation gets an explicit default at creation time.

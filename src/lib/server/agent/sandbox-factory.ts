@@ -29,7 +29,7 @@
 
 import { Sandbox, type SecretConfig } from "zerobox";
 import { resolve } from "path";
-import { mkdir } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import { getDb } from "../db/index.js";
 import { tryJsonParse } from "$lib/utils.js";
 import { type ConversationSettings, conversationSettingsSchema } from "$lib/types.js";
@@ -186,7 +186,8 @@ export async function ensureSandboxDeps(): Promise<void> {
     const nodeModulesDir = resolve(SANDBOX_DEPS_DIR, "node_modules");
 
     // Check if we need to install/update deps
-    const needsInstall = !(await Bun.file(nodeModulesDir).exists()) || !(await Bun.file(SANDBOX_DEPS_LOCKFILE).exists());
+    const nodeModulesExists = await stat(nodeModulesDir).then(() => true).catch(() => false);
+    const needsInstall = !nodeModulesExists || !(await Bun.file(SANDBOX_DEPS_LOCKFILE).exists());
 
     if (!needsInstall) {
         // Compare installed deps against the current spec
