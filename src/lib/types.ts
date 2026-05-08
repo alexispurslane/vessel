@@ -161,6 +161,36 @@ export interface SearchResultItem {
     publishedDate?: string;
 }
 
+/** Timing metrics for a single agent turn */
+export interface TurnTiming {
+    /** Zero-based turn index within the agent loop */
+    turn: number;
+    /** Time To First Token in milliseconds, or null if no tokens were streamed */
+    ttftMs: number | null;
+    /** Tokens Per Second over the entire turn, or null if not computable */
+    tps: number | null;
+    /** Total output tokens produced in this turn */
+    outputTokens: number;
+    /** Total turn wall-clock duration in milliseconds, or null if turn never ended */
+    totalTurnMs: number | null;
+}
+
+/** Aggregate timing statistics across all timed turns in a session */
+export interface SessionTiming {
+    /** Total number of timed turns */
+    turnCount: number;
+    /** Number of turns with TTFT data */
+    ttftCount: number;
+    /** Average TTFT in milliseconds (across turns with TTFT data), or null */
+    avgTtftMs: number | null;
+    /** Number of turns with TPS data */
+    tpsCount: number;
+    /** Average TPS (across turns with TPS data), or null */
+    avgTps: number | null;
+    /** Total output tokens across all turns */
+    totalOutputTokens: number;
+}
+
 /** A source the agent consulted during a turn (fetched page or web search) */
 export type FetchedSource =
     | { type: "page"; url: string; title: string; contentLength: number; truncated: boolean; content: string; turn: number }
@@ -253,6 +283,8 @@ export interface HistoryMessage {
 export interface HistoryResult {
     messages: HistoryMessage[];
     model: { provider: string; modelId: string } | null;
+    /** Aggregate timing statistics across all timed turns */
+    timing?: SessionTiming;
 }
 
 /** A single step within a thinking group — either a thinking text chunk or a tool call */

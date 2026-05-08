@@ -8,7 +8,7 @@
 
 import type { AgentSession as PiAgentSession, SessionEntry } from "@mariozechner/pi-coding-agent";
 import type { ActiveSession } from "./types.js";
-import type { FetchedSource, HistoryMessage, HistoryResult } from "$lib/types.js";
+import type { FetchedSource, HistoryMessage, HistoryResult, SessionTiming, TurnTiming } from "$lib/types.js";
 
 // --- Types ---
 
@@ -52,6 +52,8 @@ interface HistoryBuilderState {
     lastModelId: string | null;
     lastAssistantMsgIndex: number;
     accumulatedSources: FetchedSource[];
+    /** Collected per-turn timing entries for aggregate computation */
+    timingEntries: TurnTiming[];
 }
 
 /**
@@ -81,6 +83,18 @@ function handleFetchedSources(state: HistoryBuilderState, entry: unknown): void 
                 ...state.accumulatedSources,
             ];
         }
+    }
+}
+
+/**
+ * Collect a turn_timing custom entry for later aggregate computation.
+ * @param state - Mutable history builder state
+ * @param entry - The turn timing entry
+ */
+function handleTimingEntry(state: HistoryBuilderState, entry: unknown): void {
+    const timing = (entry as { data: TurnTiming | undefined }).data;
+    if (timing) {
+        state.timingEntries.push(timing);
     }
 }
 
@@ -309,6 +323,11 @@ function processBranchEntry(state: HistoryBuilderState, entry: SessionEntry): vo
         return;
     }
 
+    if (entry.type === "custom" && (entry as { customType: string }).customType === "turn_timing") {
+        handleTimingEntry(state, entry);
+        return;
+    }
+
     if (entry.type !== "message") return;
 
     const msg = (entry as unknown as { message: Record<string, unknown> | null | undefined }).message;
@@ -348,19 +367,54 @@ function resolveModel(
 }
 
 /**
- * Build message history from an in-memory session, respecting the
- * current branch/leaf position. Uses the SessionManager's getBranch() method
- * to walk only the entries on the current branch path.
+ * Compute aggregate timing statistics from collected per-turn entries.
  *
- * This is the sole method for reading session history — the SessionManager
- * handles JSONL file restoration automatically when the session is loaded.
+ * @param entries - The per-turn timing entries collected during history building
+ * @returns Aggregate statistics, or undefined if no timing entries exist
+ */
+function computeAggregateTiming(entries: TurnTiming[]): SessionTiming | undefined {
+    if (entries.length === 0) return undefined;
+
+    let ttftSum = 0;
+    let ttftCount = 0;
+    let tpsSum = 0;
+    let tpsCount = 0;
+    let totalOutputTokens = 0;
+
+    for (const entry of entries) {
+        if (entry.ttftMs !== null) {
+            ttftSum += entry.ttftMs;
+            ttftCount++;
+        }
+        if (entry.tps !== null) {
+            tpsSum += entry.tps;
+            tpsCount++;
+        }
+        totalOutputTokens += entry.outputTokens;
+    }
+
+    return {
+        turnCount: entries.length,
+        ttftCount,
+        avgTtftMs: ttftCount > 0 ? ttftSum / ttftCount : null,
+        tpsCount,
+        avgTps: tpsCount > 0 ? tpsSum / tpsCount : null,
+        totalOutputTokens,
+    };
+}
+
+/**
+ * Build message history from an in-memory AgentSession.
+ *
+ * Reads the current branch from the session manager, processes each entry,
+ * and returns the reconstructed messages, model info, and aggregate timing.
  *
  * @param activeSession - The active session to build history from
  * @param row - Database row data for fallback model info
  * @param row.session_file_path - Path to the session file
  * @param row.model_provider - Fallback model provider
  * @param row.model_id - Fallback model ID
- * @returns The built history result with messages and resolved model
+ * @returns The built history result with messages, resolved model, and aggregate timing
  */
 export function buildHistoryFromSession(
     activeSession: ActiveSession,
@@ -376,13 +430,18 @@ export function buildHistoryFromSession(
         lastModelId: null,
         lastAssistantMsgIndex: -1,
         accumulatedSources: [],
+        timingEntries: [],
     };
 
     for (const entry of branchEntries) {
         processBranchEntry(state, entry);
     }
 
-    return { messages: state.messages, model: resolveModel(state, row) };
+    return {
+        messages: state.messages,
+        model: resolveModel(state, row),
+        timing: computeAggregateTiming(state.timingEntries),
+    };
 }
 
 // --- Session tree ---

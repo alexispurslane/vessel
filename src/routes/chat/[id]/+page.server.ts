@@ -52,6 +52,7 @@ export const load: PageServerLoad = async ({ params }) => {
             // having to do any conversion before first paint.
             messages: messageHistoryToChatMessages(history),
             lastModel: history.model,
+            timing: history.timing ?? null,
             sandboxFiles,
         };
     } catch (e) {
@@ -62,6 +63,7 @@ export const load: PageServerLoad = async ({ params }) => {
             messageHistory: { messages: [], model: null },
             messages: [],
             lastModel: null,
+            timing: null,
             sandboxFiles: [],
         };
     }

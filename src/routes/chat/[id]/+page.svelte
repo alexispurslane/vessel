@@ -60,6 +60,8 @@
     import { ContextUsageRing } from "$lib/components/ui/context-usage-ring";
     import ArrowUp from "@lucide/svelte/icons/arrow-up";
     import ArrowDown from "@lucide/svelte/icons/arrow-down";
+    import Timer from "@lucide/svelte/icons/timer";
+    import Gauge from "@lucide/svelte/icons/gauge";
     import Undo2 from "@lucide/svelte/icons/undo-2";
     import X from "@lucide/svelte/icons/x";
     import {
@@ -941,6 +943,56 @@
                         >
                     </Tooltip>
                 </TooltipProvider>
+                {#if chat.timing}
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger>
+                                {#snippet child({ props })}
+                                    <div
+                                        {...props}
+                                        class="flex items-center gap-1 text-[11px] text-muted-foreground"
+                                    >
+                                        <Timer class="size-3" />
+                                        <span
+                                            >{chat.timing.avgTtftMs !== null
+                                                ? `${(chat.timing.avgTtftMs / 1000).toFixed(1)}s`
+                                                : "—"}</span
+                                        >
+                                    </div>
+                                {/snippet}
+                            </TooltipTrigger>
+                            <TooltipContent
+                                >Avg TTFT: {chat.timing.avgTtftMs !== null
+                                    ? `${chat.timing.avgTtftMs.toFixed(0)}ms`
+                                    : "n/a"} ({chat.timing.ttftCount} turns)</TooltipContent
+                            >
+                        </Tooltip>
+                    </TooltipProvider>
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger>
+                                {#snippet child({ props })}
+                                    <div
+                                        {...props}
+                                        class="flex items-center gap-1 text-[11px] text-muted-foreground"
+                                    >
+                                        <Gauge class="size-3" />
+                                        <span
+                                            >{chat.timing.avgTps !== null
+                                                ? `${chat.timing.avgTps.toFixed(0)}`
+                                                : "—"}</span
+                                        >
+                                    </div>
+                                {/snippet}
+                            </TooltipTrigger>
+                            <TooltipContent
+                                >Avg TPS: {chat.timing.avgTps !== null
+                                    ? `${chat.timing.avgTps.toFixed(1)}`
+                                    : "n/a"} ({chat.timing.tpsCount} turns)</TooltipContent
+                            >
+                        </Tooltip>
+                    </TooltipProvider>
+                {/if}
             </div>
             <!-- Right: Action buttons -->
             <div class="flex items-center gap-1">

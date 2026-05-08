@@ -22,7 +22,7 @@ import {
     releaseConversation,
 } from "$lib/api.js";
 import type { MessageHistory } from "$lib/api.js";
-import type { ChatMessage } from "$lib/types.js";
+import type { ChatMessage, SessionTiming } from "$lib/types.js";
 import { setActiveConversation, updateConversationTitleAndTags } from "./conversations.svelte.js";
 
 // Import message management functions from chat-messages module
@@ -43,6 +43,7 @@ import {
     handleToolExecutionUpdate,
     handleToolExecutionEnd,
     handleFetchedSources,
+    handleTurnTiming,
     finalizeStreamingMessage,
 } from "./chat-messages.svelte.js";
 
@@ -62,6 +63,8 @@ export interface ChatState {
     titleGenerationRequested: boolean;
     insideThinkingTag: boolean;
     lastModel: { provider: string; modelId: string } | null;
+    /** Aggregate timing statistics (avg TTFT, avg TPS) across all timed turns */
+    timing: SessionTiming | null;
     /** Resolves when the SSE 'connected' event arrives. Reset on each connectStream. */
     connectPromise: Promise<void> | null;
     /** Resolver for connectPromise — called from handleConnected. */
@@ -83,6 +86,7 @@ const state = $state<ChatState>({
     titleGenerationRequested: false,
     insideThinkingTag: false,
     lastModel: null,
+    timing: null,
     connectPromise: null,
     resolveConnect: null,
 });
@@ -296,6 +300,12 @@ function setupEventSource(
         handleFetchedSources(s, e);
     });
 
+    // Attach timing metrics (TTFT, TPS) to the producing assistant msg.
+    es.addEventListener("turn_timing", (e: MessageEvent) => {
+        if (isStale()) return;
+        handleTurnTiming(s, e);
+    });
+
     // When the session tree is navigated (by us or another client), reload messages
     es.addEventListener("session_tree", () => {
         if (isStale()) return;
@@ -406,6 +416,13 @@ export function getChat() {
          */
         get totalOutputTokens() {
             return state.messages.reduce((sum, m) => sum + (m.usage?.output ?? 0), 0);
+        },
+        /**
+         * Aggregate timing statistics (avg TTFT, avg TPS) across all timed turns.
+         * @returns The session timing aggregate, or null if no timing data
+         */
+        get timing() {
+            return state.timing;
         },
         /**
          * Add a user message to the local list only (does NOT send to the API).

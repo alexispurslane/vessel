@@ -18,7 +18,7 @@ import {
     regenWithFeedback as apiRegenWithFeedback,
 } from "$lib/api.js";
 import type { MessageHistory } from "$lib/api.js";
-import type { ChatMessage, FetchedSource } from "$lib/types.js";
+import type { ChatMessage, FetchedSource, SessionTiming, TurnTiming } from "$lib/types.js";
 import { messageHistoryToChatMessages } from "$lib/chat-history.js";
 import { updateConversationTitleAndTags } from "./conversations.svelte.js";
 
@@ -128,6 +128,18 @@ const fetchedSourceSchema: z.ZodType<FetchedSource> = z.union([
 
 const sseFetchedSourcesSchema = z.object({
     sources: z.array(fetchedSourceSchema).optional(),
+});
+
+const turnTimingSchema: z.ZodType<TurnTiming> = z.object({
+    turn: z.number(),
+    ttftMs: z.number().nullable(),
+    tps: z.number().nullable(),
+    outputTokens: z.number(),
+    totalTurnMs: z.number().nullable(),
+});
+
+const sseTurnTimingSchema = z.object({
+    timing: turnTimingSchema.optional(),
 });
 
 // --- State helpers (take ChatState as first parameter) ---
@@ -341,6 +353,9 @@ export function populateFromHistory(s: ChatState, history: MessageHistory, conve
     if (history.model) {
         s.lastModel = history.model;
     }
+    if (history.timing) {
+        s.timing = history.timing;
+    }
 
     // If this conversation has messages but no title yet, request
     // one now (server checks if the title is still "New Chat")
@@ -372,6 +387,7 @@ export function clearMessages(s: ChatState): void {
     s.error = null;
     s.insideThinkingTag = false;
     s.lastModel = null;
+    s.timing = null;
     s.titleGenerationRequested = false;
     s.recoveryTurnGeneration = null;
 }
@@ -413,6 +429,9 @@ export async function reloadMessages(s: ChatState): Promise<void> {
         }));
         if (history.model) {
             s.lastModel = history.model;
+        }
+        if (history.timing) {
+            s.timing = history.timing;
         }
     } catch (e) {
         s.error = e instanceof Error ? e.message : "Failed to reload messages";
@@ -1257,6 +1276,65 @@ export function handleFetchedSources(s: ChatState, e: MessageEvent): void {
     } catch {
         // ignore parse errors
     }
+}
+
+/**
+ * Handle the 'turn_timing' SSE event.
+ * Updates the aggregate SessionTiming on ChatState with the new turn data.
+ * @param s - The chat state
+ * @param e - The SSE MessageEvent
+ * @returns {void}
+ */
+export function handleTurnTiming(s: ChatState, e: MessageEvent): void {
+    try {
+        const data = safeJsonParse(e.data as string, sseTurnTimingSchema);
+        if (!data?.timing) return;
+        s.timing = mergeTurnTiming(s.timing, data.timing);
+    } catch {
+        // ignore parse errors
+    }
+}
+
+/**
+ * Merge a single turn's timing into the running aggregate.
+ * If no aggregate exists yet, creates one from the single turn.
+ *
+ * @param current - The current aggregate, or null if none exists
+ * @param turn - The new turn timing to merge in
+ * @returns The updated aggregate
+ */
+function mergeTurnTiming(current: SessionTiming | null, turn: TurnTiming): SessionTiming {
+    if (!current) {
+        return {
+            turnCount: 1,
+            ttftCount: turn.ttftMs !== null ? 1 : 0,
+            avgTtftMs: turn.ttftMs,
+            tpsCount: turn.tps !== null ? 1 : 0,
+            avgTps: turn.tps,
+            totalOutputTokens: turn.outputTokens,
+        };
+    }
+
+    const newTtftCount = turn.ttftMs !== null ? current.ttftCount + 1 : current.ttftCount;
+    const newTpsCount = turn.tps !== null ? current.tpsCount + 1 : current.tpsCount;
+
+    // Running-average: newAvg = (oldAvg * oldCount + newValue) / newCount
+    const newAvgTtftMs = turn.ttftMs !== null && current.ttftCount > 0
+        ? (current.avgTtftMs! * current.ttftCount + turn.ttftMs) / newTtftCount
+        : turn.ttftMs ?? current.avgTtftMs;
+
+    const newAvgTps = turn.tps !== null && current.tpsCount > 0
+        ? (current.avgTps! * current.tpsCount + turn.tps) / newTpsCount
+        : turn.tps ?? current.avgTps;
+
+    return {
+        turnCount: current.turnCount + 1,
+        ttftCount: newTtftCount,
+        avgTtftMs: newAvgTtftMs,
+        tpsCount: newTpsCount,
+        avgTps: newAvgTps,
+        totalOutputTokens: current.totalOutputTokens + turn.outputTokens,
+    };
 }
 
 // --- New helpers ---

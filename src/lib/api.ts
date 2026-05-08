@@ -11,6 +11,7 @@ import type {
     ModelInfo,
     ConversationSettings,
     FetchedSource,
+    SessionTiming,
 } from "$lib/types.js";
 
 class ApiError extends Error {
@@ -626,6 +627,8 @@ export interface MessageHistoryItem {
 export interface MessageHistory {
     messages: MessageHistoryItem[];
     model: { provider: string; modelId: string } | null;
+    /** Aggregate timing statistics across all timed turns */
+    timing?: SessionTiming;
 }
 
 /**

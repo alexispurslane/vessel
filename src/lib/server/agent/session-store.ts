@@ -38,6 +38,8 @@ import { createFetchTool } from "./sandboxed-fetch-tool.js";
 import { createSearchTool, SEARCH_SETTINGS_KEYS } from "./sandboxed-search-tool.js";
 import { fetchTracker } from "./extensions/fetch-tracker.js";
 import type { FetchedSource } from "./extensions/fetch-tracker.js";
+import { timingTracker } from "./extensions/timing-tracker.js";
+import type { SessionTiming, TurnTiming } from "$lib/types.js";
 import { createSessionSandbox, getSessionWorkDir, loadConversationSettingsFromDb, saveConversationSettingsToDb, isNetworkAllowed, getEffectiveAgentMode } from "./sandbox-factory.js";
 import type { Model as PiModel, Api } from "@mariozechner/pi-ai";
 import { getDb } from "../db/index.js";
@@ -467,7 +469,7 @@ async function createSessionInfrastructure(
 
     // Create a custom ResourceLoader that includes the fetch tracker (always) and
     // pi-mcp-adapter (only when there are enabled MCP servers).
-    const extensionFactories = hasMcpServers ? [mcpAdapter, fetchTracker] : [fetchTracker];
+    const extensionFactories = hasMcpServers ? [mcpAdapter, fetchTracker, timingTracker] : [fetchTracker, timingTracker];
     const resourceLoader = new DefaultResourceLoader({
         cwd: sessionWorkDir,
         agentDir: AGENT_DIR,
@@ -718,7 +720,7 @@ function setupSessionEventSubscriptions(
         broadcast({ sessions, scheduleDispose, disposeIfIdle }, conversationId, sseEvent);
     });
 
-    const unsubscribeEventBus = eventBus.on("fetched_sources", (data) => {
+    const unsubscribeFetchSources = eventBus.on("fetched_sources", (data) => {
         const sources = data as FetchedSource[];
         log.debug("fetch-tracker", `EventBus received fetched_sources: ${String(sources.length)} sources for conversation ${conversationId}`);
         broadcast({ sessions, scheduleDispose, disposeIfIdle }, conversationId, {
@@ -727,9 +729,19 @@ function setupSessionEventSubscriptions(
         });
     });
 
+    const unsubscribeTurnTiming = eventBus.on("turn_timing", (data) => {
+        const timing = data as TurnTiming;
+        log.debug("timing-tracker", `EventBus received turn_timing: turn=${String(timing.turn)}, ttftMs=${String(timing.ttftMs)} for conversation ${conversationId}`);
+        broadcast({ sessions, scheduleDispose, disposeIfIdle }, conversationId, {
+            event: "turn_timing",
+            data: { timing },
+        });
+    });
+
     return () => {
         unsubscribeAgent();
-        unsubscribeEventBus();
+        unsubscribeFetchSources();
+        unsubscribeTurnTiming();
     };
 }
 
@@ -1156,6 +1168,7 @@ export async function getSessionHistory(conversationId: string): Promise<{
         fetchedSources?: FetchedSource[];
     }>;
     model: { provider: string; modelId: string } | null;
+    timing?: SessionTiming;
 }> {
     const row = getConversationDbRow(conversationId);
     if (!row?.session_file_path) {

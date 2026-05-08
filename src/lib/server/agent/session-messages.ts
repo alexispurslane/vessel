@@ -18,6 +18,7 @@
 import type { AgentSession as PiAgentSession } from "@mariozechner/pi-coding-agent";
 import type { ActiveSession } from "./types.js";
 import type { FetchedSource } from "./extensions/fetch-tracker.js";
+import type { SessionTiming } from "$lib/types.js";
 
 import {
     buildHistoryFromSession,
@@ -163,6 +164,7 @@ export function getHistoryFromSession(
         fetchedSources?: FetchedSource[];
     }>;
     model: { provider: string; modelId: string } | null;
+    timing?: SessionTiming;
 } {
     return buildHistoryFromSession(activeSession, row);
 }
