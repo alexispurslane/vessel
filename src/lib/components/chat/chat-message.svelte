@@ -13,6 +13,8 @@
     import ChevronDown from "@lucide/svelte/icons/chevron-down";
     import ChevronUp from "@lucide/svelte/icons/chevron-up";
     import Clipboard from "@lucide/svelte/icons/clipboard";
+    import ClipboardCopy from "@lucide/svelte/icons/clipboard-copy";
+    import Archive from "@lucide/svelte/icons/archive";
     import AlertCircle from "@lucide/svelte/icons/alert-circle";
     import Trash2 from "@lucide/svelte/icons/trash-2";
     import Pencil from "@lucide/svelte/icons/pencil";
@@ -22,8 +24,17 @@
     import ThumbsDown from "@lucide/svelte/icons/thumbs-down";
     import ToolCall from "$lib/components/chat/tool-call.svelte";
     import FetchedSources from "$lib/components/chat/fetched-sources.svelte";
+    import {
+        Tooltip,
+        TooltipContent,
+        TooltipProvider,
+        TooltipTrigger,
+    } from "$lib/components/ui/tooltip/index.js";
     import type { ChatMessage as ChatMessageType } from "$lib/types.js";
     import type { SearchResultItem } from "$lib/types.js";
+    import { getCodeBlocks } from "$lib/api.js";
+    import { langToExt, generateId } from "$lib/utils/code-block.js";
+    import { strToU8, zipSync } from "fflate";
 
     interface Props {
         /** The chat message data */
@@ -48,6 +59,8 @@
         onsearchclick?: (query: string, results: SearchResultItem[]) => void;
         /** Callback when a page source is clicked, to open page content panel */
         onpageclick?: (url: string, title: string, content: string) => void;
+        /** The conversation ID, used for API calls like extracting code blocks */
+        conversationId: string;
     }
 
     let {
@@ -62,6 +75,7 @@
         navigating = false,
         onsearchclick,
         onpageclick,
+        conversationId,
     }: Props = $props();
 
     /** Theme override for user messages — needs text-primary-foreground instead of text-foreground */
@@ -137,12 +151,16 @@
     let thinkingEl: HTMLDivElement | undefined = $state();
     let msgEl: HTMLDivElement | undefined = $state();
     let copied = $state(false);
+    let copiedCode = $state(false);
     let confirmDelete = $state(false);
     let confirmDeleteTimer: ReturnType<typeof setTimeout> | undefined;
     let editing = $state(false);
     let editText = $state("");
     let showFeedbackPopup = $state(false);
     let feedbackText = $state("");
+    let showCodeBlockPopup = $state(false);
+    let pendingCodeBlocks: { lang: string; text: string }[] = $state([]);
+    let zipping = $state(false);
 
     /** Preprocessed content: fixes math formatting for Streamdown */
     const preprocessedContent = $derived(preprocessMathMarkdown(msg.content));
@@ -176,6 +194,107 @@
         }
         copied = true;
         setTimeout(() => (copied = false), 2000);
+    }
+
+    /**
+     * Write text to clipboard and set the copiedCode feedback state.
+     *
+     * @param text - The text to copy
+     */
+    async function doCopyCode(text: string) {
+        try {
+            await navigator.clipboard.writeText(text);
+        } catch {
+            // Clipboard API not available (e.g. non-HTTPS context)
+        }
+        copiedCode = true;
+        setTimeout(() => (copiedCode = false), 2000);
+    }
+
+    /**
+     * Count the number of distinct non-empty languages across the given code blocks.
+     *
+     * @param blocks - The code blocks to check
+     * @returns The count of distinct languages
+     */
+    function distinctLangCount(blocks: { lang: string }[]): number {
+        const langs = new Set(blocks.map((b) => b.lang).filter((l) => l));
+        return langs.size;
+    }
+
+    async function handleCopyCodeBlocks() {
+        try {
+            const { codeBlocks, concatenated } = await getCodeBlocks(conversationId, msg.id);
+            if (!concatenated) return;
+            // Multiple distinct languages — confirm before copying
+            if (codeBlocks.length > 1 && distinctLangCount(codeBlocks) > 1) {
+                pendingCodeBlocks = codeBlocks;
+                showCodeBlockPopup = true;
+                return;
+            }
+            await doCopyCode(concatenated);
+        } catch {
+            // Clipboard API not available or API error
+        }
+    }
+
+    function handleCodeBlockPopupCopy() {
+        const concatenated = pendingCodeBlocks.map((b) => b.text).join("\n\n");
+        showCodeBlockPopup = false;
+        pendingCodeBlocks = [];
+        void doCopyCode(concatenated);
+    }
+
+    function handleCodeBlockPopupCancel() {
+        showCodeBlockPopup = false;
+        pendingCodeBlocks = [];
+    }
+
+    /**
+     * Build unique filenames for code blocks, de-duplicating by appending
+     * a numeric suffix when multiple blocks share the same language.
+     *
+     * @param blocks - The code blocks to name
+     * @returns An array of filenames in the same order as blocks
+     */
+    function buildFilenames(blocks: { lang: string }[]): string[] {
+        const nameCounts: Record<string, number> = {};
+        return blocks.map((b) => {
+            const ext = langToExt(b.lang);
+            const base = `code`;
+            const key = `${base}.${ext}`;
+            const count = nameCounts[key] ?? 0;
+            nameCounts[key] = count + 1;
+            if (count === 0) return `${base}.${ext}`;
+            return `${base}-${String(count)}.${ext}`;
+        });
+    }
+
+    async function handleDownloadCodeBlocksZip() {
+        zipping = true;
+        try {
+            const { codeBlocks } = await getCodeBlocks(conversationId, msg.id);
+            if (!codeBlocks.length) return;
+            const filenames = buildFilenames(codeBlocks);
+            const files: Record<string, Uint8Array> = {};
+            for (let i = 0; i < codeBlocks.length; i++) {
+                files[filenames[i]] = strToU8(codeBlocks[i].text);
+            }
+            const zipped = zipSync(files);
+            const blob = new Blob([new Uint8Array(zipped)], { type: "application/zip" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `${generateId()}-code-blocks.zip`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch {
+            // API error or zip failure
+        } finally {
+            zipping = false;
+        }
     }
 
     function handleToggle(e: Event) {
@@ -383,99 +502,200 @@
                     </button>
                 </div>
             {:else if !msg.streaming && !navigating}
-                <div
-                    class="flex justify-end gap-1 mt-1 opacity-0 group-hover/msg:opacity-100 transition-opacity"
-                >
-                    {#if oneditassistant || (onedit && msg.role === "user")}
-                        <button
-                            onclick={() => {
-                                handleEdit();
-                            }}
-                            class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
-                            aria-label="Edit message"
-                            title="Edit message"
-                        >
-                            <Pencil class="size-3" />
-                        </button>
-                    {/if}
-                    {#if onedit && msg.role === "user"}
-                        <button
-                            onclick={() => {
-                                onedit(msg.id, msg.role);
-                            }}
-                            class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
-                            aria-label="Regenerate from here"
-                            title="Regenerate from here"
-                        >
-                            <RotateCcw class="size-3" />
-                        </button>
-                    {/if}
-                    {#if onedit && msg.role === "assistant"}
-                        <button
-                            onclick={() => {
-                                onedit(msg.id, msg.role);
-                            }}
-                            class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
-                            aria-label="Regenerate response"
-                            title="Regenerate response"
-                        >
-                            <RotateCcw class="size-3" />
-                        </button>
-                    {/if}
-                    {#if onregenfeedback && msg.role === "assistant"}
-                        <button
-                            onclick={() => {
-                                handleFeedbackOpen();
-                            }}
-                            class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
-                            aria-label="Regenerate with feedback"
-                            title="Regenerate with feedback"
-                        >
-                            <ThumbsDown class="size-3" />
-                        </button>
-                    {/if}
-                    {#if ondelete}
-                        <button
-                            onclick={() => {
-                                handleDelete();
-                            }}
-                            class="inline-flex items-center gap-1 text-[11px] transition-colors cursor-pointer px-1.5 py-0.5 rounded {confirmDelete
-                                ? 'text-destructive bg-destructive/10'
-                                : 'text-muted-foreground hover:text-foreground hover:bg-muted'}"
-                            aria-label={confirmDelete ? "Confirm delete" : "Delete message"}
-                            title={confirmDelete
-                                ? "Click again to confirm deletion"
-                                : "Delete message"}
-                        >
-                            <Trash2 class="size-3" />
-                            {#if confirmDelete}
-                                <span class="text-[10px] font-medium">Confirm?</span>
-                            {/if}
-                        </button>
-                    {/if}
-                    <button
-                        onclick={() => {
-                            void handleCopyMessage();
-                        }}
-                        class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
-                        aria-label="Copy message"
+                <TooltipProvider>
+                    <div
+                        class="flex justify-end gap-1 mt-1 opacity-0 group-hover/msg:opacity-100 transition-opacity"
                     >
-                        {#if copied}
-                            <Check class="size-3" />
-                        {:else}
-                            <Clipboard class="size-3" />
+                        {#if oneditassistant || (onedit && msg.role === "user")}
+                            <Tooltip>
+                                <TooltipTrigger>
+                                    {#snippet child({ props })}
+                                        <button
+                                            {...props}
+                                            onclick={() => {
+                                                handleEdit();
+                                            }}
+                                            class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
+                                            aria-label="Edit message"
+                                        >
+                                            <Pencil class="size-3" />
+                                        </button>
+                                    {/snippet}
+                                </TooltipTrigger>
+                                <TooltipContent>Edit message</TooltipContent>
+                            </Tooltip>
                         {/if}
-                    </button>
-                    <button
-                        onclick={() => {
-                            scrollToTop();
-                        }}
-                        class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
-                        aria-label="Scroll to top of message"
-                    >
-                        <ChevronUp class="size-3" />
-                    </button>
-                </div>
+                        {#if onedit && msg.role === "user"}
+                            <Tooltip>
+                                <TooltipTrigger>
+                                    {#snippet child({ props })}
+                                        <button
+                                            {...props}
+                                            onclick={() => {
+                                                onedit(msg.id, msg.role);
+                                            }}
+                                            class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
+                                            aria-label="Regenerate from here"
+                                        >
+                                            <RotateCcw class="size-3" />
+                                        </button>
+                                    {/snippet}
+                                </TooltipTrigger>
+                                <TooltipContent>Regenerate from here</TooltipContent>
+                            </Tooltip>
+                        {/if}
+                        {#if onedit && msg.role === "assistant"}
+                            <Tooltip>
+                                <TooltipTrigger>
+                                    {#snippet child({ props })}
+                                        <button
+                                            {...props}
+                                            onclick={() => {
+                                                onedit(msg.id, msg.role);
+                                            }}
+                                            class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
+                                            aria-label="Regenerate response"
+                                        >
+                                            <RotateCcw class="size-3" />
+                                        </button>
+                                    {/snippet}
+                                </TooltipTrigger>
+                                <TooltipContent>Regenerate response</TooltipContent>
+                            </Tooltip>
+                        {/if}
+                        {#if onregenfeedback && msg.role === "assistant"}
+                            <Tooltip>
+                                <TooltipTrigger>
+                                    {#snippet child({ props })}
+                                        <button
+                                            {...props}
+                                            onclick={() => {
+                                                handleFeedbackOpen();
+                                            }}
+                                            class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
+                                            aria-label="Regenerate with feedback"
+                                        >
+                                            <ThumbsDown class="size-3" />
+                                        </button>
+                                    {/snippet}
+                                </TooltipTrigger>
+                                <TooltipContent>Regenerate with feedback</TooltipContent>
+                            </Tooltip>
+                        {/if}
+                        {#if ondelete}
+                            <Tooltip>
+                                <TooltipTrigger>
+                                    {#snippet child({ props })}
+                                        <button
+                                            {...props}
+                                            onclick={() => {
+                                                handleDelete();
+                                            }}
+                                            class="inline-flex items-center gap-1 text-[11px] transition-colors cursor-pointer px-1.5 py-0.5 rounded {confirmDelete
+                                                ? 'text-destructive bg-destructive/10'
+                                                : 'text-muted-foreground hover:text-foreground hover:bg-muted'}"
+                                            aria-label={confirmDelete
+                                                ? "Confirm delete"
+                                                : "Delete message"}
+                                        >
+                                            <Trash2 class="size-3" />
+                                            {#if confirmDelete}
+                                                <span class="text-[10px] font-medium">Confirm?</span
+                                                >
+                                            {/if}
+                                        </button>
+                                    {/snippet}
+                                </TooltipTrigger>
+                                <TooltipContent
+                                    >{confirmDelete
+                                        ? "Click again to confirm"
+                                        : "Delete message"}</TooltipContent
+                                >
+                            </Tooltip>
+                        {/if}
+                        <Tooltip>
+                            <TooltipTrigger>
+                                {#snippet child({ props })}
+                                    <button
+                                        {...props}
+                                        onclick={() => {
+                                            void handleCopyMessage();
+                                        }}
+                                        class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
+                                        aria-label="Copy message"
+                                    >
+                                        {#if copied}
+                                            <Check class="size-3" />
+                                        {:else}
+                                            <Clipboard class="size-3" />
+                                        {/if}
+                                    </button>
+                                {/snippet}
+                            </TooltipTrigger>
+                            <TooltipContent>Copy message</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                            <TooltipTrigger>
+                                {#snippet child({ props })}
+                                    <button
+                                        {...props}
+                                        onclick={() => {
+                                            void handleCopyCodeBlocks();
+                                        }}
+                                        class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
+                                        aria-label="Copy code blocks"
+                                    >
+                                        {#if copiedCode}
+                                            <Check class="size-3" />
+                                        {:else}
+                                            <ClipboardCopy class="size-3" />
+                                        {/if}
+                                    </button>
+                                {/snippet}
+                            </TooltipTrigger>
+                            <TooltipContent>Copy code blocks</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                            <TooltipTrigger>
+                                {#snippet child({ props })}
+                                    <button
+                                        {...props}
+                                        onclick={() => {
+                                            void handleDownloadCodeBlocksZip();
+                                        }}
+                                        class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted disabled:opacity-50"
+                                        aria-label="Download code blocks as zip"
+                                        disabled={zipping}
+                                    >
+                                        {#if zipping}
+                                            <Spinner class="size-3" />
+                                        {:else}
+                                            <Archive class="size-3" />
+                                        {/if}
+                                    </button>
+                                {/snippet}
+                            </TooltipTrigger>
+                            <TooltipContent>Download code blocks as zip</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                            <TooltipTrigger>
+                                {#snippet child({ props })}
+                                    <button
+                                        {...props}
+                                        onclick={() => {
+                                            scrollToTop();
+                                        }}
+                                        class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted"
+                                        aria-label="Scroll to top of message"
+                                    >
+                                        <ChevronUp class="size-3" />
+                                    </button>
+                                {/snippet}
+                            </TooltipTrigger>
+                            <TooltipContent>Scroll to top</TooltipContent>
+                        </Tooltip>
+                    </div>
+                </TooltipProvider>
             {:else if navigating}
                 <div class="flex justify-end gap-1 mt-1">
                     <span
@@ -514,6 +734,40 @@
                         >
                             <ThumbsDown class="size-3" />
                             Submit
+                        </button>
+                    </div>
+                </div>
+            {/if}
+            <!-- Multi-language code block confirmation popup -->
+            {#if showCodeBlockPopup}
+                <div class="flex flex-col gap-2 mt-2 p-3 rounded border border-border bg-muted/50">
+                    <p class="text-xs text-muted-foreground">
+                        This message contains code blocks in different languages. Copy them all
+                        together?
+                    </p>
+                    <ul class="text-xs text-muted-foreground list-disc pl-5">
+                        {#each [...new Set(pendingCodeBlocks
+                                    .map((b) => b.lang)
+                                    .filter((l) => l))] as lang}
+                            <li class="font-mono">{lang}</li>
+                        {/each}
+                    </ul>
+                    <div class="flex justify-end gap-1.5">
+                        <button
+                            onclick={handleCodeBlockPopupCancel}
+                            class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
+                            aria-label="Cancel copying code blocks"
+                        >
+                            <X class="size-3" />
+                            Cancel
+                        </button>
+                        <button
+                            onclick={handleCodeBlockPopupCopy}
+                            class="inline-flex items-center gap-1 text-[11px] text-primary-foreground bg-primary hover:bg-primary/90 transition-colors cursor-pointer px-2 py-1 rounded"
+                            aria-label="Copy all code blocks"
+                        >
+                            <ClipboardCopy class="size-3" />
+                            Copy all
                         </button>
                     </div>
                 </div>

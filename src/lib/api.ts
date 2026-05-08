@@ -641,6 +641,36 @@ export async function getMessageHistory(conversationId: string): Promise<Message
     return apiFetch<MessageHistory>(`/api/sessions/${conversationId}/messages`);
 }
 
+/** A single code block extracted from a message */
+interface CodeBlock {
+    /** The language identifier (e.g. "typescript", "python"), or empty string if none */
+    lang: string;
+    /** The raw code content */
+    text: string;
+}
+
+/** Response from GET /api/sessions/[id]/code-blocks */
+interface CodeBlocksResponse {
+    codeBlocks: CodeBlock[];
+    concatenated: string;
+}
+
+/**
+ * Extract code blocks from a specific message using server-side marked parsing.
+ *
+ * @param conversationId - The conversation ID
+ * @param messageId - The message ID to extract code blocks from
+ * @returns The code blocks and their concatenated text
+ */
+export async function getCodeBlocks(
+    conversationId: string,
+    messageId: string
+): Promise<CodeBlocksResponse> {
+    return apiFetch<CodeBlocksResponse>(
+        `/api/sessions/${conversationId}/code-blocks?messageId=${encodeURIComponent(messageId)}`
+    );
+}
+
 /**
  * Abort an in-progress generation for a conversation.
  *

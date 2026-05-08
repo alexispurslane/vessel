@@ -1247,6 +1247,7 @@
                                                             navigating={chat.navigating}
                                                             onsearchclick={handleSearchClick}
                                                             onpageclick={handlePageClick}
+                                                            conversationId={id}
                                                         />
                                                     </div>
                                                 </div>

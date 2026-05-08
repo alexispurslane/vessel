@@ -4,7 +4,9 @@
      */
     import Clipboard from "@lucide/svelte/icons/clipboard";
     import Check from "@lucide/svelte/icons/check";
+    import Download from "@lucide/svelte/icons/download";
     import { highlightElement } from "@speed-highlight/core";
+    import { langToExt, generateId } from "$lib/utils/code-block.js";
 
     interface Props {
         lang?: string;
@@ -47,6 +49,26 @@
         return aliases[lower] ?? lower;
     }
 
+    /**
+     * Download the code block as a file.
+     *
+     * @param code - The code text to download
+     * @param lang - The language identifier for determining the file extension
+     */
+    function handleDownload(code: string, lang: string) {
+        const ext = langToExt(lang);
+        const filename = `${generateId()}.${ext}`;
+        const blob = new Blob([code], { type: "text/plain" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
     async function handleCopy() {
         try {
             await navigator.clipboard.writeText(text);
@@ -83,32 +105,53 @@
             class="flex items-center justify-between px-4 py-1.5 text-[11px] text-muted-foreground bg-muted/50 border-b"
         >
             <span class="font-medium">{lang}</span>
+            <div class="flex items-center gap-2">
+                <button
+                    onclick={handleCopy}
+                    class="inline-flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer"
+                    aria-label="Copy code"
+                >
+                    {#if copied}
+                        <Check class="size-3" />
+                        <span>Copied!</span>
+                    {:else}
+                        <Clipboard class="size-3" />
+                        <span>Copy</span>
+                    {/if}
+                </button>
+                <button
+                    onclick={() => handleDownload(text, lang)}
+                    class="inline-flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer"
+                    aria-label="Download code"
+                >
+                    <Download class="size-3" />
+                    <span>Download</span>
+                </button>
+            </div>
+        </div>
+    {:else}
+        <div
+            class="absolute top-2 right-2 opacity-0 group-hover/code:opacity-100 transition-opacity flex items-center gap-1 z-10"
+        >
             <button
                 onclick={handleCopy}
-                class="inline-flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer"
+                class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground bg-muted/80 rounded px-1.5 py-0.5 cursor-pointer"
                 aria-label="Copy code"
             >
                 {#if copied}
                     <Check class="size-3" />
-                    <span>Copied!</span>
                 {:else}
                     <Clipboard class="size-3" />
-                    <span>Copy</span>
                 {/if}
             </button>
+            <button
+                onclick={() => handleDownload(text, lang)}
+                class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground bg-muted/80 rounded px-1.5 py-0.5 cursor-pointer"
+                aria-label="Download code"
+            >
+                <Download class="size-3" />
+            </button>
         </div>
-    {:else}
-        <button
-            onclick={handleCopy}
-            class="absolute top-2 right-2 opacity-0 group-hover/code:opacity-100 transition-opacity inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground bg-muted/80 rounded px-1.5 py-0.5 cursor-pointer z-10"
-            aria-label="Copy code"
-        >
-            {#if copied}
-                <Check class="size-3" />
-            {:else}
-                <Clipboard class="size-3" />
-            {/if}
-        </button>
     {/if}
     <div class="shj-code-wrapper overflow-x-auto p-4 text-sm leading-relaxed font-mono">
         <div bind:this={codeEl}></div>
