@@ -497,7 +497,7 @@
                     bind:value
                     {placeholder}
                     rows={1}
-                    class="border-0 bg-transparent dark:bg-transparent focus-visible:ring-0 resize-none py-1 w-full overflow-hidden min-h-0 max-h-50"
+                    class="border-0 bg-transparent dark:bg-transparent focus-visible:ring-0 resize-none py-1 w-full overflow-y-auto min-h-0 max-h-50"
                     onkeydown={handleKeydown}
                     oninput={adjustTextareaHeight}
                     onpaste={handleTextareaPaste}
