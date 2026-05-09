@@ -47,6 +47,8 @@
         disabled?: boolean;
         minHeight?: number;
         maxHeight?: number;
+        /** Whether the editor is in fullscreen mode — fills available parent space instead of auto-growing */
+        fullscreen?: boolean;
         autofocus?: boolean;
         /** Workspace file paths to suggest when the user types @ */
         sandboxFiles?: string[];
@@ -63,6 +65,7 @@
         disabled = false,
         minHeight = 36,
         maxHeight = 200,
+        fullscreen = false,
         autofocus = false,
         sandboxFiles = [],
         onchange,
@@ -83,15 +86,14 @@
     const autocompleteCompartment = new Compartment();
 
     /**
-     * Sync the wrapper height to the editor's content height,
-     * clamped between minHeight and maxHeight.
+     * Track the editor's content height so the wrapper can size itself.
+     * CSS min-height / max-height on the wrapper handle clamping.
      * @param view - The EditorView whose content height to measure
      */
     function syncHeight(view: EditorView) {
         const contentH = view.contentHeight;
-        const next = Math.min(Math.max(contentH, minHeight), maxHeight);
-        if (next !== wrapperHeight) {
-            wrapperHeight = next;
+        if (contentH !== wrapperHeight) {
+            wrapperHeight = contentH;
         }
     }
 
@@ -438,8 +440,10 @@
 
 <div
     bind:this={wrapperEl}
-    class="cm-input-wrapper w-full overflow-hidden"
-    style="height: {wrapperHeight}px; min-height: {minHeight}px; max-height: {maxHeight}px;"
+    class="cm-input-wrapper w-full overflow-hidden {fullscreen ? 'flex-1 min-h-0' : ''}"
+    style="min-height: {minHeight}px; max-height: {fullscreen
+        ? 'none'
+        : `${maxHeight}px`}; {fullscreen ? '' : `height: ${wrapperHeight}px;`}"
     role="textbox"
     aria-multiline="true"
     aria-label={placeholder || "Chat message input"}

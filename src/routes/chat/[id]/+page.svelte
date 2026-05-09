@@ -1485,6 +1485,7 @@
                             <ChatInput
                                 bind:value={inputText}
                                 bind:pendingFiles
+                                bind:fullscreen={inputFullscreen}
                                 {sandboxFiles}
                                 placeholder={chat.connected ? "Type a message..." : "Connecting..."}
                                 disabled={!chat.connected || uploadProgress !== null}

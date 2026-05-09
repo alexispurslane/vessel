@@ -39,6 +39,8 @@
     import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
     import Plus from "@lucide/svelte/icons/plus";
     import X from "@lucide/svelte/icons/x";
+    import Maximize from "@lucide/svelte/icons/maximize";
+    import Minimize from "@lucide/svelte/icons/minimize";
     import FileIcon from "@lucide/svelte/icons/file";
     import ImageIcon from "@lucide/svelte/icons/image";
     import type { ModelInfo } from "$lib/types.js";
@@ -87,6 +89,8 @@
         onswitchtoglobaldefault?: () => void;
         /** Whether to autofocus the input on mount */
         autofocus?: boolean;
+        /** Whether the input is in fullscreen mode (two-way bindable) */
+        fullscreen?: boolean;
     }
 
     let {
@@ -109,6 +113,7 @@
         onsetconversationdefault,
         onswitchtoglobaldefault,
         autofocus = false,
+        fullscreen = $bindable(false),
     }: Props = $props();
 
     let editorRef: import("@codemirror/view").EditorView | null = $state(null);
@@ -302,8 +307,20 @@
 
 <!-- Unified input container with border -->
 <div
-    class="group flex flex-col rounded-md border bg-background px-3 py-2 focus-within:ring-2 focus-within:ring-ring focus-within:border-ring transition-all"
+    class="group relative flex flex-col rounded-md border bg-background px-3 py-2 focus-within:ring-2 focus-within:ring-ring focus-within:border-ring transition-all {fullscreen
+        ? 'flex-1 min-h-0'
+        : ''}"
 >
+    <!-- Exit fullscreen button (upper-right overlay) -->
+    {#if fullscreen}
+        <button
+            class="absolute top-2 right-2 z-10 inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+            onclick={() => (fullscreen = false)}
+            aria-label="Exit fullscreen"
+        >
+            <Minimize class="size-4" />
+        </button>
+    {/if}
     <!-- File chips: sandbox files (subdued) + pending files (outlined) -->
     {#if sandboxFiles.length > 0 || pendingFiles.length > 0}
         <div class="flex flex-wrap gap-1.5 pb-2">
@@ -365,125 +382,129 @@
     {/if}
 
     <!-- Input row -->
-    <div class="flex items-center gap-2">
-        <!-- Model selector button -->
-        {#if models.length > 0}
-            <DropdownMenu>
-                <TooltipProvider>
-                    <Tooltip>
-                        <TooltipTrigger>
-                            {#snippet child({ props })}
-                                <DropdownMenuTrigger
-                                    {...props}
-                                    class="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-muted text-foreground transition-colors cursor-pointer"
-                                    aria-label="Select model"
-                                >
-                                    <Cpu class="size-4" />
-                                    {#if modelIsNonDefault}
-                                        <span
-                                            class="absolute top-1 right-1 size-2 rounded-full bg-primary"
-                                        ></span>
-                                    {/if}
-                                </DropdownMenuTrigger>
-                            {/snippet}
-                        </TooltipTrigger>
-                        <TooltipContent
-                            >Model: {getModelDisplayName(selectedModelId)}</TooltipContent
-                        >
-                    </Tooltip>
-                </TooltipProvider>
-                <DropdownMenuContent align="start">
-                    {#each Object.entries(modelsByProvider()) as [provider, providerModels] (provider)}
-                        <DropdownMenuGroup>
-                            <DropdownMenuLabel class="text-xs text-muted-foreground"
-                                >{provider}</DropdownMenuLabel
+    <div class="flex {fullscreen ? 'flex-1 min-h-0' : 'items-center'} gap-2">
+        <!-- Left-side buttons: model selector etc. -->
+        <div class="flex {fullscreen ? 'self-end' : 'items-center'} gap-1">
+            {#if models.length > 0}
+                <DropdownMenu>
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger>
+                                {#snippet child({ props })}
+                                    <DropdownMenuTrigger
+                                        {...props}
+                                        class="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-muted text-foreground transition-colors cursor-pointer"
+                                        aria-label="Select model"
+                                    >
+                                        <Cpu class="size-4" />
+                                        {#if modelIsNonDefault}
+                                            <span
+                                                class="absolute top-1 right-1 size-2 rounded-full bg-primary"
+                                            ></span>
+                                        {/if}
+                                    </DropdownMenuTrigger>
+                                {/snippet}
+                            </TooltipTrigger>
+                            <TooltipContent
+                                >Model: {getModelDisplayName(selectedModelId)}</TooltipContent
                             >
-                            {#each providerModels as model (model.id)}
-                                <DropdownMenuItem
-                                    onclick={() => (selectedModelId = model.id)}
-                                    class="flex items-center justify-between"
+                        </Tooltip>
+                    </TooltipProvider>
+                    <DropdownMenuContent align="start">
+                        {#each Object.entries(modelsByProvider()) as [provider, providerModels] (provider)}
+                            <DropdownMenuGroup>
+                                <DropdownMenuLabel class="text-xs text-muted-foreground"
+                                    >{provider}</DropdownMenuLabel
                                 >
-                                    <span class="text-xs">{model.name}</span>
-                                    {#if selectedModelId === model.id}
-                                        <Check class="size-3.5 shrink-0" />
-                                    {/if}
-                                </DropdownMenuItem>
-                            {/each}
-                        </DropdownMenuGroup>
-                    {/each}
-                </DropdownMenuContent>
-            </DropdownMenu>
+                                {#each providerModels as model (model.id)}
+                                    <DropdownMenuItem
+                                        onclick={() => (selectedModelId = model.id)}
+                                        class="flex items-center justify-between"
+                                    >
+                                        <span class="text-xs">{model.name}</span>
+                                        {#if selectedModelId === model.id}
+                                            <Check class="size-3.5 shrink-0" />
+                                        {/if}
+                                    </DropdownMenuItem>
+                                {/each}
+                            </DropdownMenuGroup>
+                        {/each}
+                    </DropdownMenuContent>
+                </DropdownMenu>
 
-            <!-- Model action buttons: visible when selected model differs from conversation default -->
-            {#if modelIsNonDefault}
-                <TooltipProvider>
-                    <Tooltip>
-                        <TooltipTrigger>
-                            {#snippet child({ props })}
-                                <button
-                                    {...props}
-                                    class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-green-600 hover:bg-green-500/10 transition-colors cursor-pointer"
-                                    onclick={onsetconversationdefault}
-                                    aria-label="Set as conversation default"
-                                >
-                                    <CheckCircle class="size-3.5" />
-                                </button>
-                            {/snippet}
-                        </TooltipTrigger>
-                        <TooltipContent>Set as conversation default</TooltipContent>
-                    </Tooltip>
-                </TooltipProvider>
-                <TooltipProvider>
-                    <Tooltip>
-                        <TooltipTrigger>
-                            {#snippet child({ props })}
-                                <button
-                                    {...props}
-                                    class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
-                                    onclick={() => (selectedModelId = conversationDefaultModelId)}
-                                    aria-label="Restore conversation default"
-                                >
-                                    <Undo2 class="size-3.5" />
-                                </button>
-                            {/snippet}
-                        </TooltipTrigger>
-                        <TooltipContent>Restore to conversation default</TooltipContent>
-                    </Tooltip>
-                </TooltipProvider>
-            {/if}
+                <!-- Model action buttons: visible when selected model differs from conversation default -->
+                {#if modelIsNonDefault}
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger>
+                                {#snippet child({ props })}
+                                    <button
+                                        {...props}
+                                        class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-green-600 hover:bg-green-500/10 transition-colors cursor-pointer"
+                                        onclick={onsetconversationdefault}
+                                        aria-label="Set as conversation default"
+                                    >
+                                        <CheckCircle class="size-3.5" />
+                                    </button>
+                                {/snippet}
+                            </TooltipTrigger>
+                            <TooltipContent>Set as conversation default</TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger>
+                                {#snippet child({ props })}
+                                    <button
+                                        {...props}
+                                        class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+                                        onclick={() =>
+                                            (selectedModelId = conversationDefaultModelId)}
+                                        aria-label="Restore conversation default"
+                                    >
+                                        <Undo2 class="size-3.5" />
+                                    </button>
+                                {/snippet}
+                            </TooltipTrigger>
+                            <TooltipContent>Restore to conversation default</TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                {/if}
 
-            <!-- Reset conversation default to global default -->
-            {#if conversationDefaultDiffersFromGlobal}
-                <TooltipProvider>
-                    <Tooltip>
-                        <TooltipTrigger>
-                            {#snippet child({ props })}
-                                <button
-                                    {...props}
-                                    class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
-                                    onclick={onswitchtoglobaldefault}
-                                    aria-label="Switch to global default"
-                                >
-                                    <RotateCcw class="size-3.5" />
-                                </button>
-                            {/snippet}
-                        </TooltipTrigger>
-                        <TooltipContent>Switch to global default</TooltipContent>
-                    </Tooltip>
-                </TooltipProvider>
+                <!-- Reset conversation default to global default -->
+                {#if conversationDefaultDiffersFromGlobal}
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger>
+                                {#snippet child({ props })}
+                                    <button
+                                        {...props}
+                                        class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+                                        onclick={onswitchtoglobaldefault}
+                                        aria-label="Switch to global default"
+                                    >
+                                        <RotateCcw class="size-3.5" />
+                                    </button>
+                                {/snippet}
+                            </TooltipTrigger>
+                            <TooltipContent>Switch to global default</TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                {/if}
+            {:else}
+                <div class="shrink-0 w-8"></div>
             {/if}
-        {:else}
-            <div class="shrink-0 w-8"></div>
-        {/if}
+        </div>
 
         <!-- Text input with context menu -->
         <ContextMenu>
-            <ContextMenuTrigger class="flex-1 min-w-0">
+            <ContextMenuTrigger class="flex-1 min-w-0 {fullscreen ? 'min-h-0 flex flex-col' : ''}">
                 <CodeMirrorInput
                     bind:ref={editorRef}
                     bind:value
                     {placeholder}
                     {disabled}
+                    {fullscreen}
                     {sandboxFiles}
                     onsubmit={handleSend}
                     onpaste={handleTextareaPaste}
@@ -510,52 +531,80 @@
             </ContextMenuContent>
         </ContextMenu>
 
-        <!-- Plus button for file upload -->
-        <TooltipProvider>
-            <Tooltip>
-                <TooltipTrigger>
-                    {#snippet child({ props })}
-                        <Button
-                            {...props}
-                            variant="ghost"
-                            size="icon"
-                            onclick={handleFileSelect}
-                            class="h-8 w-8 shrink-0"
-                            aria-label="Attach files"
-                        >
-                            <Plus class="size-4" />
-                        </Button>
-                    {/snippet}
-                </TooltipTrigger>
-                <TooltipContent>Attach files to sandbox</TooltipContent>
-            </Tooltip>
-        </TooltipProvider>
+        <!-- Right-side action buttons -->
+        <div class="flex {fullscreen ? 'self-end' : 'items-center'} gap-2">
+            <!-- Plus button for file upload -->
+            <TooltipProvider>
+                <Tooltip>
+                    <TooltipTrigger>
+                        {#snippet child({ props })}
+                            <Button
+                                {...props}
+                                variant="ghost"
+                                size="icon"
+                                onclick={handleFileSelect}
+                                class="h-8 w-8 shrink-0"
+                                aria-label="Attach files"
+                            >
+                                <Plus class="size-4" />
+                            </Button>
+                        {/snippet}
+                    </TooltipTrigger>
+                    <TooltipContent>Attach files to sandbox</TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
 
-        <!-- Send / Abort button -->
-        {#if generating}
-            <Button
-                variant="destructive"
-                size="icon"
-                onclick={handleAbort}
-                class="h-8 w-8 shrink-0"
-                aria-label="Stop generating"
-            >
-                <StopCircle class="size-4" />
-            </Button>
-        {:else}
-            <Button
-                size="icon"
-                onclick={handleSend}
-                disabled={!canSend}
-                class="h-8 w-8 shrink-0"
-                aria-label="Send message"
-            >
-                {#if disabled}
-                    <Spinner class="h-4 w-4" />
-                {:else}
-                    <Send class="size-4" />
-                {/if}
-            </Button>
-        {/if}
+            <!-- Fullscreen toggle button -->
+            <TooltipProvider>
+                <Tooltip>
+                    <TooltipTrigger>
+                        {#snippet child({ props })}
+                            <Button
+                                {...props}
+                                variant="ghost"
+                                size="icon"
+                                onclick={() => (fullscreen = !fullscreen)}
+                                class="h-8 w-8 shrink-0"
+                                aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+                            >
+                                {#if fullscreen}
+                                    <Minimize class="size-4" />
+                                {:else}
+                                    <Maximize class="size-4" />
+                                {/if}
+                            </Button>
+                        {/snippet}
+                    </TooltipTrigger>
+                    <TooltipContent>{fullscreen ? "Exit fullscreen" : "Fullscreen"}</TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
+
+            <!-- Send / Abort button -->
+            {#if generating}
+                <Button
+                    variant="destructive"
+                    size="icon"
+                    onclick={handleAbort}
+                    class="h-8 w-8 shrink-0"
+                    aria-label="Stop generating"
+                >
+                    <StopCircle class="size-4" />
+                </Button>
+            {:else}
+                <Button
+                    size="icon"
+                    onclick={handleSend}
+                    disabled={!canSend}
+                    class="h-8 w-8 shrink-0"
+                    aria-label="Send message"
+                >
+                    {#if disabled}
+                        <Spinner class="h-4 w-4" />
+                    {:else}
+                        <Send class="size-4" />
+                    {/if}
+                </Button>
+            {/if}
+        </div>
     </div>
 </div>
