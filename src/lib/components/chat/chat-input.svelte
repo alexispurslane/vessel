@@ -3,7 +3,7 @@
      * @file Chat input component with file upload support.
      */
     import { Button } from "$lib/components/ui/button/index.js";
-    import { Textarea } from "$lib/components/ui/textarea/index.js";
+    import CodeMirrorInput from "$lib/components/codemirror/CodeMirrorInput.svelte";
     import {
         DropdownMenu,
         DropdownMenuContent,
@@ -111,22 +111,15 @@
         autofocus = false,
     }: Props = $props();
 
-    let textareaRef: HTMLTextAreaElement | null = $state(null);
+    let editorRef: import("@codemirror/view").EditorView | null = $state(null);
     let fileInputRef: HTMLInputElement | null = $state(null);
 
-    // Autofocus the textarea on mount when requested
+    // Autofocus the editor on mount when requested
     $effect(() => {
-        if (autofocus && textareaRef) {
-            textareaRef.focus();
+        if (autofocus && editorRef) {
+            editorRef.focus();
         }
     });
-
-    function handleKeydown(e: KeyboardEvent) {
-        if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            handleSend();
-        }
-    }
 
     function handleSend() {
         if (
@@ -159,7 +152,7 @@
     }
 
     /**
-     * Handle native paste events on the textarea.
+     * Handle paste events on the editor.
      * If the clipboard contains image data, the image is captured as a
      * File and added to pendingFiles.
      * Text content from the same paste is also inserted so nothing is lost.
@@ -188,11 +181,14 @@
                 ];
             }
 
-            // If there is also plain text in the clipboard, insert it manually
-            // so mixed text+image pastes don't lose the text portion.
+            // Insert any plain text from the same paste via EditorView
             const text = e.clipboardData.getData("text/plain");
-            if (text) {
-                document.execCommand("insertText", false, text);
+            if (text && editorRef) {
+                const view = editorRef;
+                const pos = view.state.selection.main.head;
+                view.dispatch({
+                    changes: { from: pos, insert: text },
+                });
             }
         }
     }
@@ -200,8 +196,12 @@
     async function handlePaste() {
         try {
             const text = await navigator.clipboard.readText();
-            if (text) {
-                document.execCommand("insertText", false, text);
+            if (text && editorRef) {
+                const view = editorRef;
+                const pos = view.state.selection.main.head;
+                view.dispatch({
+                    changes: { from: pos, insert: text },
+                });
             }
         } catch {
             // Clipboard read failed (e.g. permissions denied)
@@ -211,8 +211,7 @@
     function handleClear() {
         value = "";
         pendingFiles = [];
-        textareaRef?.focus();
-        adjustTextareaHeight();
+        editorRef?.focus();
     }
 
     function handleFileSelect() {
@@ -248,19 +247,7 @@
         return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
     }
 
-    // Auto-resize textarea based on content
-    function adjustTextareaHeight() {
-        if (!textareaRef) return;
-        // Reset to auto to get the correct scrollHeight
-        textareaRef.style.height = "auto";
-        // Set to scrollHeight (capped at max-height via CSS)
-        textareaRef.style.height = `${String(textareaRef.scrollHeight)}px`;
-    }
-
-    // Watch value changes to adjust height
-    $effect(() => {
-        adjustTextareaHeight();
-    });
+    // Height auto-resize is handled by CodeMirrorInput's internal auto-grow logic
 
     // Look up a model's display name from the available models list.
     // Model IDs are unique, so we only need the modelId to find it.
@@ -492,17 +479,14 @@
         <!-- Text input with context menu -->
         <ContextMenu>
             <ContextMenuTrigger class="flex-1 min-w-0">
-                <Textarea
-                    bind:ref={textareaRef}
+                <CodeMirrorInput
+                    bind:ref={editorRef}
                     bind:value
                     {placeholder}
-                    rows={1}
-                    class="border-0 bg-transparent dark:bg-transparent focus-visible:ring-0 resize-none py-1 w-full overflow-y-auto min-h-0 max-h-50"
-                    onkeydown={handleKeydown}
-                    oninput={adjustTextareaHeight}
-                    onpaste={handleTextareaPaste}
                     {disabled}
-                    aria-label="Chat message input"
+                    {sandboxFiles}
+                    onsubmit={handleSend}
+                    onpaste={handleTextareaPaste}
                 />
             </ContextMenuTrigger>
             <ContextMenuContent>

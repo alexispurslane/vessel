@@ -66,12 +66,15 @@
         "pre-push": "bun audit && bun run lint --quiet"
     },
     "dependencies": {
+        "@codemirror/lang-markdown": "^6.5.0",
+        "@codemirror/language-data": "^6.5.2",
         "@mariozechner/pi-agent-core": "^0.67.68",
         "@mariozechner/pi-ai": "^0.67.68",
         "@mariozechner/pi-coding-agent": "^0.67.68",
         "@speed-highlight/core": "^1.2.15",
         "bcrypt": "^6.0.0",
         "bcryptjs": "^3.0.3",
+        "codemirror": "^6.0.2",
         "cookie": "^1.1.1",
         "d3-dag": "^1.2.1",
         "defuddle": "^0.18.1",

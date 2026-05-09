@@ -1,5 +1,6 @@
 import { IsMobile } from "$lib/hooks/is-mobile.svelte.js";
 import { getContext, setContext } from "svelte";
+import { isInCodeMirror } from "$lib/utils/keyboard.js";
 import {
     SIDEBAR_KEYBOARD_SHORTCUT,
     SIDEBAR_WIDTH_DEFAULT_PX,
@@ -94,6 +95,7 @@ class SidebarState {
     // Event handler to apply to the `<svelte:window>`
     handleShortcutKeydown = (e: KeyboardEvent) => {
         if (e.key === SIDEBAR_KEYBOARD_SHORTCUT && (e.metaKey || e.ctrlKey)) {
+            if (isInCodeMirror(e)) return;
             e.preventDefault();
             this.toggle();
         }

@@ -95,6 +95,21 @@ export const SHORTCUTS: ReadonlyArray<{
     ];
 
 /**
+ * Check whether a keyboard event originated inside a CodeMirror editor.
+ *
+ * CodeMirror uses `div[contenteditable]` rather than `<input>` or
+ * `<textarea>`, so the standard `tagName` checks don't catch it. This
+ * walks up from the event target looking for the `.cm-editor` root.
+ *
+ * @param e - A keyboard event
+ * @returns Whether the target is inside a CodeMirror editor
+ */
+export function isInCodeMirror(e: KeyboardEvent): boolean {
+    const el = e.target as HTMLElement | null;
+    return !!el?.closest(".cm-editor");
+}
+
+/**
  * Global keydown handler that checks all registered shortcuts and
  * dispatches a `vessel-shortcut` custom event when one matches.
  * @param e - The keyboard event

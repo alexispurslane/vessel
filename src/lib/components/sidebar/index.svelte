@@ -72,7 +72,11 @@
     import { getAuth, doLogout } from "$lib/stores/auth.svelte.js";
     import ConversationItem from "./conversation-item.svelte";
     import { onMount, onDestroy } from "svelte";
-    import { SHORTCUT_EVENT_TYPE, type ShortcutEventDetail } from "$lib/utils/keyboard.js";
+    import {
+        SHORTCUT_EVENT_TYPE,
+        type ShortcutEventDetail,
+        isInCodeMirror,
+    } from "$lib/utils/keyboard.js";
 
     let { currentPath }: { currentPath: string } = $props();
 
@@ -388,7 +392,7 @@
         function handleKeyDown(e: KeyboardEvent) {
             if ((e.metaKey || e.ctrlKey) && e.key === "f") {
                 const tag = (e.target as HTMLElement | null)?.tagName;
-                if (tag === "INPUT" || tag === "TEXTAREA") return;
+                if (tag === "INPUT" || tag === "TEXTAREA" || isInCodeMirror(e)) return;
                 e.preventDefault();
                 focusSearch();
             }
