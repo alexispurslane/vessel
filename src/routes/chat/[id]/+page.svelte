@@ -98,6 +98,7 @@
         clearTabTitleNotification,
     } from "$lib/stores/notifications.svelte.js";
     import { IsMobile } from "$lib/hooks/is-mobile.svelte.js";
+    import AriaLiveRegion from "$lib/components/chat/a11y/aria-live-region.svelte";
 
     const isMobile = new IsMobile();
 
@@ -227,6 +228,12 @@
     let searchResultsData = $state<SearchResultItem[]>([]);
     // Fetched page panel state
     let fetchedPageOpen = $state(false);
+
+    // --- Accessibility: screen reader announcements ---
+    let a11yAnnouncement = $state("");
+
+    // --- Accessibility: focus management ---
+    let lastFocusedMsgId: string | null = null;
     let fetchedPageUrl = $state("");
     let fetchedPageTitle = $state("");
     let fetchedPageContent = $state("");
@@ -651,6 +658,71 @@
         });
     });
 
+    // --- Accessibility: screen reader announcements ---
+    // Announce when a new assistant message finishes streaming
+    $effect(() => {
+        const count = displayMessages.length;
+        if (count === 0) return;
+        const lastMsg = displayMessages[count - 1];
+        const content = lastMsg.content;
+        const streaming = lastMsg.streaming;
+        const role = lastMsg.role;
+
+        // Announce completed assistant messages
+        if (role === "assistant" && !streaming && content) {
+            const preview = content.length > 100 ? content.slice(0, 100) + "..." : content;
+            a11yAnnouncement = `Assistant responded: ${preview}`;
+        }
+    });
+
+    // Announce tool call status changes
+    function announceToolCall(tc: { toolName: string; status: string }) {
+        if (tc.status === "completed") {
+            a11yAnnouncement = `Tool ${tc.toolName} completed`;
+        } else if (tc.status === "error") {
+            a11yAnnouncement = `Tool ${tc.toolName} encountered an error`;
+        }
+    }
+
+    $effect(() => {
+        for (const item of renderItems) {
+            if (item.type === "thinkingGroup") {
+                for (const step of item.steps) {
+                    if (step.type === "toolCall" && step.toolCall) {
+                        announceToolCall(step.toolCall);
+                    }
+                }
+            } else if (item.msg.toolCalls) {
+                for (const tc of item.msg.toolCalls) {
+                    announceToolCall(tc);
+                }
+            }
+        }
+    });
+
+    // --- Accessibility: focus management ---
+    // Focus the latest message when a new assistant message finishes streaming
+    $effect(() => {
+        const count = displayMessages.length;
+        if (count === 0) return;
+        const lastMsg = displayMessages[count - 1];
+        // Focus when streaming ends on assistant msg we haven't focused
+        if (
+            lastMsg.role === "assistant" &&
+            !lastMsg.streaming &&
+            lastMsg.content &&
+            lastMsg.id !== lastFocusedMsgId
+        ) {
+            lastFocusedMsgId = lastMsg.id;
+            requestAnimationFrame(() => {
+                const el = document.getElementById(`msg-${lastMsg.id}`);
+                if (el) {
+                    el.focus({ preventScroll: true });
+                }
+            });
+        }
+    });
+
     // --- Extracted handlers (handleSend, onConnectStream) ---
     // The heavy lifting lives in ./chat-handlers.svelte.ts — this keeps the
     // page component focused on rendering. We wire page state via getters/setters
@@ -901,6 +973,8 @@
 <svelte:head>
     <title>Vessel - {conversationTitle}</title>
 </svelte:head>
+
+<AriaLiveRegion announcement={a11yAnnouncement} />
 
 <div
     class="h-full w-full flex flex-col overflow-hidden relative"
@@ -1178,6 +1252,9 @@
                             <ScrollArea
                                 class="flex-1 min-h-0 overflow-hidden"
                                 bind:viewportRef={viewportEl}
+                                role="log"
+                                aria-label="Chat messages"
+                                aria-live="polite"
                             >
                                 <div class="flex flex-col gap-6 p-6">
                                     {#if displayMessages.length === 0}
@@ -1186,12 +1263,15 @@
                                                 class="flex flex-col items-center gap-4 text-muted-foreground"
                                             >
                                                 <div class="rounded-full bg-muted p-4">
-                                                    <Bot class="size-8 opacity-60" />
+                                                    <Bot
+                                                        class="size-8 opacity-60"
+                                                        aria-hidden="true"
+                                                    />
                                                 </div>
                                                 <div class="text-center">
-                                                    <p class="text-sm font-medium">
+                                                    <h2 class="text-sm font-medium">
                                                         Start a conversation
-                                                    </p>
+                                                    </h2>
                                                     <p class="text-xs mt-1 opacity-70">
                                                         Send a message to begin chatting with the AI
                                                         assistant.
@@ -1203,7 +1283,11 @@
                                         {#each renderItems as item, i (item.type === "thinkingGroup" ? item.id : item.msg.id)}
                                             {#if item.type === "thinkingGroup"}
                                                 <!-- Grouped thinking + tool calls -->
-                                                <div class="flex w-full justify-start">
+                                                <div
+                                                    class="flex w-full justify-start"
+                                                    id="msg-{item.id}"
+                                                    tabindex="-1"
+                                                >
                                                     <div
                                                         class="flex gap-3 w-[min(75%,65ch)] font-serif"
                                                     >
@@ -1244,6 +1328,12 @@
                                                         : 'justify-start'} {!isLastConsecutive
                                                         ? '-mt-4'
                                                         : ''}"
+                                                    id="msg-{msg.id}"
+                                                    tabindex="-1"
+                                                    role="article"
+                                                    aria-label="{msg.role === 'user'
+                                                        ? 'You'
+                                                        : 'Assistant'} message"
                                                 >
                                                     <div
                                                         class="flex gap-3 w-max-[65ch] font-serif {msg.role ===

@@ -189,9 +189,9 @@
                     <SidebarTrigger />
                     <Separator orientation="vertical" class="h-4" />
                     <div class="flex items-center gap-2 min-w-0 flex-1">
-                        <span class="text-sm text-muted-foreground truncate">
+                        <h1 class="text-sm text-muted-foreground truncate m-0">
                             {convs.activeConversation?.title ?? "Vessel"}
-                        </span>
+                        </h1>
                         {#if convs.activeConversation?.tags.length}
                             <div class="flex items-center gap-1 shrink-0">
                                 {#each convs.activeConversation.tags as tag (tag)}

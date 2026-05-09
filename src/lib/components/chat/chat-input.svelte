@@ -502,6 +502,7 @@
                     oninput={adjustTextareaHeight}
                     onpaste={handleTextareaPaste}
                     {disabled}
+                    aria-label="Chat message input"
                 />
             </ContextMenuTrigger>
             <ContextMenuContent>

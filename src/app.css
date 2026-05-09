@@ -123,6 +123,26 @@
     * {
         @apply border-border outline-ring/50;
     }
+
+    /* WCAG 2.1 focus indicators — 3:1 minimum contrast against adjacent colors */
+    :focus-visible {
+        outline: 2px solid var(--ring);
+        outline-offset: 2px;
+        border-radius: var(--radius-sm);
+    }
+}
+
+/* Visually hidden but accessible to screen readers */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
 }
 
 /* Markdown prose styles for rendered chat messages */

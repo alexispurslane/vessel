@@ -454,7 +454,11 @@
     });
 </script>
 
-<div class="flex flex-col gap-1.5 w-full font-sans">
+<div
+    class="flex flex-col gap-1.5 w-full font-sans"
+    role="article"
+    aria-label="{msg.role === 'user' ? 'You' : 'Assistant'} message"
+>
     <!-- Thinking section -->
     {#if msg.role === "assistant" && (msg.thinking || msg.thinkingStreaming)}
         <details
@@ -464,11 +468,12 @@
         >
             <summary
                 class="flex items-center gap-2 px-3 py-1.5 cursor-pointer select-none hover:bg-muted/50 transition-colors rounded-lg text-xs text-muted-foreground"
+                aria-label={msg.thinkingStreaming ? "Thinking in progress" : "Thinking trace"}
             >
                 {#if msg.thinkingStreaming}
-                    <Spinner class="size-3" />
+                    <Spinner class="size-3" aria-hidden="true" />
                 {:else}
-                    <Brain class="size-3" />
+                    <Brain class="size-3" aria-hidden="true" />
                 {/if}
                 <span class="font-medium">
                     {#if msg.thinkingStreaming}
@@ -479,6 +484,7 @@
                 </span>
                 <ChevronDown
                     class="size-3 ml-auto shrink-0 transition-transform group-open:rotate-180"
+                    aria-hidden="true"
                 />
             </summary>
             <div
@@ -512,10 +518,11 @@
                       ? 'bg-primary text-primary-foreground rounded-br-sm'
                       : 'bg-muted text-foreground rounded-bl-sm'}"
                 onclick={toggleActions}
+                role="group"
             >
                 {#if msg.isError}
                     <span class="flex items-center gap-1.5 font-medium">
-                        <AlertCircle class="size-4 shrink-0" />
+                        <AlertCircle class="size-4 shrink-0" aria-hidden="true" />
                         {msg.errorMessage || msg.content || "An error occurred"}
                     </span>
                 {:else if editing}

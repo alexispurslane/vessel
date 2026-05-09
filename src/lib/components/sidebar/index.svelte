@@ -451,6 +451,7 @@
                         placeholder="Search conversations..."
                         class="flex-1 min-w-0 bg-transparent outline-none text-foreground placeholder:text-muted-foreground text-sm"
                         oninput={handleSearchInput}
+                        aria-label="Search conversations"
                     />
                     {#if searching}
                         <Spinner class="h-3.5 w-3.5 shrink-0" />

@@ -71,7 +71,7 @@
 <div class="flex flex-col h-full pt-9">
     <!-- Header -->
     <div class="flex items-center gap-2 px-3 py-2 border-b shrink-0">
-        <Globe class="size-4 shrink-0 text-muted-foreground" />
+        <Globe class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         <div class="min-w-0 flex-1">
             <a
                 href={url}
@@ -88,14 +88,16 @@
                     target="_blank"
                     rel="noopener noreferrer"
                     class="inline-flex items-center gap-0.5 hover:text-foreground transition-colors shrink-0"
+                    aria-label="Open original page in new tab"
                 >
-                    <ExternalLink class="size-3" />
+                    <ExternalLink class="size-3" aria-hidden="true" />
                 </a>
             </div>
         </div>
         <button
             class="shrink-0 p-1 rounded-md hover:bg-muted/50 transition-colors"
             onclick={onclose}
+            aria-label="Close page panel"
         >
             <X class="size-4 text-muted-foreground" />
         </button>

@@ -97,6 +97,7 @@
         <button
             class="shrink-0 p-1 rounded-md hover:bg-muted/50 transition-colors"
             onclick={onclose}
+            aria-label="Close search results"
         >
             <X class="size-4 text-muted-foreground" />
         </button>

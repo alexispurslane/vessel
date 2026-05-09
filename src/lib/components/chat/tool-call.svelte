@@ -1,6 +1,6 @@
 <script lang="ts">
     /**
-     * @file Tool call display component.
+     * @file Tool call display component with a11y support.
      */
     import { Spinner } from "$lib/components/ui/spinner/index.js";
     import Wrench from "@lucide/svelte/icons/wrench";
@@ -18,6 +18,15 @@
     }
 
     let { toolCall, compact = false }: Props = $props();
+
+    /** Accessible status label for screen readers */
+    let statusLabel = $derived(
+        toolCall.status === "running"
+            ? "Running"
+            : toolCall.status === "completed"
+              ? "Completed"
+              : "Error"
+    );
 </script>
 
 <details
@@ -29,8 +38,9 @@
         class={compact
             ? "flex items-center gap-2 px-2 py-1 cursor-pointer select-none hover:bg-muted/50 transition-colors rounded text-xs"
             : "flex items-center gap-2 px-3 py-1.5 cursor-pointer select-none hover:bg-muted/50 transition-colors rounded-lg text-xs"}
+        aria-label="{toolCall.toolName} tool call, {statusLabel}"
     >
-        <Wrench class="size-3 text-muted-foreground shrink-0" />
+        <Wrench class="size-3 text-muted-foreground shrink-0" aria-hidden="true" />
         <span class="font-medium shrink-0">{toolCall.toolName}</span>
         {#if toolCall.arguments && Object.keys(toolCall.arguments).length > 0}
             <span class="text-muted-foreground/70 truncate min-w-0">
@@ -45,13 +55,13 @@
                 {/each}
             </span>
         {/if}
-        <span class="ml-auto shrink-0 flex items-center">
+        <span class="ml-auto shrink-0 flex items-center" aria-label={statusLabel}>
             {#if toolCall.status === "running"}
-                <Spinner class="size-3" />
+                <Spinner class="size-3" aria-hidden="true" />
             {:else if toolCall.status === "completed"}
-                <Check class="size-3.5 text-green-600 dark:text-green-400" />
+                <Check class="size-3.5 text-green-600 dark:text-green-400" aria-hidden="true" />
             {:else if toolCall.status === "error"}
-                <X class="size-3.5 text-destructive" />
+                <X class="size-3.5 text-destructive" aria-hidden="true" />
             {/if}
         </span>
     </summary>
@@ -61,6 +71,8 @@
             class={compact
                 ? "border-t px-2 py-1 text-xs text-muted-foreground font-mono whitespace-pre-wrap break-all max-h-48 overflow-auto"
                 : "border-t px-3 py-2 text-xs text-muted-foreground font-mono whitespace-pre-wrap break-all max-h-48 overflow-auto"}
+            role="region"
+            aria-label="Tool call output"
         >
             {toolCall.output}
         </div>

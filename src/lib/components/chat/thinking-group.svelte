@@ -136,11 +136,16 @@
     >
         <summary
             class="flex items-center gap-2 px-3 py-1.5 cursor-pointer select-none hover:bg-muted/50 transition-colors rounded-lg text-xs text-muted-foreground"
+            aria-label="{thinkingStreaming || group.streaming
+                ? 'Thinking in progress'
+                : 'Thinking trace'}, {toolCallCount} {toolCallCount === 1
+                ? 'tool call'
+                : 'tool calls'}"
         >
             {#if thinkingStreaming || group.streaming}
-                <Spinner class="size-3" />
+                <Spinner class="size-3" aria-hidden="true" />
             {:else}
-                <Brain class="size-3" />
+                <Brain class="size-3" aria-hidden="true" />
             {/if}
             <span class="font-medium">
                 {#if thinkingStreaming || group.streaming}
@@ -157,6 +162,7 @@
             {/if}
             <ChevronDown
                 class="size-3 ml-auto shrink-0 transition-transform group-open:rotate-180"
+                aria-hidden="true"
             />
         </summary>
         <div
@@ -199,7 +205,7 @@
                     aria-label="Regenerate response"
                     title="Regenerate response"
                 >
-                    <RotateCcw class="size-3" />
+                    <RotateCcw class="size-3" aria-hidden="true" />
                 </button>
             {/if}
             {#if ondelete}
@@ -213,7 +219,7 @@
                     aria-label={confirmDelete ? "Confirm delete" : "Delete message"}
                     title={confirmDelete ? "Click again to confirm deletion" : "Delete message"}
                 >
-                    <Trash2 class="size-3" />
+                    <Trash2 class="size-3" aria-hidden="true" />
                     {#if confirmDelete}
                         <span class="text-[10px] font-medium">Confirm?</span>
                     {/if}
@@ -225,7 +231,7 @@
             <span
                 class="inline-flex items-center gap-1 text-[11px] text-muted-foreground px-1.5 py-0.5"
             >
-                <Spinner class="size-3" />
+                <Spinner class="size-3" aria-hidden="true" />
                 Updating...
             </span>
         </div>
