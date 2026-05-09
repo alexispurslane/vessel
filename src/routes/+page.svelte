@@ -144,10 +144,8 @@
         {:else if !isSetupComplete}
             <!-- Setup prompt -->
             <div class="text-center">
-                <div
-                    class="mx-auto mb-4 flex size-16 items-center justify-center rounded-full bg-muted overflow-hidden"
-                >
-                    <img src="/vessel.png" alt="Vessel" class="size-16 rounded-full" />
+                <div class="mx-auto mb-4 flex size-16 items-center justify-center">
+                    <img src="/vessel.webp" alt="Vessel" class="size-16" />
                 </div>
                 <h1 class="text-2xl font-bold">Welcome to Vessel</h1>
                 <p class="mt-2 text-muted-foreground">
@@ -201,10 +199,8 @@
         {:else}
             <!-- Logo/Header -->
             <div class="mb-8 text-center">
-                <div
-                    class="mx-auto mb-4 flex size-16 items-center justify-center rounded-full bg-muted overflow-hidden"
-                >
-                    <img src="/vessel.png" alt="Vessel" class="size-16 rounded-full" />
+                <div class="mx-auto mb-4 flex size-16 items-center justify-center">
+                    <img src="/vessel.webp" alt="Vessel" class="size-16" />
                 </div>
                 <h1 class="text-2xl font-bold">Vessel</h1>
                 <p class="mt-2 text-muted-foreground">Start a conversation with a message</p>

@@ -1,19 +1,71 @@
-# Vessel
+![Vessel](vessel_banner.webp)
 
-A powerful and private AI chat application with a built-in coding agent, real-time streaming, and sandbox-isolated tool execution. Built with SvelteKit, Bun, and [pi](https://github.com/mariozechner/pi).
+## Philosophy
 
-![Vessel](vessel.png)
+Vessel is built on a few core principles:
+
+- **Extremely lightweight** — Svelte on the client, Svelte SSR for chat histories, Bun on the server, and careful attention to RAM and resource usage throughout. No heavy frameworks, no bloat.
+- **Fault-tolerant and reliable** — All inference happens server-side, then SSE-streams to the client. If your connection dies mid-stream, Vessel backfills the client and resumes where it left off. If you're in a conversation from multiple devices, Vessel handles that seamlessly. Absolutely no messages are ever lost.
+- **A safe realization of the agentic chat ideal** — Not just a chatbot, but a full agentic harness at its heart: any tools you expose, MCP servers you configure, all running inside per-conversation [zerobox](https://github.com/nicobailon/zerobox) sandboxes with configurable filesystem isolation, network allowlists, secrets management, and per-conversation overrides. The power of OpenClaw or the agentic features of claude.ai/gemini app — with real security.
+- **Elegant, mobile-friendly UI** — Good typography, a design that gets out of your way, and full mobile support.
+- **Agentic coding with rigorous linting** — Stretching the limits of linters (OxLint with security, JSDoc, and SonarJS plugins) to allow high-level agentic coding while keeping code well-documented, readable, well-factored, secure, type-safe, and free of common LLM pitfalls.
 
 ## Features
 
-- **Multi-provider LLM support**: OpenAI, Anthropic, Google, Mistral, Groq, xAI, OpenRouter, Ollama, LM Studio, vLLM, and any OpenAI-compatible endpoint
-- **Coding agent**: powered by [pi-coding-agent](https://github.com/mariozechner/pi): bash execution, file read/write/edit, web fetch, and web search, all inside a [zerobox](https://github.com/nicobailon/zerobox) sandbox
-- **Per-conversation sandboxing**: configurable filesystem isolation, network allowlists, secrets management, and per-conversation overrides
-- **Streaming responses**: real-time SSE streaming with thinking/reasoning display, tool execution progress, and fetched-source panels
-- **Conversation management**: tags, pinning, archiving, forking, message editing, and branch navigation (message DAG)
+### Multi-Provider LLM Support
+
+OpenAI, Anthropic, Google, Mistral, Groq, xAI, OpenRouter, Ollama, LM Studio, vLLM, and any OpenAI-compatible endpoint.
+
+### Coding Agent
+
+Powered by [pi-coding-agent](https://github.com/mariozechner/pi): bash execution, file read/write/edit, web fetch, and web search — all inside a [zerobox](https://github.com/nicobailon/zerobox) sandbox.
+
+### Advanced Chat History Editing
+
+Vessel offers the most flexible chat history editing of any AI chat app:
+
+- **Regenerate** assistant messages
+- **Regenerate with feedback** on the old message and/or a new model
+- **Delete** any message
+- **Edit** both user and assistant messages
+
+All changes are represented as an **append-only directed acyclic graph** (DAG) — nothing is truly destroyed, and you can navigate the full branching history of a conversation using an actual flow graph.
+
+### Conversation Forking
+
+Any point in a conversation can be forked into a fresh, totally separate conversation with its own independent history.
+
+### Deep Web Research Integration
+
+Web search (any [Exa](https://exa.ai)-compatible API) and fetch are integrated directly into the Pi
+agent harness via an extension — not just returning results to your AI, but keeping precise track of
+what searches and fetches contributed to each message, and which are new for the given message
+versus just part of the conversation history. This enables:
+
+- **Per-message source lists** showing exactly what the agent searched for and what it fetched
+- **Clickable sefarch sources** that show the precise search results the agent saw, and, if those results weren't just a list of links but included page contents too, allows you to click on a search result to read that page
+- **Clickable fetched pages** that show the exact page content the agent saw, whether from a fetch or a search
+- **A 3-pane research dashboard** — conversation to the left, search results list and page content on the other — so you can read both what your agent says about sources and the primary sources themselves
+
+### Conversation Management
+
+- Tags, pinning, archiving
+- **Bulk operations** on conversations
+- Export as Markdown, PDF, or **raw Pi JSONL**
+- Resume Vessel sessions from regular [pi](https://github.com/mariozechner/pi) in the terminal by exporting the JSONL
+
+### CodeMirror 6 Editor
+
+Text inputs use [CodeMirror 6](https://codemirror.net/) with:
+
+- Autocomplete for files uploaded to the agent's sandbox
+- Full Emacs keybindings
+- Markdown semi-WYSIWYG syntax highlighting
+
+### More Features
+
 - **MCP server support**: configure Model Context Protocol servers per-conversation for extended tooling
 - **Authentication**: single-user setup with bcrypt password hashing and JWT sessions
-- **Export**: conversations can be exported as Markdown or PDF
 - **Dark mode**: full dark/light theme support via [mode-watcher](https://mode-watcher.pages.dev/)
 - **Keyboard-first**: comprehensive keyboard shortcuts for power users
 
@@ -21,17 +73,12 @@ A powerful and private AI chat application with a built-in coding agent, real-ti
 
 | Layer | Technology |
 |---|---|
-| Framework | [SvelteKit](https://svelte.dev/docs/kit) (Svelte 5, runes mode) |
+| Framework | [Svelte 5](https://svelte.dev/) (runes mode, SvelteKit) |
 | Runtime | [Bun](https://bun.sh/) (including `bun:sqlite` for the database) |
-| UI Components | [shadcn-svelte](https://next.shadcn-svelte.com/) (Vega style), [bits-ui](https://bits-ui.com/), [paneforge](https://paneforge.com/) |
-| Styling | [Tailwind CSS v4](https://tailwindcss.com/), [tw-animate-css](https://github.com/brennerexe/tw-animate-css) |
-| Markdown Rendering | [svelte-streamdown](https://github.com/nicobailon/svelte-streamdown) (with math, Mermaid, and code highlighting) |
-| AI Engine | [pi-coding-agent](https://github.com/mariozechner/pi), [pi-ai](https://github.com/mariozechner/pi), [pi-agent-core](https://github.com/mariozechner/pi) |
-| MCP | [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter) |
-| Sandbox | [zerobox](https://github.com/nicobailon/zerobox) |
-| Icons | [Lucide](https://lucide.dev/) |
-| Linting | [OxLint](https://oxc.rs/docs/guide/usage/linter.html) with security, JSDoc, and SonarJS plugins |
-| Fonts | Inter Variable, Merriweather Variable |
+| UI | [Shadcn](https://next.shadcn-svelte.com/) |
+| AI Engine | [Pi](https://github.com/mariozechner/pi) (pi-coding-agent, pi-ai, pi-agent-core) |
+| Sandbox | [Zerobox](https://github.com/nicobailon/zerobox) |
+| Linting | [OxLint](https://oxc.rs/docs/guide/usage/linter.html) (security, JSDoc, SonarJS plugins) |
 
 ## Getting Started
 
@@ -71,48 +118,11 @@ bun run preview
 | `bun run lint:fix` | Auto-fix lint issues |
 | `bun run format` | Format with Prettier |
 
-## Project Structure
-
-```
-src/
-├── lib/
-│   ├── server/
-│   │   ├── agent/        # Session lifecycle, tools, sandbox, MCP, model registry
-│   │   ├── auth/         # bcrypt + JWT authentication
-│   │   ├── db/           # SQLite schema and migrations
-│   │   ├── export/       # Markdown and PDF exporters
-│   │   ├── inference/    # LLM provider API helpers
-│   │   └── fs-security.ts # Path sanitization / traversal prevention
-│   ├── components/
-│   │   ├── chat/         # Message rendering, input, tool calls, code blocks
-│   │   ├── sidebar/      # Conversation list
-│   │   ├── conversation-settings/ # Per-conversation config panels
-│   │   ├── page-layout/  # App shell / layout
-│   │   ├── shortcuts-help/
-│   │   └── ui/           # shadcn-svelte primitives (40+ components)
-│   ├── stores/           # Svelte 5 reactive stores (auth, chat, conversations, settings, notifications)
-│   ├── hooks/            # is-mobile detector
-│   ├── utils/            # Code block rendering, keyboard shortcuts, math preprocessing
-│   ├── api.ts            # Client-side API functions for all backend endpoints
-│   ├── providers.ts      # Provider config registry (13 built-in providers)
-│   ├── types.ts          # Shared domain types
-│   └── utils.ts          # General utility functions
-├── routes/
-│   ├── api/              # REST API endpoints (auth, sessions, models, providers, MCP, tags, settings, fs-complete)
-│   ├── chat/[id]/        # Chat view per conversation
-│   ├── login/            # Login page
-│   ├── setup/            # First-run setup (create user)
-│   ├── settings/         # Settings tabs (Agent, Models, Notifications, Sandbox, Tools, User)
-│   └── tags/             # Tag management page
-├── hooks.server.ts       # Auth middleware, rate limiting, route protection
-└── app.css               # Tailwind + theme tokens (light/dark)
-```
-
 ## Architecture
 
 Vessel is a **monolithic SvelteKit app** where the server handles all AI inference and tool execution. Model API calls happen in the main process (not inside the sandbox), while agent tool execution (bash, read, write, etc.) runs inside a zerobox sandbox with configurable filesystem and network restrictions.
 
-Conversations are persisted as pi `.jsonl` session files under `data/sessions/`, with metadata and settings stored in a SQLite database (`data/vessel.db`). Active sessions are kept in memory with SSE subscriptions for real-time streaming to clients.
+Conversations are persisted as pi `.jsonl` session files under `data/sessions/`, with metadata and settings stored in a SQLite database (`data/vessel.db`). Active sessions are kept in memory with SSE subscriptions for real-time streaming to clients. Message history is represented as an append-only DAG, enabling full branch navigation and forking without data loss.
 
 ## License
 

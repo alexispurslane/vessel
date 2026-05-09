@@ -438,7 +438,7 @@
                     class="font-semibold flex flex-row justify-between"
                     onclick={handleNewChat}
                 >
-                    <img src="/vessel.png" alt="Vessel" class="size-6 rounded" />
+                    <img src="/vessel.webp" alt="Vessel" class="size-6 rounded" />
                     Vessel
                     <MessageSquarePlus />
                 </SidebarMenuButton>
