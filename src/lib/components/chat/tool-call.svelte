@@ -6,6 +6,7 @@
     import Wrench from "@lucide/svelte/icons/wrench";
     import Check from "@lucide/svelte/icons/check";
     import X from "@lucide/svelte/icons/x";
+    import Clipboard from "@lucide/svelte/icons/clipboard";
 
     import type { ToolCallInfo } from "$lib/types.js";
     import { formatArgValue } from "$lib/utils.js";
@@ -19,6 +20,8 @@
 
     let { toolCall, compact = false }: Props = $props();
 
+    let copiedOutput = $state(false);
+
     /** Accessible status label for screen readers */
     let statusLabel = $derived(
         toolCall.status === "running"
@@ -27,6 +30,20 @@
               ? "Completed"
               : "Error"
     );
+
+    /**
+     * Copy the tool call output to the clipboard.
+     */
+    async function handleCopyOutput() {
+        if (!toolCall.output) return;
+        try {
+            await navigator.clipboard.writeText(toolCall.output);
+            copiedOutput = true;
+            setTimeout(() => (copiedOutput = false), 2000);
+        } catch {
+            // Clipboard API not available (e.g. non-HTTPS context)
+        }
+    }
 </script>
 
 <details
@@ -69,12 +86,25 @@
     {#if toolCall.output}
         <div
             class={compact
-                ? "border-t px-2 py-1 text-xs text-muted-foreground font-mono whitespace-pre-wrap break-all max-h-48 overflow-auto"
-                : "border-t px-3 py-2 text-xs text-muted-foreground font-mono whitespace-pre-wrap break-all max-h-48 overflow-auto"}
+                ? "group/output relative border-t px-2 py-1 text-xs text-muted-foreground font-mono whitespace-pre-wrap break-all max-h-48 overflow-auto"
+                : "group/output relative border-t px-3 py-2 text-xs text-muted-foreground font-mono whitespace-pre-wrap break-all max-h-48 overflow-auto"}
             role="region"
             aria-label="Tool call output"
         >
             {toolCall.output}
+            <button
+                onclick={handleCopyOutput}
+                class={compact
+                    ? "absolute top-1 right-1 opacity-0 group-hover/output:opacity-100 transition-opacity inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground bg-muted/80 rounded px-1 py-0.5 cursor-pointer"
+                    : "absolute top-2 right-2 opacity-0 group-hover/output:opacity-100 transition-opacity inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground bg-muted/80 rounded px-1.5 py-0.5 cursor-pointer"}
+                aria-label="Copy output"
+            >
+                {#if copiedOutput}
+                    <Check class="size-3" aria-hidden="true" />
+                {:else}
+                    <Clipboard class="size-3" aria-hidden="true" />
+                {/if}
+            </button>
         </div>
     {:else if toolCall.status !== "running"}
         <div
