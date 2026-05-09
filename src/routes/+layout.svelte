@@ -25,6 +25,7 @@
     import { hashHue } from "$lib/utils.js";
     import { resolve } from "$app/paths";
     import AppSidebar from "$lib/components/sidebar/index.svelte";
+    import SwipeToOpen from "$lib/components/sidebar/swipe-to-open.svelte";
     import ShortcutsHelp from "$lib/components/shortcuts-help/ShortcutsHelp.svelte";
     import {
         handleGlobalKeydown,
@@ -182,33 +183,35 @@
 
         <ShortcutsHelp />
 
-        <SidebarInset class="min-h-0 overflow-hidden">
-            <header class="flex h-12 shrink-0 items-center gap-2 border-b px-4">
-                <SidebarTrigger />
-                <Separator orientation="vertical" class="h-4" />
-                <div class="flex items-center gap-2 min-w-0 flex-1">
-                    <span class="text-sm text-muted-foreground truncate">
-                        {convs.activeConversation?.title ?? "Vessel"}
-                    </span>
-                    {#if convs.activeConversation?.tags.length}
-                        <div class="flex items-center gap-1 shrink-0">
-                            {#each convs.activeConversation.tags as tag (tag)}
-                                <a
-                                    href={resolve(`/tags/${tag}`)}
-                                    class="tag-pill-colors inline-flex items-center justify-center h-5 px-1.5 rounded-full text-[10px] leading-none font-medium whitespace-nowrap cursor-pointer hover:opacity-80 transition-opacity"
-                                    style="--tag-hue: {hashHue(tag)}"
-                                >
-                                    {tag}
-                                </a>
-                            {/each}
-                        </div>
-                    {/if}
-                </div>
-            </header>
+        <SwipeToOpen>
+            <SidebarInset class="min-h-0 overflow-hidden">
+                <header class="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+                    <SidebarTrigger />
+                    <Separator orientation="vertical" class="h-4" />
+                    <div class="flex items-center gap-2 min-w-0 flex-1">
+                        <span class="text-sm text-muted-foreground truncate">
+                            {convs.activeConversation?.title ?? "Vessel"}
+                        </span>
+                        {#if convs.activeConversation?.tags.length}
+                            <div class="flex items-center gap-1 shrink-0">
+                                {#each convs.activeConversation.tags as tag (tag)}
+                                    <a
+                                        href={resolve(`/tags/${tag}`)}
+                                        class="tag-pill-colors inline-flex items-center justify-center h-5 px-1.5 rounded-full text-[10px] leading-none font-medium whitespace-nowrap cursor-pointer hover:opacity-80 transition-opacity"
+                                        style="--tag-hue: {hashHue(tag)}"
+                                    >
+                                        {tag}
+                                    </a>
+                                {/each}
+                            </div>
+                        {/if}
+                    </div>
+                </header>
 
-            <main class="flex flex-1 flex-col min-h-0 overflow-auto">
-                {@render children()}
-            </main>
-        </SidebarInset>
+                <main class="flex flex-1 flex-col min-h-0 overflow-auto">
+                    {@render children()}
+                </main>
+            </SidebarInset>
+        </SwipeToOpen>
     </SidebarProvider>
 {/if}

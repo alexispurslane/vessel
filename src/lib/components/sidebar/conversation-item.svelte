@@ -2,7 +2,11 @@
     /**
      * @file Sidebar conversation list item component.
      */
-    import { SidebarMenuItem, SidebarMenuButton } from "$lib/components/ui/sidebar/index.js";
+    import {
+        SidebarMenuItem,
+        SidebarMenuButton,
+        useSidebar,
+    } from "$lib/components/ui/sidebar/index.js";
     import {
         ContextMenu,
         ContextMenuContent,
@@ -69,6 +73,8 @@
         onToggleSelect: (id: string) => void;
         onEnterSelectMode: (id: string) => void;
     } = $props();
+
+    const sidebar = useSidebar();
 </script>
 
 <SidebarMenuItem
@@ -118,6 +124,7 @@
                                     style="--tag-hue: {hashHue(tag)}"
                                     onclick={(e) => {
                                         e.stopPropagation();
+                                        if (sidebar.isMobile) sidebar.setOpenMobile(false);
                                     }}
                                 >
                                     {tag}

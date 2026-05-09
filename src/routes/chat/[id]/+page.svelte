@@ -97,6 +97,9 @@
         notifyCompletion,
         clearTabTitleNotification,
     } from "$lib/stores/notifications.svelte.js";
+    import { IsMobile } from "$lib/hooks/is-mobile.svelte.js";
+
+    const isMobile = new IsMobile();
 
     const pageData = $derived(page.data as PageData);
 
@@ -233,6 +236,8 @@
     const TOP_BAR_HIDE_DELAY = 2000; // ms before auto-hiding
 
     function showTopBar() {
+        // No-op on mobile — bar is always visible
+        if (isMobile.current) return;
         if (topBarTimeout) {
             clearTimeout(topBarTimeout);
             topBarTimeout = null;
@@ -904,14 +909,21 @@
     onmousemove={showTopBar}
 >
     <!-- Main content -->
-    <!-- Top bar: hidden by default, shows on mouse movement, auto-hides after timeout or on send -->
-    {#if topBarVisible}
+    <!-- Action bar: on desktop, absolutely positioned at top with auto-hide on mouse movement.
+         On mobile, pinned to bottom and always visible with icon-only buttons. -->
+    {#if topBarVisible || isMobile.current}
         <div
-            class="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-4 py-1.5 border-b h-9 bg-background/80 backdrop-blur-sm"
-            transition:fade={{ duration: 150 }}
+            class="absolute {isMobile.current
+                ? 'bottom-0 border-t'
+                : 'top-0 border-b'} left-0 right-0 z-10 flex items-center justify-between px-4 {isMobile.current
+                ? 'py-1 h-12'
+                : 'py-1.5 h-9'} {isMobile.current
+                ? 'bg-background'
+                : 'bg-background/80 backdrop-blur-sm'}"
+            transition:fade={{ duration: isMobile.current ? 0 : 150 }}
         >
             <!-- Left: Context usage + token counts -->
-            <div class="flex items-center gap-3">
+            <div class="flex items-center {isMobile.current ? 'gap-2' : 'gap-3'}">
                 <TooltipProvider>
                     <Tooltip>
                         <TooltipTrigger>
@@ -919,7 +931,7 @@
                                 <div {...props} class="flex items-center gap-1.5">
                                     <ContextUsageRing
                                         fraction={contextUsageFraction}
-                                        size={22}
+                                        size={isMobile.current ? 28 : 22}
                                         strokeWidth={2.5}
                                     />
                                 </div>
@@ -930,42 +942,44 @@
                         >
                     </Tooltip>
                 </TooltipProvider>
-                <TooltipProvider>
-                    <Tooltip>
-                        <TooltipTrigger>
-                            {#snippet child({ props })}
-                                <div
-                                    {...props}
-                                    class="flex items-center gap-1 text-[11px] text-muted-foreground"
-                                >
-                                    <ArrowUp class="size-3" />
-                                    <span>{formatTokens(chat.totalInputTokens)}</span>
-                                </div>
-                            {/snippet}
-                        </TooltipTrigger>
-                        <TooltipContent
-                            >Input tokens: {chat.totalInputTokens.toLocaleString()}</TooltipContent
-                        >
-                    </Tooltip>
-                </TooltipProvider>
-                <TooltipProvider>
-                    <Tooltip>
-                        <TooltipTrigger>
-                            {#snippet child({ props })}
-                                <div
-                                    {...props}
-                                    class="flex items-center gap-1 text-[11px] text-muted-foreground"
-                                >
-                                    <ArrowDown class="size-3" />
-                                    <span>{formatTokens(chat.totalOutputTokens)}</span>
-                                </div>
-                            {/snippet}
-                        </TooltipTrigger>
-                        <TooltipContent
-                            >Output tokens: {chat.totalOutputTokens.toLocaleString()}</TooltipContent
-                        >
-                    </Tooltip>
-                </TooltipProvider>
+                {#if !isMobile.current}
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger>
+                                {#snippet child({ props })}
+                                    <div
+                                        {...props}
+                                        class="flex items-center gap-1 text-[11px] text-muted-foreground"
+                                    >
+                                        <ArrowUp class="size-3" />
+                                        <span>{formatTokens(chat.totalInputTokens)}</span>
+                                    </div>
+                                {/snippet}
+                            </TooltipTrigger>
+                            <TooltipContent
+                                >Input tokens: {chat.totalInputTokens.toLocaleString()}</TooltipContent
+                            >
+                        </Tooltip>
+                    </TooltipProvider>
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger>
+                                {#snippet child({ props })}
+                                    <div
+                                        {...props}
+                                        class="flex items-center gap-1 text-[11px] text-muted-foreground"
+                                    >
+                                        <ArrowDown class="size-3" />
+                                        <span>{formatTokens(chat.totalOutputTokens)}</span>
+                                    </div>
+                                {/snippet}
+                            </TooltipTrigger>
+                            <TooltipContent
+                                >Output tokens: {chat.totalOutputTokens.toLocaleString()}</TooltipContent
+                            >
+                        </Tooltip>
+                    </TooltipProvider>
+                {/if}
                 {#if chat.timing}
                     <TooltipProvider>
                         <Tooltip>
@@ -1018,7 +1032,7 @@
                 {/if}
             </div>
             <!-- Right: Action buttons -->
-            <div class="flex items-center gap-1">
+            <div class="flex items-center {isMobile.current ? 'gap-0' : 'gap-1'}">
                 <TooltipProvider>
                     <Tooltip>
                         <TooltipTrigger>
@@ -1027,14 +1041,15 @@
                                     {...props}
                                     onclick={() =>
                                         (sidePanel = sidePanel === "security" ? null : "security")}
-                                    class="inline-flex items-center gap-1 text-[11px] {sidePanel ===
-                                    'security'
+                                    class="inline-flex items-center {isMobile.current
+                                        ? 'justify-center min-w-11 min-h-11'
+                                        : 'gap-1 px-2 py-1'} text-[11px] {sidePanel === 'security'
                                         ? 'text-foreground bg-muted'
-                                        : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
+                                        : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer rounded hover:bg-muted"
                                     aria-label="Toggle security panel"
                                 >
-                                    <Shield class="size-3" />
-                                    <span>Security</span>
+                                    <Shield class={isMobile.current ? "size-4" : "size-3"} />
+                                    {#if !isMobile.current}<span>Security</span>{/if}
                                 </button>
                             {/snippet}
                         </TooltipTrigger>
@@ -1048,16 +1063,17 @@
                                 <button
                                     {...props}
                                     onclick={toggleDag}
-                                    class="inline-flex items-center gap-1 text-[11px] {sidePanel ===
-                                    'history'
+                                    class="inline-flex items-center {isMobile.current
+                                        ? 'justify-center min-w-11 min-h-11'
+                                        : 'gap-1 px-2 py-1'} text-[11px] {sidePanel === 'history'
                                         ? 'text-foreground bg-muted'
-                                        : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
+                                        : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer rounded hover:bg-muted"
                                     aria-label={sidePanel === "history"
                                         ? "Close history view"
                                         : "Open history view"}
                                 >
-                                    <GitBranch class="size-3" />
-                                    <span>History</span>
+                                    <GitBranch class={isMobile.current ? "size-4" : "size-3"} />
+                                    {#if !isMobile.current}<span>History</span>{/if}
                                 </button>
                             {/snippet}
                         </TooltipTrigger>
@@ -1072,14 +1088,15 @@
                                     {...props}
                                     onclick={() =>
                                         (sidePanel = sidePanel === "agent" ? null : "agent")}
-                                    class="inline-flex items-center gap-1 text-[11px] {sidePanel ===
-                                    'agent'
+                                    class="inline-flex items-center {isMobile.current
+                                        ? 'justify-center min-w-11 min-h-11'
+                                        : 'gap-1 px-2 py-1'} text-[11px] {sidePanel === 'agent'
                                         ? 'text-foreground bg-muted'
-                                        : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
+                                        : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer rounded hover:bg-muted"
                                     aria-label="Toggle agent info panel"
                                 >
-                                    <FileText class="size-3" />
-                                    <span>Agent</span>
+                                    <FileText class={isMobile.current ? "size-4" : "size-3"} />
+                                    {#if !isMobile.current}<span>Agent</span>{/if}
                                 </button>
                             {/snippet}
                         </TooltipTrigger>
@@ -1093,11 +1110,13 @@
                                 {#snippet child({ props })}
                                     <DropdownMenuTrigger
                                         {...props}
-                                        class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
+                                        class="inline-flex items-center {isMobile.current
+                                            ? 'justify-center min-w-11 min-h-11'
+                                            : 'gap-1 px-2 py-1'} text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded hover:bg-muted"
                                         aria-label="Export conversation"
                                     >
-                                        <Download class="size-3" />
-                                        <span>Export</span>
+                                        <Download class={isMobile.current ? "size-4" : "size-3"} />
+                                        {#if !isMobile.current}<span>Export</span>{/if}
                                     </DropdownMenuTrigger>
                                 {/snippet}
                             </TooltipTrigger>
@@ -1149,7 +1168,11 @@
             >
                 <!-- Main chat area -->
                 <ResizablePane defaultSize={sidePanel ? 75 : 100} minSize={50}>
-                    <div class="h-full flex flex-col overflow-hidden max-w-[100ch] mx-auto">
+                    <div
+                        class="h-full flex flex-col overflow-hidden max-w-[100ch] mx-auto {isMobile.current
+                            ? 'pb-12'
+                            : ''}"
+                    >
                         <!-- Message area (hidden when input is fullscreen) -->
                         {#if !inputFullscreen}
                             <ScrollArea
@@ -1408,8 +1431,8 @@
                     </div></ResizablePane
                 >
 
-                <!-- Resizable side panel -->
-                {#if sidePanel && id}
+                <!-- Resizable side panel (desktop only) -->
+                {#if sidePanel && id && !isMobile.current}
                     <ResizableHandle withHandle />
                     <ResizablePane defaultSize={25} minSize={15} maxSize={50}>
                         <div class="h-full bg-background flex flex-col">
@@ -1459,6 +1482,44 @@
                             fetchedPageOpen = false;
                         }}
                     />
+                </div>
+            {/if}
+
+            <!-- Mobile full-screen overlay for side panels -->
+            {#if isMobile.current && sidePanel && id}
+                <div
+                    class="absolute inset-0 z-20 bg-background flex flex-col animate-in slide-in-from-right duration-200"
+                >
+                    <div class="flex items-center justify-between px-4 py-2 border-b">
+                        <span class="text-sm font-medium">
+                            {sidePanel === "security"
+                                ? "Security"
+                                : sidePanel === "history"
+                                  ? "History"
+                                  : "Agent"}
+                        </span>
+                        <button
+                            onclick={() => (sidePanel = null)}
+                            class="p-2 hover:bg-muted rounded-md"
+                            aria-label="Close panel"
+                        >
+                            <X class="size-4" />
+                        </button>
+                    </div>
+                    <div class="flex-1 overflow-auto">
+                        {#if sidePanel === "security"}
+                            <ConversationSecurityPanel conversationId={id} />
+                        {:else if sidePanel === "history"}
+                            <MessageDag
+                                nodes={dagNodes}
+                                leafId={dagLeafId}
+                                onnavigateto={handleDagNavigate}
+                                navigating={chat.navigating}
+                            />
+                        {:else if sidePanel === "agent"}
+                            <AgentInfoPanel conversationId={id} />
+                        {/if}
+                    </div>
                 </div>
             {/if}
         </div>

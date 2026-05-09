@@ -14,6 +14,7 @@
         SidebarMenuItem,
         SidebarMenuButton,
         SidebarRail,
+        useSidebar,
     } from "$lib/components/ui/sidebar/index.js";
     import { Button } from "$lib/components/ui/button/index.js";
     import { ScrollArea } from "$lib/components/ui/scroll-area/index.js";
@@ -77,6 +78,7 @@
 
     const _auth = getAuth();
     const convs = getConversations();
+    const sidebar = useSidebar();
 
     // Track which conversations have unsent drafts (client-side only)
     let draftIds = $state<Set<string>>(new Set());
@@ -239,6 +241,7 @@
         setActiveConversation(null);
         clearMessages();
         disconnectStream();
+        if (sidebar.isMobile) sidebar.setOpenMobile(false);
         void goto(resolve("/"));
     }
 
@@ -256,6 +259,7 @@
     function handleSelectConversation(id: string) {
         if (id === convs.activeId) return;
         switchConversation(id);
+        if (sidebar.isMobile) sidebar.setOpenMobile(false);
         void goto(resolve(`/chat/${id}`));
     }
 
@@ -265,6 +269,7 @@
 
     async function handleLogout() {
         disconnectStream();
+        if (sidebar.isMobile) sidebar.setOpenMobile(false);
         await doLogout();
     }
 
@@ -346,6 +351,7 @@
         const hash = messageId ? `#msg-${messageId}` : "";
         if (id !== convs.activeId) {
             switchConversation(id);
+            if (sidebar.isMobile) sidebar.setOpenMobile(false);
             void goto(resolve(`/chat/${id}${hash}`));
         } else {
             // Already on this conversation — just scroll to the message
@@ -542,6 +548,9 @@
                                     href={resolve(`/tags/${tag}`)}
                                     class="tag-pill-colors inline-flex items-center justify-center h-5 px-1.5 rounded-full text-[10px] leading-none font-medium whitespace-nowrap cursor-pointer hover:opacity-80 transition-opacity"
                                     style="--tag-hue: {hashHue(tag)}"
+                                    onclick={() => {
+                                        if (sidebar.isMobile) sidebar.setOpenMobile(false);
+                                    }}
                                 >
                                     {tag} ({count})
                                 </a>
@@ -744,7 +753,10 @@
             <SidebarMenuItem>
                 <SidebarMenuButton
                     isActive={currentPath === "/settings"}
-                    onclick={() => void goto(resolve("/settings"))}
+                    onclick={() => {
+                        if (sidebar.isMobile) sidebar.setOpenMobile(false);
+                        void goto(resolve("/settings"));
+                    }}
                 >
                     <Settings />
                     Settings

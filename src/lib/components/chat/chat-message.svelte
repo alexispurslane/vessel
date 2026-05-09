@@ -31,6 +31,7 @@
         TooltipTrigger,
     } from "$lib/components/ui/tooltip/index.js";
     import type { ChatMessage as ChatMessageType, ModelInfo } from "$lib/types.js";
+    import { IsMobile } from "$lib/hooks/is-mobile.svelte.js";
     import type { SearchResultItem } from "$lib/types.js";
     import type { Tokens } from "marked";
     import { getCodeBlocks } from "$lib/api.js";
@@ -195,6 +196,40 @@
     let showCodeBlockPopup = $state(false);
     let pendingCodeBlocks: { lang: string; text: string }[] = $state([]);
     let zipping = $state(false);
+
+    const isMobile = new IsMobile();
+    let actionsVisible = $state(false);
+
+    /** Event name used to signal other messages to hide their action bars. */
+    const ACTIONS_OPEN_EVENT = "chat:message-actions-open";
+
+    /**
+     * Toggle the action bar visibility on mobile via tap.
+     * On desktop, hover handles this — this is a no-op.
+     * Dispatches an event so other message instances can dismiss their actions.
+     *
+     * @param e - The click event on the message bubble.
+     */
+    function toggleActions(e: MouseEvent) {
+        // Skip clicks on links and other interactive elements
+        const target = e.target as HTMLElement;
+        if (target.closest("a, button, input, textarea, select, details")) return;
+        if (!isMobile.current) return;
+        actionsVisible = !actionsVisible;
+        if (actionsVisible) {
+            window.dispatchEvent(new CustomEvent(ACTIONS_OPEN_EVENT, { detail: msg.id }));
+        }
+    }
+
+    /**
+     * Hides this message's actions when another message is tapped on mobile.
+     *
+     * @param e - The custom event carrying the other message's ID.
+     */
+    function handleOtherActionsOpen(e: Event) {
+        const detail = (e as CustomEvent).detail;
+        if (detail !== msg.id) actionsVisible = false;
+    }
 
     /** Preprocessed content: fixes math formatting for Streamdown */
     const preprocessedContent = $derived(preprocessMathMarkdown(msg.content));
@@ -411,6 +446,12 @@
             handleFeedbackCancel();
         }
     }
+
+    // Dismiss this message's actions when another message is tapped on mobile
+    $effect(() => {
+        window.addEventListener(ACTIONS_OPEN_EVENT, handleOtherActionsOpen);
+        return () => window.removeEventListener(ACTIONS_OPEN_EVENT, handleOtherActionsOpen);
+    });
 </script>
 
 <div class="flex flex-col gap-1.5 w-full font-sans">
@@ -470,6 +511,7 @@
                     : msg.role === 'user'
                       ? 'bg-primary text-primary-foreground rounded-br-sm'
                       : 'bg-muted text-foreground rounded-bl-sm'}"
+                onclick={toggleActions}
             >
                 {#if msg.isError}
                     <span class="flex items-center gap-1.5 font-medium">
@@ -547,7 +589,9 @@
             {:else if !msg.streaming && !navigating}
                 <TooltipProvider>
                     <div
-                        class="flex justify-end gap-1 mt-1 opacity-0 group-hover/msg:opacity-100 transition-opacity"
+                        class="flex justify-end gap-1 mt-1 {isMobile.current && actionsVisible
+                            ? 'opacity-100'
+                            : 'opacity-0 group-hover/msg:opacity-100'} transition-opacity"
                     >
                         {#if oneditassistant || (onedit && msg.role === "user")}
                             <Tooltip>
