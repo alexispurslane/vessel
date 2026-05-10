@@ -80,6 +80,7 @@ Text inputs use [CodeMirror 6](https://codemirror.net/) with:
 | UI | [Shadcn](https://next.shadcn-svelte.com/) |
 | AI Engine | [Pi](https://github.com/mariozechner/pi) (pi-coding-agent, pi-ai, pi-agent-core) |
 | Sandbox | [Zerobox](https://github.com/nicobailon/zerobox) |
+| Editor | [CodeMirror 6](https://codemirror.net/) |
 | Linting | [OxLint](https://oxc.rs/docs/guide/usage/linter.html) (security, JSDoc, SonarJS plugins) |
 
 ## Getting Started
