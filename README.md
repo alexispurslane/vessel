@@ -1,5 +1,7 @@
 ![Vessel](vessel_banner.webp)
 
+[![Lint](https://github.com/alexispurslane/vessel/actions/workflows/lint.yml/badge.svg)](https://github.com/alexispurslane/vessel/actions/workflows/lint.yml)
+
 ## Philosophy
 
 Vessel is built on a few core principles:
