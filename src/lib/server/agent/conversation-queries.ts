@@ -11,21 +11,11 @@ import { safeJsonParse, stringArraySchema } from "$lib/utils.js";
 import { log } from "$lib/server/logger.js";
 import { SESSIONS_DIR } from "./model-registry.js";
 import type { ConversationListItem } from "./types.js";
+import type { ConversationSearchResult } from "$lib/types/conversation.js";
+
+export type { ConversationSearchResult };
 
 // --- Types ---
-
-/** A single search result with context snippets */
-export interface ConversationSearchResult {
-    id: string;
-    title: string;
-    tags: string[];
-    archived: boolean;
-    updatedAt: string;
-    /** Where the match was found */
-    matchSource: "title" | "content" | "both";
-    /** Context snippets showing the match in surrounding text, with the message ID the match was found in */
-    snippets: Array<{ text: string; messageId: string | null }>;
-}
 
 /** Row from the conversations table — shared by list and search queries. */
 interface ConversationRow {

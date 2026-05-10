@@ -23,6 +23,7 @@
 import { Type, type Static } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { TextContent } from "@mariozechner/pi-ai";
+import type { SearchResultItem } from "$lib/types/search.js";
 
 // --- Settings keys ---
 
@@ -51,12 +52,11 @@ export type SearchToolInput = Static<typeof searchSchema>;
 
 // --- Result types ---
 
-export interface SearchResult {
-    url: string;
-    title: string;
-    text?: string;
-    publishedDate?: string;
-}
+/**
+ * SearchResult is now defined as SearchResultItem in $lib/types/search.ts.
+ * Re-export for backward compatibility.
+ */
+export type SearchResult = SearchResultItem;
 
 export interface SearchToolDetails {
     /** The search query that was executed. */
@@ -64,7 +64,7 @@ export interface SearchToolDetails {
     /** Number of results returned. */
     resultCount: number;
     /** The actual search results. */
-    results: SearchResult[];
+    results: SearchResultItem[];
 }
 
 // --- Normalize results ---

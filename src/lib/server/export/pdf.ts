@@ -16,9 +16,10 @@ import PDFDocument from "pdfkit";
 import { marked } from "marked";
 import type { Token, Tokens } from "marked";
 import type { HistoryMessage } from "$lib/types.js";
-import type { ExportOptions } from "./types.js";
+import type { ExportOptions, ToolCallFootnote } from "$lib/types/export.js";
+import { formatArgValue } from "$lib/format/format-arg-value.js";
 
-/** Re-export the shared export options type. */
+/** Re-export the shared export types. */
 export type { ExportOptions };
 
 // --- Typography constants ---
@@ -68,17 +69,7 @@ const LIST_INDENT = 18;
  * @param options - Formatting options
  * @returns A Promise resolving to the PDF as a Uint8Array
  */
-/** A collected tool call output for the appendix. */
-interface ToolCallFootnote {
-    /** 1-based footnote number */
-    num: number;
-    /** Tool name that produced this output */
-    toolName: string;
-    /** The output text */
-    output: string;
-    /** Whether the output parses as JSON */
-    isJson: boolean;
-}
+
 
 /**
  * Generate a PDF buffer from a conversation's messages.
@@ -650,38 +641,6 @@ function renderThinkingSection(doc: PDFKit.PDFDocument, thinking: string): void 
     doc.font(FONT_SANS).fontSize(META_SIZE).fillColor("#999999").text("Thinking:", { continued: false });
     doc.moveDown(0.2);
     renderMarkdown(doc, thinking);
-}
-
-/**
- * Format a tool call argument value for inline display.
- *
- * @param value - The argument value
- * @param maxLen - Maximum character length before truncation
- * @returns A human-readable string representation
- */
-function formatArgValue(value: unknown, maxLen = 60): string {
-    if (value === null) return "null";
-    if (value === undefined) return "undefined";
-    if (typeof value === "string") {
-        const cleaned = value
-            .replace(/\\n/g, " ")
-            .replace(/\n/g, " ")
-            .replace(/\\t/g, " ")
-            .replace(/\\"/g, '"')
-            .trim();
-        if (cleaned.length > maxLen) return cleaned.slice(0, maxLen) + "…";
-        return cleaned || '""';
-    }
-    if (typeof value === "number" || typeof value === "boolean") return String(value);
-    if (Array.isArray(value)) {
-        const s = JSON.stringify(value);
-        return s.length > maxLen ? s.slice(0, maxLen) + "…" : s;
-    }
-    if (typeof value === "object") {
-        const s = JSON.stringify(value);
-        return s.length > maxLen ? "{…}" : s;
-    }
-    return JSON.stringify(value);
 }
 
 /**

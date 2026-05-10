@@ -17,8 +17,7 @@ import {
     editAssistantMessage as apiEditAssistant,
     regenWithFeedback as apiRegenWithFeedback,
 } from "$lib/api.js";
-import type { MessageHistory } from "$lib/api.js";
-import type { ChatMessage, FetchedSource, SessionTiming, TurnTiming } from "$lib/types.js";
+import type { ChatMessage, FetchedSource, HistoryResult, SessionTiming, TurnTiming } from "$lib/types.js";
 import { messageHistoryToChatMessages } from "$lib/chat-history.js";
 import { updateConversationTitleAndTags } from "./conversations.svelte.js";
 
@@ -334,7 +333,7 @@ export function stripThinkingTagsFromText(text: string): string {
 // --- Message population and manipulation ---
 
 /**
- * Populate the messages array from a MessageHistory payload.
+ * Populate the messages array from a HistoryResult payload.
  * Uses the shared messageHistoryToChatMessages for the pure conversion,
  * then applies store-specific side effects (conversationDefaultModel, title generation).
  * @param s - The chat state
@@ -342,7 +341,7 @@ export function stripThinkingTagsFromText(text: string): string {
  * @param conversationId - The conversation ID for title generation
  * @returns {void}
  */
-export function populateFromHistory(s: ChatState, history: MessageHistory, conversationId: string): void {
+export function populateFromHistory(s: ChatState, history: HistoryResult, conversationId: string): void {
     const chatMessages = messageHistoryToChatMessages(history);
     console.log(`[chat-lifecycle] populateFromHistory: convId=${conversationId}, incoming=${String(chatMessages.length)}, existing=${String(s.messages.length)}`);
     for (const msg of chatMessages) {
@@ -441,47 +440,43 @@ export async function reloadMessages(s: ChatState): Promise<void> {
 // --- Message CRUD operations ---
 
 /**
- * Delete a message (and all subsequent messages) by navigating the session tree.
- * Uses the pi SDK's navigateTree to move the leaf pointer back, which effectively
- * "deletes" the message and everything after it from the conversation branch.
+ * Modify a message by either deleting it or editing an assistant message in-place.
+ *
+ * If newContent is provided, performs an in-place edit of the assistant message
+ * (navigates back, appends a new version, and replays subsequent entries
+ * without triggering a new AI generation). If newContent is not provided,
+ * deletes the message by navigating the session tree back before it.
  *
  * @param s - The chat state
- * @param messageId - The ID of the message to delete
- * @param _role - The role of the message ("user" or "assistant")
- * @param abortFn - Callback to abort current generation (from chat.svelte.ts)
+ * @param messageId - The ID of the message to modify
+ * @param abortFn - Callback to abort current generation
+ * @param newContent - If provided, the new content for an assistant message edit
  */
-export async function deleteMessage(
+export async function modifyMessage(
     s: ChatState,
     messageId: string,
-    _role: string,
-    abortFn: () => Promise<void>
+    abortFn: () => Promise<void>,
+    newContent?: string
 ): Promise<void> {
     if (!s.currentConversationId) return;
 
-    // If generating, abort first
-    if (s.generating) {
-        await abortFn();
-    }
-
-    // Finalize any streaming message before navigating
-    if (s.streamingMessageId) {
-        const msg = s.messages.find((m) => m.id === s.streamingMessageId);
-        if (msg) {
-            msg.streaming = false;
-            msg.thinkingStreaming = false;
-        }
-        setStreamingMessageId(s, null, "deleteMessage");
-    }
+    const isEdit = newContent !== undefined;
+    await abortAndFinalize(s, abortFn, isEdit ? "editAssistantMessage" : "deleteMessage");
 
     s.navigating = true;
     s.error = null;
 
     try {
-        await apiNavigate(s.currentConversationId, messageId);
-        // Reload messages from server to reflect the new session state
+        if (isEdit) {
+            await apiEditAssistant(s.currentConversationId, messageId, newContent);
+        } else {
+            await apiNavigate(s.currentConversationId, messageId);
+        }
         await reloadMessages(s);
     } catch (e) {
-        s.error = e instanceof Error ? e.message : "Failed to delete message";
+        s.error = e instanceof Error
+            ? e.message
+            : (isEdit ? "Failed to edit assistant message" : "Failed to delete message");
     } finally {
         s.navigating = false;
     }
@@ -585,54 +580,7 @@ export async function editMessage(
     }
 }
 
-/**
- * In-place edit of an assistant message.
- *
- * Navigates back to before the target assistant message, appends a new version
- * with the edited text, and replays all subsequent entries. Does NOT trigger
- * a new AI generation.
- *
- * @param s - The chat state
- * @param messageId - The ID of the message to edit
- * @param newContent - The new content for the assistant message
- * @param abortFn - Callback to abort current generation (from chat.svelte.ts)
- */
-export async function editAssistantMessage(
-    s: ChatState,
-    messageId: string,
-    newContent: string,
-    abortFn: () => Promise<void>
-): Promise<void> {
-    if (!s.currentConversationId) return;
 
-    // If generating, abort first
-    if (s.generating) {
-        await abortFn();
-    }
-
-    // Finalize any streaming message before navigating
-    if (s.streamingMessageId) {
-        const msg = s.messages.find((m) => m.id === s.streamingMessageId);
-        if (msg) {
-            msg.streaming = false;
-            msg.thinkingStreaming = false;
-        }
-        setStreamingMessageId(s, null, "editAssistantMessage");
-    }
-
-    s.navigating = true;
-    s.error = null;
-
-    try {
-        await apiEditAssistant(s.currentConversationId, messageId, newContent);
-        // Reload messages from server to reflect the new session state
-        await reloadMessages(s);
-    } catch (e) {
-        s.error = e instanceof Error ? e.message : "Failed to edit assistant message";
-    } finally {
-        s.navigating = false;
-    }
-}
 
 /**
  * Regenerate an assistant message with user feedback.

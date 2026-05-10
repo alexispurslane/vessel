@@ -14,7 +14,9 @@
         "format:check": "prettier --check .",
         "lint": "oxlint",
         "lint:fix": "oxlint --fix",
-        "lint:audit": "bun audit"
+        "lint:audit": "bun audit",
+        "build:standalone": "bun run scripts/build-standalone.ts",
+        "clean": "rm -rf build"
     },
     "devDependencies": {
         "@fontsource-variable/inter": "^5.2.8",
@@ -80,6 +82,7 @@
         "defuddle": "^0.18.1",
         "fflate": "^0.8.2",
         "happy-dom": "^20.9.0",
+        "impit": "^0.14.0",
         "jose": "^6.2.3",
         "marked": "^18.0.3",
         "pdfkit": "^0.18.0",

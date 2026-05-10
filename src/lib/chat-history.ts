@@ -1,11 +1,10 @@
 /**
- * @file Converts server-side MessageHistory payloads into client-side ChatMessage objects.
+ * @file Converts server-side HistoryResult payloads into client-side ChatMessage objects.
  */
-import type { MessageHistory } from "$lib/api.js";
-import type { ChatMessage } from "$lib/types.js";
+import type { ChatMessage, HistoryResult } from "$lib/types.js";
 
 /**
- * Pure function: convert a MessageHistory payload (from the server) into
+ * Pure function: convert a HistoryResult payload (from the server) into
  * ChatMessage objects suitable for the client-side chat store and rendering.
  *
  * This is shared between server-side (+page.server.ts) and client-side code,
@@ -14,7 +13,7 @@ import type { ChatMessage } from "$lib/types.js";
  * @param history - The message history payload from the server
  * @returns Array of ChatMessage objects for the client
  */
-export function messageHistoryToChatMessages(history: MessageHistory): ChatMessage[] {
+export function messageHistoryToChatMessages(history: HistoryResult): ChatMessage[] {
     return history.messages.map((msg) => ({
         id: msg.id,
         role: msg.role as ChatMessage["role"],

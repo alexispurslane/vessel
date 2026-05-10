@@ -7,6 +7,7 @@
 
 import type { ActiveSession } from "./types.js";
 import type { ConversationSettings } from "$lib/types.js";
+import type { McpServerStatus } from "$lib/types/mcp.js";
 import { getMcpServersFromDb } from "./mcp-config.js";
 import { getExtensionRunner, getToolRegistry, getToolDefinitions } from "./pi-adapter.js";
 import { log } from "$lib/server/logger.js";
@@ -190,14 +191,7 @@ export function getSessionAgentInfo(activeSession: ActiveSession): {
 
 // --- MCP server status ---
 
-/**
- * MCP server connection status for a conversation.
- */
-export interface McpServerStatus {
-    name: string;
-    status: "connected" | "closed" | "needs-auth" | "unknown";
-    toolCount?: number;
-}
+export type { McpServerStatus } from "$lib/types/mcp.js";
 
 /**
  * Get the MCP server connection status for an active conversation session.

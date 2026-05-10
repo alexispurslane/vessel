@@ -40,6 +40,17 @@ export type {
     ThinkingLevel as PiThinkingLevel,
 } from "@mariozechner/pi-agent-core";
 
+/** DB row shape for model provider and ID columns, shared by session-history and session-store */
+export interface ModelRow {
+    model_provider: string | null;
+    model_id: string | null;
+}
+
+/** DB row shape for session file path and model columns, used by history-building functions */
+export interface SessionModelRow extends ModelRow {
+    session_file_path: string;
+}
+
 // --- Server-internal types ---
 
 import type { ChatSSEEvent } from "$lib/types.js";

@@ -185,6 +185,16 @@
         },
         {
             "files": [
+                "src/standalone/**"
+            ],
+            "rules": {
+                "typescript/no-unsafe-assignment": "off",
+                "typescript/no-unsafe-call": "off",
+                "typescript/no-unsafe-member-access": "off"
+            }
+        },
+        {
+            "files": [
                 "src/routes/api/**"
             ],
             "rules": {
@@ -198,7 +208,8 @@
         "dist/**",
         "node_modules/**",
         "src/lib/components/ui/**",
-        "lint-rules/**"
+        "lint-rules/**",
+        "scripts/**"
     ],
     "options": {
         "typeAware": true,

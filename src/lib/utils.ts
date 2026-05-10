@@ -4,6 +4,7 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { z, type ZodType } from "zod";
+import { formatArgValue as _formatArgValue } from "$lib/format/format-arg-value.js";
 
 export function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
@@ -173,33 +174,12 @@ export function getDraftConversationIds(): Set<string> {
 
 /**
  * Format a tool argument value into a compact display string.
- * Strips escape characters from strings, replaces newlines with spaces,
- * and truncates long values with an ellipsis.
+ * Re-exports the shared implementation with a UI-appropriate default maxLen.
+ *
  * @param value - The value to format
- * @param maxLen - Maximum display length before truncation
+ * @param maxLen - Maximum display length before truncation (default 40 for UI compactness)
  * @returns A compact string representation of the value
  */
 export function formatArgValue(value: unknown, maxLen = 40): string {
-    if (value === null) return "null";
-    if (value === undefined) return "undefined";
-    if (typeof value === "string") {
-        const cleaned = value
-            .replace(/\\n/g, " ")
-            .replace(/\n/g, " ")
-            .replace(/\\t/g, " ")
-            .replace(/\\"/g, '"')
-            .trim();
-        if (cleaned.length > maxLen) return cleaned.slice(0, maxLen) + "…";
-        return cleaned || '""';
-    }
-    if (typeof value === "number" || typeof value === "boolean") return String(value);
-    if (Array.isArray(value)) {
-        const s = JSON.stringify(value);
-        return s.length > maxLen ? s.slice(0, maxLen) + "…" : s;
-    }
-    if (typeof value === "object") {
-        const s = JSON.stringify(value);
-        return s.length > maxLen ? "{…}" : s;
-    }
-    return JSON.stringify(value);
+    return _formatArgValue(value, maxLen);
 }

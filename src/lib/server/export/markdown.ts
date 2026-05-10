@@ -7,22 +7,11 @@
  */
 
 import type { HistoryMessage } from "$lib/types.js";
-import type { ExportOptions } from "./types.js";
+import type { ExportOptions, ToolCallFootnote } from "$lib/types/export.js";
+import { formatArgValue } from "$lib/format/format-arg-value.js";
 
-/** Re-export the shared export options type. */
+/** Re-export the shared export types. */
 export type { ExportOptions };
-
-/** A collected tool call output for the appendix. */
-interface ToolCallFootnote {
-    /** 1-based footnote number */
-    num: number;
-    /** Tool name that produced this output */
-    toolName: string;
-    /** The output text */
-    output: string;
-    /** Whether the output parses as JSON */
-    isJson: boolean;
-}
 
 /**
  * Convert a conversation's messages to a clean Markdown document.
@@ -131,38 +120,6 @@ function appendThinkingBlock(lines: string[], thinking: string): void {
     lines.push("");
     lines.push("</details>");
     lines.push("");
-}
-
-/**
- * Format a tool call argument value for inline display.
- *
- * @param value - The argument value
- * @param maxLen - Maximum character length before truncation
- * @returns A human-readable string representation
- */
-function formatArgValue(value: unknown, maxLen = 60): string {
-    if (value === null) return "null";
-    if (value === undefined) return "undefined";
-    if (typeof value === "string") {
-        const cleaned = value
-            .replace(/\\n/g, " ")
-            .replace(/\n/g, " ")
-            .replace(/\\t/g, " ")
-            .replace(/\\"/g, '"')
-            .trim();
-        if (cleaned.length > maxLen) return cleaned.slice(0, maxLen) + "…";
-        return cleaned || '""';
-    }
-    if (typeof value === "number" || typeof value === "boolean") return String(value);
-    if (Array.isArray(value)) {
-        const s = JSON.stringify(value);
-        return s.length > maxLen ? s.slice(0, maxLen) + "…" : s;
-    }
-    if (typeof value === "object") {
-        const s = JSON.stringify(value);
-        return s.length > maxLen ? "{…}" : s;
-    }
-    return JSON.stringify(value);
 }
 
 /**

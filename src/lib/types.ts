@@ -7,6 +7,9 @@
  */
 
 import { z } from "zod";
+import type { SearchResultItem } from "$lib/types/search.js";
+
+export type { SearchResultItem };
 
 // --- Auth ---
 
@@ -152,14 +155,6 @@ export interface ModelInfo {
 }
 
 // --- Chat UI (client-only, but defined here for consistency) ---
-
-/** A single search result from a web search */
-export interface SearchResultItem {
-    url: string;
-    title: string;
-    text?: string;
-    publishedDate?: string;
-}
 
 /** Timing metrics for a single agent turn */
 export interface TurnTiming {

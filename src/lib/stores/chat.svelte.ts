@@ -21,8 +21,7 @@ import {
     generateTitle,
     releaseConversation,
 } from "$lib/api.js";
-import type { MessageHistory } from "$lib/api.js";
-import type { ChatMessage, SessionTiming } from "$lib/types.js";
+import type { ChatMessage, HistoryResult, SessionTiming } from "$lib/types.js";
 import { setActiveConversation, updateConversationTitleAndTags } from "./conversations.svelte.js";
 
 // Import message management functions from chat-messages module
@@ -31,9 +30,8 @@ import {
     populateFromHistory,
     clearMessages as _clearMessages,
     reloadMessages as _reloadMessages,
-    deleteMessage as _deleteMessage,
+    modifyMessage as _modifyMessage,
     editMessage as _editMessage,
-    editAssistantMessage as _editAssistantMessage,
     regenWithFeedback as _regenWithFeedback,
     handleStreamRecovery,
     handleMessageStart,
@@ -487,7 +485,7 @@ export function getChat() {
  */
 export async function connectStream(
     conversationId: string,
-    preloadedHistory?: MessageHistory
+    preloadedHistory?: HistoryResult
 ): Promise<void> {
     console.log(`[chat-lifecycle] connectStream: conversationId=${conversationId}, hasPreloadedHistory=${!!preloadedHistory}, currentGeneration=${state.connectGeneration}`);
 
@@ -587,16 +585,17 @@ export async function reloadMessages(): Promise<void> {
 }
 
 /**
- * Delete a message (and all subsequent messages) by navigating the session tree.
- * Uses the pi SDK's navigateTree to move the leaf pointer back, which effectively
- * "deletes" the message and everything after it from the conversation branch.
+ * Modify a message by either deleting it or editing an assistant message in-place.
  *
- * @param messageId - The ID of the message to delete
- * @param role - The role of the message ("user" or "assistant")
+ * If newContent is provided, performs an in-place edit of the assistant message.
+ * If newContent is not provided, deletes the message by navigating the session tree.
+ *
+ * @param messageId - The ID of the message to modify
+ * @param newContent - If provided, the new content for an assistant message edit
  * @returns {Promise<void>}
  */
-export async function deleteMessage(messageId: string, role: string): Promise<void> {
-    return _deleteMessage(state, messageId, role, abort);
+export async function modifyMessage(messageId: string, newContent?: string): Promise<void> {
+    return _modifyMessage(state, messageId, abort, newContent);
 }
 
 /**
@@ -612,20 +611,6 @@ export async function deleteMessage(messageId: string, role: string): Promise<vo
  */
 export async function editMessage(messageId: string, role: string, newText?: string): Promise<void> {
     return _editMessage(state, messageId, role, { newText, abortFn: abort, sendFn: send });
-}
-
-/**
- * In-place edit of an assistant message.
- *
- * Navigates back to before the target assistant message, appends a new version
- * with the edited text, and replays all subsequent entries. Does NOT trigger
- * a new AI generation.
- * @param messageId - The ID of the assistant message to edit
- * @param newContent - The edited content
- * @returns {Promise<void>}
- */
-export async function editAssistantMessage(messageId: string, newContent: string): Promise<void> {
-    return _editAssistantMessage(state, messageId, newContent, abort);
 }
 
 /**

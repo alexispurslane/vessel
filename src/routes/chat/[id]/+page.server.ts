@@ -5,6 +5,7 @@ import { messageHistoryToChatMessages } from "$lib/chat-history.js";
 import { getDb } from "$lib/server/db/index.js";
 import { resolve, relative } from "path";
 import { readdir, stat } from "node:fs/promises";
+import type { ModelRow } from "$lib/server/agent/types.js";
 
 /**
  * Recursively list files in a directory, returning paths relative to the base.
@@ -53,7 +54,7 @@ export const load: PageServerLoad = async ({ params }) => {
         const db = getDb();
         const convRow = db
             .query("SELECT model_provider, model_id FROM conversations WHERE id = ?")
-            .get(conversationId) as { model_provider: string | null; model_id: string | null } | undefined;
+            .get(conversationId) as ModelRow | undefined;
         const conversationDefaultModel = convRow?.model_id
             ? { provider: convRow.model_provider, modelId: convRow.model_id }
             : null;

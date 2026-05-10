@@ -39,12 +39,12 @@ import { createSearchTool, SEARCH_SETTINGS_KEYS } from "./sandboxed-search-tool.
 import { fetchTracker } from "./extensions/fetch-tracker.js";
 import type { FetchedSource } from "./extensions/fetch-tracker.js";
 import { timingTracker } from "./extensions/timing-tracker.js";
-import type { SessionTiming, TurnTiming } from "$lib/types.js";
+import type { HistoryResult, TurnTiming } from "$lib/types.js";
 import { createSessionSandbox, getSessionWorkDir, loadConversationSettingsFromDb, saveConversationSettingsToDb, isNetworkAllowed, getEffectiveAgentMode } from "./sandbox-factory.js";
 import type { Model as PiModel, Api } from "@mariozechner/pi-ai";
 import { getDb } from "../db/index.js";
 import { getUsername, getPronouns } from "../auth/index.js";
-import type { ChatSSEEvent, ActiveSession, CustomModelDef } from "./types.js";
+import type { ChatSSEEvent, ActiveSession, CustomModelDef, ModelRow, SessionModelRow } from "./types.js";
 import type { ConversationSettings } from "$lib/types.js";
 import type { Sandbox } from "zerobox";
 import { getToolRegistry, getToolDefinitions, getBaseToolDefinitions, getResourceLoaderAdapter } from "./pi-adapter.js";
@@ -271,9 +271,7 @@ export async function forkConversation(
         .query(
             "SELECT session_file_path, title, model_provider, model_id FROM conversations WHERE id = ?"
         )
-        .get(sourceConversationId) as
-        | { session_file_path: string; title: string; model_provider: string | null; model_id: string | null }
-        | undefined;
+        .get(sourceConversationId) as (SessionModelRow & { title: string }) | undefined;
 
     if (!row || !row.session_file_path) {
         throw new Error(`Conversation ${sourceConversationId} not found`);
@@ -401,14 +399,12 @@ async function resolveMcpConfig(conversationId: string, conversationSettings: Co
  * Resolve the model for a conversation: conversation-specific → global default → none.
  *
  * @param row - DB row with model provider and model ID
- * @param row.model_provider - The model provider from the DB
- * @param row.model_id - The model ID from the DB
  * @param settingsManager - Settings manager for default model config
  * @param modelRegistry - Registry to look up models by ID
  * @returns The resolved PiModel, or undefined if none configured
  */
 function resolveSessionModel(
-    row: { model_provider: string | null; model_id: string | null },
+    row: ModelRow,
     settingsManager: SettingsManager,
     modelRegistry: ReturnType<typeof getModelRegistry>
 ): PiModel<Api> | undefined {
@@ -770,9 +766,7 @@ export async function getOrHydrateSession(conversationId: string): Promise<PiAge
         .query(
             "SELECT session_file_path, model_provider, model_id FROM conversations WHERE id = ?"
         )
-        .get(conversationId) as
-        | { session_file_path: string; model_provider: string | null; model_id: string | null }
-        | undefined;
+        .get(conversationId) as SessionModelRow | undefined;
 
     if (!row) {
         throw new Error(`Conversation ${conversationId} not found`);
@@ -1139,35 +1133,7 @@ export function restartAllSessions(): number {
  * @param conversationId - The conversation ID to load history for
  * @returns Object with messages array and last model info
  */
-export async function getSessionHistory(conversationId: string): Promise<{
-    messages: Array<{
-        id: string;
-        role: string;
-        content: string;
-        thinking?: string;
-        model?: string;
-        modelProvider?: string;
-        toolCalls?: Array<{
-            toolName: string;
-            status: string;
-            output?: string;
-            arguments?: Record<string, unknown>;
-        }>;
-        isError?: boolean;
-        errorMessage?: string;
-        usage?: {
-            input: number;
-            output: number;
-            cacheRead: number;
-            cacheWrite: number;
-            totalTokens: number;
-        };
-        timestamp: number;
-        fetchedSources?: FetchedSource[];
-    }>;
-    model: { provider: string; modelId: string } | null;
-    timing?: SessionTiming;
-}> {
+export async function getSessionHistory(conversationId: string): Promise<HistoryResult> {
     const row = getConversationDbRow(conversationId);
     if (!row?.session_file_path) {
         return { messages: [], model: null };

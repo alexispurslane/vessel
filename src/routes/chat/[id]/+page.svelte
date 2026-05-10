@@ -5,9 +5,8 @@
         abort,
         connectStream,
         disconnectStream,
-        deleteMessage,
+        modifyMessage,
         editMessage,
-        editAssistantMessage,
         regenWithFeedback,
         reloadMessages,
     } from "$lib/stores/chat.svelte.js";
@@ -812,8 +811,8 @@
         return found?.name || modelId;
     }
 
-    function handleDeleteMessage(messageId: string, role: string) {
-        void deleteMessage(messageId, role);
+    function handleDeleteMessage(messageId: string, _role: string) {
+        void modifyMessage(messageId);
     }
 
     function handleEditMessage(messageId: string, role: string, newText?: string) {
@@ -821,7 +820,7 @@
     }
 
     function handleEditAssistantMessage(messageId: string, newText: string) {
-        void editAssistantMessage(messageId, newText);
+        void modifyMessage(messageId, newText);
     }
 
     function handleRegenWithFeedback(messageId: string, feedback: string, modelId?: string) {

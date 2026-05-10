@@ -1,11 +1,8 @@
 /**
  * @file Shared types for conversation export.
+ *
+ * Types are defined in $lib/types/export.ts and re-exported here
+ * for backward compatibility.
  */
 
-/** Options controlling what content is included in an export. */
-export interface ExportOptions {
-    /** Whether to include thinking/reasoning content from assistant messages */
-    includeThinking?: boolean;
-    /** Whether to include tool call details */
-    includeToolCalls?: boolean;
-}
+export type { ExportOptions, ExportFormat, CodeBlock, ToolCallFootnote } from "$lib/types/export.js";

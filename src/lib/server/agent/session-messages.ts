@@ -16,9 +16,8 @@
  */
 
 import type { AgentSession as PiAgentSession } from "@mariozechner/pi-coding-agent";
-import type { ActiveSession } from "./types.js";
-import type { FetchedSource } from "./extensions/fetch-tracker.js";
-import type { SessionTiming } from "$lib/types.js";
+import type { ActiveSession, SessionModelRow } from "./types.js";
+import type { HistoryResult } from "$lib/types.js";
 
 import {
     buildHistoryFromSession,
@@ -130,43 +129,12 @@ export async function sendCustomMessageToSession(
  *
  * @param activeSession - The active session to build history from
  * @param row - The DB row with session file path and model info
- * @param row.session_file_path - Path to the session JSONL file
- * @param row.model_provider - The model provider name
- * @param row.model_id - The model identifier
  * @returns The message history and model info
  */
 export function getHistoryFromSession(
     activeSession: ActiveSession,
-    row: { session_file_path: string; model_provider: string | null; model_id: string | null }
-): {
-    messages: Array<{
-        id: string;
-        role: string;
-        content: string;
-        thinking?: string;
-        model?: string;
-        modelProvider?: string;
-        toolCalls?: Array<{
-            toolName: string;
-            status: string;
-            output?: string;
-            arguments?: Record<string, unknown>;
-        }>;
-        isError?: boolean;
-        errorMessage?: string;
-        usage?: {
-            input: number;
-            output: number;
-            cacheRead: number;
-            cacheWrite: number;
-            totalTokens: number;
-        };
-        timestamp: number;
-        fetchedSources?: FetchedSource[];
-    }>;
-    model: { provider: string; modelId: string } | null;
-    timing?: SessionTiming;
-} {
+    row: SessionModelRow
+): HistoryResult {
     return buildHistoryFromSession(activeSession, row);
 }
 
@@ -177,19 +145,13 @@ export function getHistoryFromSession(
  * @param conversationId - The conversation ID to look up
  * @returns The DB row, or undefined if not found
  */
-export function getConversationDbRow(conversationId: string): {
-    session_file_path: string;
-    model_provider: string | null;
-    model_id: string | null;
-} | undefined {
+export function getConversationDbRow(conversationId: string): SessionModelRow | undefined {
     const db = getDb();
     return db
         .query(
             "SELECT session_file_path, model_provider, model_id FROM conversations WHERE id = ?"
         )
-        .get(conversationId) as
-        | { session_file_path: string; model_provider: string | null; model_id: string | null }
-        | undefined;
+        .get(conversationId) as SessionModelRow | undefined;
 }
 
 // --- Session tree navigation ---

@@ -14,9 +14,10 @@ import { mkdir, rename } from "node:fs/promises";
 import { z } from "zod";
 import { getDb } from "../db/index.js";
 import { tryJsonParse } from "$lib/utils.js";
+import { AGENT_DIR } from "$lib/server/data-dir.js";
+import type { McpServerEntry, McpServerInfo } from "$lib/types/mcp.js";
 
-const DATA_DIR = resolve(process.cwd(), "data");
-const AGENT_DIR = resolve(DATA_DIR, "agent");
+export type { McpServerEntry, McpServerInfo };
 
 /** Path to the global MCP config file written for pi-mcp-adapter */
 export const MCP_CONFIG_PATH = resolve(AGENT_DIR, "mcp.json");
@@ -45,15 +46,6 @@ export const mcpServerEntrySchema = z.object({
 
 /** Zod schema for the full MCP servers config */
 const mcpServersSchema = z.record(z.string(), mcpServerEntrySchema);
-
-/** A simplified MCP server entry matching Claude-like JSON config syntax */
-export type McpServerEntry = z.infer<typeof mcpServerEntrySchema>;
-
-/** MCP server info returned to the frontend (sensitive fields masked) */
-export interface McpServerInfo {
-    name: string;
-    config: McpServerEntry;
-}
 
 /**
  * Get all MCP server configs from the DB.

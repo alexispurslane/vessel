@@ -23,13 +23,11 @@ import { getDb } from "../db/index.js";
 import { tryJsonParse } from "$lib/utils.js";
 import { type ConversationSettings, conversationSettingsSchema } from "$lib/types.js";
 import { log } from "$lib/server/logger.js";
+import { SESSIONS_DIR } from "$lib/server/data-dir.js";
 
 // --- Constants ---
 
 const IS_LINUX = process.platform === "linux";
-
-const DATA_DIR = resolve(process.cwd(), "data");
-const SESSIONS_DIR = resolve(DATA_DIR, "sessions");
 
 // --- Linux bash config workaround ---
 

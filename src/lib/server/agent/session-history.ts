@@ -7,36 +7,19 @@
  */
 
 import type { AgentSession as PiAgentSession, SessionEntry } from "@mariozechner/pi-coding-agent";
-import type { ActiveSession } from "./types.js";
+import type { ActiveSession, ModelRow, SessionModelRow } from "./types.js";
 import type { FetchedSource, HistoryMessage, HistoryResult, SessionTiming, TurnTiming } from "$lib/types.js";
+import type { SessionTreeNodeData, SessionTreeRelation } from "$lib/types/session-tree.js";
+
+export type { SessionTreeNodeData, SessionTreeRelation };
 
 // --- Types ---
 
-/** A node in the session tree for DAG visualization */
-export interface SessionTreeNodeData {
-    /** Entry ID */
-    id: string;
-    /** Parent entry ID (null for root) */
-    parentId: string | null;
-    /** Entry type (message, model_change, etc.) */
-    type: string;
-    /** Message role (only for type=message entries) */
-    role?: string;
-    /** First few words of the message content */
-    preview: string;
-    /** Full message content (for hover expansion) */
+/** Result of extracting content info from a message for tree node display */
+interface ContentExtractionResult {
     fullContent: string;
-    /** Whether this entry is on the current active branch (from root to leaf) */
-    onActiveBranch: boolean;
-    /** Whether this entry is the current leaf */
-    isCurrentLeaf: boolean;
-}
-
-/** A relation in the session tree DAG */
-export interface SessionTreeRelation {
-    id: string;
-    parentId: string;
-    childId: string;
+    hasToolCall: boolean;
+    hasThinking: boolean;
 }
 
 // --- History building ---
@@ -349,13 +332,11 @@ function processBranchEntry(state: HistoryBuilderState, entry: SessionEntry): vo
  * Resolve model info from builder state or fallback row data.
  * @param state - Mutable history builder state
  * @param row - Fallback row data
- * @param row.model_provider - The row's model provider
- * @param row.model_id - The row's model ID
  * @returns Resolved model info, or null if unavailable
  */
 function resolveModel(
     state: HistoryBuilderState,
-    row: { model_provider: string | null; model_id: string | null }
+    row: ModelRow
 ): { provider: string; modelId: string } | null {
     if (state.lastModelProvider && state.lastModelId) {
         return { provider: state.lastModelProvider, modelId: state.lastModelId };
@@ -418,7 +399,7 @@ function computeAggregateTiming(entries: TurnTiming[]): SessionTiming | undefine
  */
 export function buildHistoryFromSession(
     activeSession: ActiveSession,
-    row: { session_file_path: string; model_provider: string | null; model_id: string | null }
+    row: SessionModelRow
 ): HistoryResult {
     const sessionManager = activeSession.agentSession.sessionManager;
     const branchEntries = sessionManager.getBranch();
@@ -450,13 +431,10 @@ export function buildHistoryFromSession(
  * Extract content info from a message for tree node display.
  * @param block - A single content block
  * @param result - Accumulator for extracted content
- * @param result.fullContent - Accumulated full text content
- * @param result.hasToolCall - Whether a tool call block was seen
- * @param result.hasThinking - Whether a thinking block was seen
  */
 function processContentBlock(
     block: Record<string, unknown>,
-    result: { fullContent: string; hasToolCall: boolean; hasThinking: boolean }
+    result: ContentExtractionResult
 ): void {
     if (block.type === "text" && typeof block.text === "string") {
         result.fullContent += block.text;
@@ -472,11 +450,7 @@ function processContentBlock(
  * @param msg - The message to extract content from
  * @returns Content summary with text, tool call, and thinking flags
  */
-function extractTreeContent(msg: Record<string, unknown>): {
-    fullContent: string;
-    hasToolCall: boolean;
-    hasThinking: boolean;
-} {
+function extractTreeContent(msg: Record<string, unknown>): ContentExtractionResult {
     const result = { fullContent: "", hasToolCall: false, hasThinking: false };
 
     if (Array.isArray(msg.content)) {

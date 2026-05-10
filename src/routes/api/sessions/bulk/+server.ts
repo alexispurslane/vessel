@@ -6,6 +6,7 @@ import { z } from "zod";
 import { apiHandler } from "$lib/server/api-errors.js";
 import { getDb, upsertTags } from "$lib/server/db/index.js";
 import { destroyConversation } from "$lib/server/agent/session-store.js";
+import type { BulkResult } from "$lib/types/conversation.js";
 
 const BulkBody = z.object({
     ids: z.array(z.string()).min(1).max(100),
@@ -16,15 +17,7 @@ const BulkBody = z.object({
     { message: "tags required for tag action" }
 );
 
-type BulkAction = z.infer<typeof BulkBody>["action"];
 
-/** Per-action result counts returned in the response. */
-interface BulkResult {
-    action: BulkAction;
-    succeeded: number;
-    failed: number;
-    failures?: Array<{ id: string; error: string }>;
-}
 
 /**
  * Bulk-archive conversations: set archived = 1 and clear pinned.

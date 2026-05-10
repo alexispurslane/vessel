@@ -4,10 +4,11 @@
 
 import { Database } from "bun:sqlite";
 import { join } from "path";
+import { DATA_DIR } from "$lib/server/data-dir.js";
 import { SCHEMA, runMigrations } from "./schema.js";
 import { safeJsonParse, tryJsonParse, stringArraySchema } from "$lib/utils.js";
 
-const DB_PATH = join(process.cwd(), "data", "vessel.db");
+const DB_PATH = join(DATA_DIR, "vessel.db");
 
 let _db: Database | null = null;
 

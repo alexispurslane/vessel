@@ -7,14 +7,7 @@ import { marked } from "marked";
 import type { Token, Tokens } from "marked";
 import { tryApi, badRequest, notFound } from "$lib/server/api-errors.js";
 import { getSessionHistory } from "$lib/server/agent/session-store.js";
-
-/** A single code block extracted from a message */
-interface CodeBlock {
-    /** The language identifier (e.g. "typescript", "python"), or empty string if none */
-    lang: string;
-    /** The raw code content (no trailing newline) */
-    text: string;
-}
+import type { CodeBlock } from "$lib/types/export.js";
 
 /**
  * Recursively walk the marked token tree and collect all fenced code blocks.

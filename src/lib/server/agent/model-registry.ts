@@ -17,12 +17,10 @@ import { getDb } from "../db/index.js";
 import { inferApiForProvider } from "../inference/api-helpers.js";
 import { VESSEL_APPEND_PROMPT } from "./vessel-append-prompt.js";
 import { getModelList, setModelList } from "./pi-adapter.js";
+import { DATA_DIR, SESSIONS_DIR, AGENT_DIR } from "$lib/server/data-dir.js";
 
 // --- Constants ---
 
-const DATA_DIR = resolve(process.cwd(), "data");
-const SESSIONS_DIR = resolve(DATA_DIR, "sessions");
-const AGENT_DIR = resolve(DATA_DIR, "agent");
 const MODELS_JSON_PATH = resolve(DATA_DIR, "models.json");
 
 /**

@@ -10,9 +10,31 @@ import type {
     CustomModelDef,
     ModelInfo,
     ConversationSettings,
-    FetchedSource,
-    SessionTiming,
+    HistoryMessage,
+    HistoryResult,
 } from "$lib/types.js";
+import type { BulkAction, BulkResult, ConversationSearchResult } from "$lib/types/conversation.js";
+import type { AgentToolInfo, AgentSkillInfo, AgentInfo } from "$lib/types/agent.js";
+import type { SessionTreeNodeData, SessionTreeRelation } from "$lib/types/session-tree.js";
+import type { CodeBlock, ExportFormat, ExportOptions } from "$lib/types/export.js";
+import type { McpServerEntry, McpServerInfo, McpServerStatus } from "$lib/types/mcp.js";
+
+export type {
+    BulkAction,
+    BulkResult,
+    ConversationSearchResult,
+    AgentToolInfo,
+    AgentSkillInfo,
+    AgentInfo,
+    SessionTreeNodeData,
+    SessionTreeRelation,
+    CodeBlock,
+    ExportFormat,
+    ExportOptions,
+    McpServerEntry,
+    McpServerInfo,
+    McpServerStatus,
+};
 
 class ApiError extends Error {
     constructor(
@@ -152,17 +174,6 @@ export async function deleteConversation(id: string): Promise<{ success: boolean
 
 // --- Bulk Operations ---
 
-/** Action type for the bulk endpoint. */
-export type BulkAction = "archive" | "unarchive" | "delete" | "tag";
-
-/** Result returned by the bulk endpoint. */
-export interface BulkResult {
-    action: BulkAction;
-    succeeded: number;
-    failed: number;
-    failures?: Array<{ id: string; error: string }>;
-}
-
 /**
  * Perform a batch action on multiple conversations.
  *
@@ -183,16 +194,6 @@ export async function bulkConversationAction(
 }
 
 // --- Search ---
-
-export interface ConversationSearchResult {
-    id: string;
-    title: string;
-    tags: string[];
-    archived: boolean;
-    updatedAt: string;
-    matchSource: "title" | "content" | "both";
-    snippets: Array<{ text: string; messageId: string | null }>;
-}
 
 /**
  * Search conversations by text query.
@@ -466,31 +467,6 @@ export function uploadFile(
 
 // --- Agent Info ---
 
-export interface AgentToolInfo {
-    name: string;
-    description: string;
-    source: string;
-    scope: string;
-}
-
-export interface AgentSkillInfo {
-    name: string;
-    description: string;
-    source: string;
-    scope: string;
-    disableModelInvocation: boolean;
-}
-
-export interface AgentInfo {
-    systemPrompt: string;
-    tools: AgentToolInfo[];
-    skills: AgentSkillInfo[];
-    /** Custom system prompt from conversation settings (null = use default) */
-    customSystemPrompt?: string | null;
-    /** Appended system prompt instructions from conversation settings (null = nothing appended) */
-    appendSystemPrompt?: string[] | null;
-}
-
 /**
  * Get agent info (tools, skills, system prompt) for an active session.
  *
@@ -536,23 +512,6 @@ export async function updateSessionSystemPrompt(
 }
 
 // --- Session Tree DAG ---
-
-export interface SessionTreeNodeData {
-    id: string;
-    parentId: string | null;
-    type: string;
-    role?: string;
-    preview: string;
-    fullContent: string;
-    onActiveBranch: boolean;
-    isCurrentLeaf: boolean;
-}
-
-export interface SessionTreeRelation {
-    id: string;
-    parentId: string;
-    childId: string;
-}
 
 export interface SessionTree {
     nodes: SessionTreeNodeData[];
@@ -602,38 +561,11 @@ export async function forkConversation(conversationId: string, beforeEntryId: st
     });
 }
 
-export interface MessageHistoryItem {
-    id: string;
-    role: string;
-    content: string;
-    thinking?: string;
-    model?: string;
-    modelProvider?: string;
-    toolCalls?: Array<{
-        toolName: string;
-        status: string;
-        output?: string;
-        arguments?: Record<string, unknown>;
-    }>;
-    isError?: boolean;
-    errorMessage?: string;
-    usage?: {
-        input: number;
-        output: number;
-        cacheRead: number;
-        cacheWrite: number;
-        totalTokens: number;
-    };
-    timestamp: number;
-    fetchedSources?: FetchedSource[];
-}
+/** @deprecated Use HistoryMessage from $lib/types.js instead */
+export type MessageHistoryItem = HistoryMessage;
 
-export interface MessageHistory {
-    messages: MessageHistoryItem[];
-    model: { provider: string; modelId: string } | null;
-    /** Aggregate timing statistics across all timed turns */
-    timing?: SessionTiming;
-}
+/** @deprecated Use HistoryResult from $lib/types.js instead */
+export type MessageHistory = HistoryResult;
 
 /**
  * Get the full message history for a conversation.
@@ -643,14 +575,6 @@ export interface MessageHistory {
  */
 export async function getMessageHistory(conversationId: string): Promise<MessageHistory> {
     return apiFetch<MessageHistory>(`/api/sessions/${conversationId}/messages`);
-}
-
-/** A single code block extracted from a message */
-interface CodeBlock {
-    /** The language identifier (e.g. "typescript", "python"), or empty string if none */
-    lang: string;
-    /** The raw code content */
-    text: string;
 }
 
 /** Response from GET /api/sessions/[id]/code-blocks */
@@ -826,31 +750,6 @@ export async function updateSettings(
 
 // --- MCP Servers ---
 
-/** MCP server entry matching the Claude-like JSON config syntax */
-export interface McpServerEntry {
-    command?: string;
-    args?: string[];
-    env?: Record<string, string>;
-    cwd?: string;
-    url?: string;
-    headers?: Record<string, string>;
-    auth?: "oauth" | "bearer" | false;
-    bearerToken?: string;
-    lifecycle?: "keep-alive" | "lazy" | "eager";
-    idleTimeout?: number;
-    exposeResources?: boolean;
-    directTools?: boolean | string[];
-    excludeTools?: string[];
-    debug?: boolean;
-    /** Whether this server is enabled by default in new conversations (default: true) */
-    defaultEnabled?: boolean;
-}
-
-export interface McpServerInfo {
-    name: string;
-    config: McpServerEntry;
-}
-
 /**
  * List all configured MCP servers.
  *
@@ -888,12 +787,6 @@ export async function deleteMcpServer(name: string): Promise<{ success: boolean 
         method: "DELETE",
         body: JSON.stringify({ name }),
     });
-}
-
-export interface McpServerStatus {
-    name: string;
-    status: "connected" | "closed" | "needs-auth" | "unknown";
-    toolCount?: number;
 }
 
 /**
@@ -997,17 +890,6 @@ export async function fsComplete(partial: string, type?: "file" | "directory" | 
         method: 'POST',
         body: JSON.stringify({ partial, type }),
     });
-}
-
-/** Supported export formats */
-export type ExportFormat = "pdf" | "markdown" | "json";
-
-/** Options controlling what content is included in an export. */
-export interface ExportOptions {
-    /** Whether to include thinking/reasoning content from assistant messages */
-    includeThinking?: boolean;
-    /** Whether to include tool call details */
-    includeToolCalls?: boolean;
 }
 
 /**
