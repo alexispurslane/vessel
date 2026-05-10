@@ -2,52 +2,80 @@
  * @file Fetch tool — fetches the fully-rendered content of any web page using
  * happy-dom, then extracts the main content as Markdown via defuddle.
  *
- * Two execution modes, both powered by the same JS code (built by `buildFetchJs`):
+ * Two execution modes, both running in-process:
  *
- * **Sandboxed** (preferred): Pass a zerobox `Sandbox` instance to
- * `createFetchTool({ sandbox })`. The JS code runs inside a sandbox via
- * `sandbox.exec("node", ["-e", code])`, with network and filesystem access
- * governed by the sandbox policy.
+ * **Sandboxed**: Pass a zerobox `Sandbox` instance to
+ * `createFetchTool({ sandbox })`. The sandbox's network policy
+ * (`allowNet`) is enforced in-process — URLs are checked against the policy
+ * before any request is made, and happy-dom's fetch interceptor routes
+ * sub-resource requests through impit (with the same domain check).
  *
- * **Local** (fallback): Call `createFetchTool()` with no options. The same JS
- * code runs in a plain Node subprocess with `NODE_PATH` set to the project's
- * `node_modules`. No sandbox restrictions apply. Only use when sandboxing is
- * disabled.
+ * **Local** (fallback): Call `createFetchTool()` with no options. No sandbox
+ * restrictions apply — all network requests go through directly.
  *
- * Both paths share a single source of truth — `buildFetchJs` — so the impit
- * TLS fingerprinting, navigator patches, fetch interceptor, CAPTCHA detection,
- * img/SVG replacement, and defuddle extraction are never duplicated.
+ * Both paths share the same in-process logic:
+ * 1. impit fetches the HTML with Chrome 131's TLS fingerprint/headers
+ * 2. happy-dom renders the page (JS execution, DOM construction)
+ * 3. defuddle extracts the main content as Markdown
  *
- * Inline string template vs. `Function.toString()` / `import()`:
- *
- * The JS code is written as an inline string template (in `buildFetchJs`)
- * using `require()` for module loading. This is necessary because:
- * (a) Vite's SSR transform rewrites `import()` into
- * `__vite_ssr_dynamic_import__()` — even with `@vite-ignore` — which fails
- * in a standalone Node process; and (b) ESM `import()` doesn't use NODE_PATH
- * for resolution, so modules in the sandbox deps dir can't be found.
- * `require()` solves both problems: it's not transformed by Vite, and it
- * respects NODE_PATH.
+ * The impit TLS fingerprinting, navigator patches, fetch interceptor,
+ * CAPTCHA detection, img/SVG replacement, and defuddle extraction happen
+ * in a single shared `fetchPage` function — no code duplication.
  */
 
 import { Type, type Static } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
-import type { TextContent } from "@mariozechner/pi-ai";
-import type { Sandbox, CommandOutput } from "zerobox";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { resolve } from "node:path";
-import { z } from "zod";
-import { tryJsonParse } from "$lib/utils.js";
+import type { Sandbox } from "zerobox";
+import { Browser, BrowserErrorCaptureEnum } from "happy-dom";
+import type BrowserWindow from "happy-dom/lib/window/BrowserWindow.js";
+import type IFetchInterceptor from "happy-dom/lib/fetch/types/IFetchInterceptor.js";
+import type Request from "happy-dom/lib/fetch/Request.js";
+import type Response from "happy-dom/lib/fetch/Response.js";
+import { Impit } from "impit";
+import { Defuddle } from "defuddle/node";
 
-const execFileAsync = promisify(execFile);
+// --- Bun vm module workaround ---
 
-const fetchOutputSchema = z.object({
-    content: z.string().optional(),
-    title: z.string().optional(),
-    captchaDetected: z.boolean().optional(),
-    httpStatus: z.number().optional(),
-});
+/**
+ * Patch JS globals onto a happy-dom BrowserWindow instance.
+ *
+ * Bun's `vm` module does not properly execute happy-dom's
+ * `VMGlobalPropertyScript.runInContext()`, which uses `vm.Script` to copy
+ * JS globals (`SyntaxError`, `TypeError`, `Array`, etc.) from `globalThis`
+ * onto the window object. Under Bun every one of these properties ends up as
+ * `undefined`. This causes an immediate crash in happy-dom's
+ * `SelectorParser.getSelectorGroups()`, which eagerly constructs a
+ * `SyntaxError` with `new this.window.SyntaxError(...)` — turning what
+ * should be a clean selector-parse error into an opaque
+ * `TypeError: undefined is not a constructor` that kills *every*
+ * `querySelectorAll` call (even valid selectors like `"p"` or `"*"`).
+ *
+ * This function copies any missing globals from `globalThis` onto the
+ * window, restoring normal selector parsing and error handling.
+ *
+ * @param win - The happy-dom BrowserWindow instance to patch
+ */
+function patchBunVmGlobals(win: BrowserWindow): void {
+    // Mirrors happy-dom's VMGlobalPropertyScript (minus deprecated globals).
+    // Only patch when undefined — some properties are already set correctly.
+    const jsGlobals: (keyof typeof globalThis)[] = [
+        "Array", "ArrayBuffer", "Boolean", "DataView", "Date", "Error",
+        "EvalError", "Float32Array", "Float64Array", "Function", "Infinity",
+        "Int16Array", "Int32Array", "Int8Array", "Intl", "JSON", "Map", "Math",
+        "NaN", "Number", "Object", "Promise", "RangeError", "ReferenceError",
+        "RegExp", "Reflect", "Set", "String", "Symbol", "SyntaxError",
+        "TypeError", "URIError", "Uint16Array", "Uint32Array", "Uint8Array",
+        "Uint8ClampedArray", "WeakMap", "WeakSet", "decodeURI",
+        "decodeURIComponent", "encodeURI", "encodeURIComponent", "eval",
+        "isFinite", "isNaN", "parseFloat", "parseInt",
+    ];
+
+    for (const name of jsGlobals) {
+        if ((win as unknown as Record<string, unknown>)[name] === undefined) {
+            (win as unknown as Record<string, unknown>)[name] = globalThis[name];
+        }
+    }
+}
 
 // --- Chrome 131 on Windows Spoof ---
 
@@ -118,6 +146,8 @@ const fetchSchema = Type.Object({
 
 export type FetchToolInput = Static<typeof fetchSchema>;
 
+// --- Details & options ---
+
 export interface FetchToolDetails {
     /** The URL that was fetched. */
     url: string;
@@ -133,13 +163,12 @@ export interface FetchToolDetails {
     wasSearchResult?: boolean;
 }
 
-// --- Tool options ---
-
 export interface FetchToolOptions {
     /**
-     * A zerobox Sandbox to run happy-dom inside.
-     * When provided, the fetch executes inside the sandbox.
-     * When omitted, happy-dom runs locally in the main process.
+     * A zerobox Sandbox whose network policy should be respected.
+     * When provided, the sandbox's `allowNet` policy (false, true, or specific
+     * domains) is enforced in-process — URLs are checked before any request.
+     * When omitted, no network restrictions apply.
      */
     sandbox?: Sandbox;
     /**
@@ -150,292 +179,419 @@ export interface FetchToolOptions {
     searchResultUrls?: Set<string>;
 }
 
-// --- Fetch result parsing ---
+// --- Network policy enforcement ---
 
 /**
- * Parse the JSON output produced by `buildFetchJs` from a process's stdout.
+ * Check whether a URL is permitted by the sandbox's network policy.
  *
- * Both `fetchPageLocally` and `fetchPageInSandbox` run the same JS code
- * (produced by `buildFetchJs`) and parse the same JSON result, so this
- * logic is shared.
+ * The sandbox's `allowNet` can be:
+ * - `false`: no network access at all
+ * - `true`: all domains allowed
+ * - `string[]`: only specific domains allowed (matched by hostname suffix)
  *
- * @param stdout - The raw stdout from the Node.js fetch process
- * @param url - The URL that was fetched (for error messages)
- * @returns Parsed content, title, captcha flag, and HTTP status
+ * Domain matching uses hostname suffix comparison — e.g. if "example.com"
+ * is in the allowed list, "api.example.com" is also allowed.
+ *
+ * @param url - The URL to check
+ * @param allowNet - The sandbox's network policy value
+ * @returns Whether the URL is permitted
  */
-function parseFetchOutput(stdout: string, url: string): { content: string; title: string; captchaDetected: boolean; httpStatus: number } {
-    if (!stdout.trim()) {
-        throw new Error("Failed to fetch " + url + ": empty response");
-    }
-    try {
-        const parsed = tryJsonParse(stdout.trim(), fetchOutputSchema);
-        return { content: parsed.content ?? stdout, title: parsed.title ?? "", captchaDetected: !!parsed.captchaDetected, httpStatus: parsed.httpStatus ?? 200 };
-    } catch {
-        // Fall through to raw stdout output
-    }
-    return { content: stdout, title: "", captchaDetected: false, httpStatus: 200 };
+function isUrlAllowed(url: string, allowNet: boolean | string[]): boolean {
+    if (allowNet === true) return true;
+    if (allowNet === false) return false;
+
+    const hostname = new URL(url).hostname.toLowerCase();
+    return allowNet.some((domain) => {
+        const d = domain.toLowerCase();
+        return hostname === d || hostname.endsWith("." + d);
+    });
 }
 
-// --- Sandboxed fetch function (injected as inline JS string) ---
+// --- CAPTCHA detection ---
 
 /**
- * Build the inline JS string to execute inside the sandbox.
+ * Detect common CAPTCHA and anti-bot challenge patterns in the rendered document.
  *
- * This generates a self-contained async function that runs inside a
- * standalone Node process (via sandbox.exec). It uses `require()` for
- * module resolution, which respects the NODE_PATH env var set by the
- * sandbox (pointing to data/deps/node_modules).
+ * Checks for well-known Cloudflare, reCAPTCHA, and hCAPTCHA indicators in the
+ * page title, DOM elements, and body text.
  *
- * Previous approach used dynamic `import()`, but this had two problems:
- * 1. Vite's SSR transform rewrites `import()` into `__vite_ssr_dynamic_import__()`
- *    — even with `@vite-ignore` — and Function.toString() captured the
- *    transformed source, which fails in a standalone Node process.
- * 2. ESM `import()` does NOT use NODE_PATH for resolution (only `require()`
- *    does), so modules installed in the sandbox deps dir weren't found.
+ * @param document - The happy-dom Document to inspect
+ * @returns Whether a CAPTCHA was detected
+ */
+function detectCaptcha(document: Document): boolean {
+    const docTitle = (document.title || "").toLowerCase();
+    if (docTitle.includes("just a moment") || docTitle.includes("attention required")) return true;
+    if (document.querySelector("#challenge-running") || document.querySelector("#challenge-stage")) return true;
+    if (document.querySelector(".cf-turnstile")) return true;
+    if (document.querySelector(".g-recaptcha")) return true;
+    if (document.querySelector('iframe[src*="google.com/recaptcha"]')) return true;
+    if (document.querySelector(".h-captcha")) return true;
+    if (document.querySelector('iframe[src*="hcaptcha.com"]')) return true;
+
+    const bodyText = (document.body?.textContent || "").trim();
+    if (bodyText.length > 0 && bodyText.length < 500) {
+        const lower = bodyText.toLowerCase();
+        if (
+            lower.includes("captcha") ||
+            lower.includes("verify you") ||
+            lower.includes("are you a robot") ||
+            lower.includes("are you human") ||
+            lower.includes("access denied") ||
+            (lower.includes("blocked") && lower.includes("bot"))
+        ) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// --- Image/SVG cleanup ---
+
+/**
+ * Replace img and SVG elements with paragraphs containing their alt text
+ * before passing to defuddle.
  *
- * `require()` can't load `defuddle/node` via subpath because package exports
- * block it (ESM-only). Instead, we construct the absolute path to
- * `defuddle/dist/node.js` using the NODE_PATH env var and require it by
- * file path — this bypasses the package exports restriction.
+ * Huge SVGs (diagrams, icons, charts) dump pages of markup into the output.
+ * For `<img>`, use the alt attribute. For `<svg>`, check aria-label, title
+ * attribute, or `<title>` child. If no descriptive text is found, remove the
+ * element entirely.
  *
- * After happy-dom renders the page, the live Document object is passed
- * straight to defuddle which extracts the main content as Markdown.
+ * @param document - The happy-dom Document to clean up
+ */
+function cleanImagesAndSvgs(document: Document): void {
+    document.querySelectorAll("img").forEach((el) => {
+        const alt = el.getAttribute("alt");
+        if (alt && alt.trim()) {
+            const p = document.createElement("p");
+            p.textContent = "[Image: " + alt.trim() + "]";
+            // Node.parentNode can be null for detached elements
+            if (el.parentNode) el.parentNode.replaceChild(p, el);
+        } else {
+            el.remove();
+        }
+    });
+    document.querySelectorAll("svg").forEach((el) => {
+        const ariaLabel = el.getAttribute("aria-label");
+        const titleAttr = el.getAttribute("title");
+        const titleEl = el.querySelector("title");
+        const titleText = titleEl ? titleEl.textContent : null;
+        const label =
+            (ariaLabel && ariaLabel.trim()) ||
+            (titleAttr && titleAttr.trim()) ||
+            (titleText && titleText.trim());
+        if (label) {
+            const p = document.createElement("p");
+            p.textContent = "[Image: " + label + "]";
+            // Node.parentNode can be null for detached elements
+            if (el.parentNode) el.parentNode.replaceChild(p, el);
+        } else {
+            el.remove();
+        }
+    });
+}
+
+// --- Navigator patches ---
+
+/**
+ * Build the Sec-CH-UA brand list from the constant header value.
+ *
+ * @returns Array of { brand, version } objects parsed from `CHROME_SEC_CH_UA`
+ */
+function parseBrowserBrands(): { brand: string; version: string }[] {
+    return CHROME_SEC_CH_UA.split(", ")
+        .map((part) => {
+            const m = part.match(/"([^"]+)";v="([^"]+)"/);
+            return m ? { brand: m[1], version: m[2] } : null;
+        })
+        .filter((b): b is { brand: string; version: string } => b !== null);
+}
+
+/** Pre-parsed brand list for the `userAgentData` navigator patch. */
+const BROWSER_BRANDS = parseBrowserBrands();
+
+/**
+ * Apply navigator and DOM patches to a happy-dom window to spoof Chrome 131
+ * on Windows. Patches vendor, productSub, platform, userAgentData,
+ * getBoundingClientRect, and requestAnimationFrame.
+ *
+ * @param win - The happy-dom BrowserWindow to patch
+ */
+function applyNavigatorPatches(win: BrowserWindow): void {
+    Object.defineProperty(win.Navigator.prototype, "vendor", {
+        get: () => "Google Inc.",
+        configurable: true,
+    });
+    Object.defineProperty(win.Navigator.prototype, "productSub", {
+        get: () => "20030107",
+        configurable: true,
+    });
+    Object.defineProperty(win.Navigator.prototype, "platform", {
+        get: () => "Win32",
+        configurable: true,
+    });
+
+    Object.defineProperty(win.Navigator.prototype, "userAgentData", {
+        get: () => ({
+            brands: BROWSER_BRANDS,
+            mobile: false,
+            platform: CHROME_PLATFORM,
+            getHighEntropyValues: async (hints: string[]) => {
+                const result: {
+                    brands: { brand: string; version: string }[];
+                    mobile: boolean;
+                    platform: string;
+                    platformVersion?: string;
+                    architecture?: string;
+                    model?: string;
+                    bitness?: string;
+                    fullVersionList?: { brand: string; version: string }[];
+                } = {
+                    brands: BROWSER_BRANDS,
+                    mobile: false,
+                    platform: CHROME_PLATFORM,
+                };
+                if (hints.includes("platformVersion"))
+                    result.platformVersion = "15.0.0";
+                if (hints.includes("architecture"))
+                    result.architecture = "x86";
+                if (hints.includes("model")) result.model = "";
+                if (hints.includes("bitness")) result.bitness = "64";
+                if (hints.includes("fullVersionList"))
+                    result.fullVersionList = BROWSER_BRANDS.map((b) => ({
+                        brand: b.brand,
+                        version: b.version,
+                    }));
+                return result;
+            },
+        }),
+        configurable: true,
+    });
+
+    // Stub getBoundingClientRect — anti-bot scripts probe element geometry
+    // Timer dispatch, not eval/deserialization
+
+    // oxlint-disable-next-line secure-coding/no-unsafe-deserialization
+    win.Element.prototype.getBoundingClientRect = function () {
+        return { width: 100, height: 100, top: 0, left: 0, bottom: 100, right: 100, x: 0, y: 0 } as unknown as ReturnType<typeof win.Element.prototype.getBoundingClientRect>;
+    };
+    // Stub requestAnimationFrame — scripts rely on animation loop heartbeat
+    // Timer dispatch, not eval/deserialization
+
+    // oxlint-disable-next-line secure-coding/no-unsafe-deserialization
+    win.requestAnimationFrame = (callback: FrameRequestCallback) => setTimeout(callback, 16) as unknown as NodeJS.Immediate;
+}
+
+/**
+ * Build a fetch interceptor that routes sub-resource requests through impit
+ * (for TLS fingerprint consistency) and enforces the sandbox network policy.
+ *
+ * The window reference comes from the `beforeAsyncRequest` callback parameter,
+ * not from the factory call — this avoids the chicken-and-egg problem of
+ * needing a BrowserWindow before the Browser is created.
+ *
+ * @param allowNet - Network policy from the sandbox (false, true, or domain list).
+ *   When undefined, no network restrictions apply.
+ * @param timeoutMs - Timeout for impit requests in milliseconds
+ * @returns A fetch interceptor object for happy-dom's configuration
+ */
+function buildFetchInterceptor(
+    allowNet: boolean | string[] | undefined,
+    timeoutMs: number
+): IFetchInterceptor {
+    return {
+        async beforeAsyncRequest({
+            request,
+            window: win,
+        }: {
+            request: Request;
+            window: BrowserWindow;
+        }): Promise<Response | void> {
+            // Enforce sandbox network policy on sub-resource requests
+            if (allowNet !== undefined && !isUrlAllowed(request.url, allowNet)) {
+                return new win.Response("", {
+                    status: 403,
+                    statusText: "Forbidden (sandbox policy)",
+                });
+            }
+
+            try {
+                const subImpit = new Impit({
+                    browser: IMPIT_BROWSER_PROFILE,
+                    timeout: timeoutMs,
+                    headers: CHROME_CLIENT_HINT_HEADERS,
+                });
+                const subResponse = await subImpit.fetch(request.url, {
+                    method: request.method as "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS",
+                    headers: Object.fromEntries(request.headers.entries()),
+                    body:
+                        request.method !== "GET" && request.method !== "HEAD"
+                            ? await request.text()
+                            : undefined,
+                });
+                const body = await subResponse.text();
+                const headerEntries: [string, string][] = [];
+                subResponse.headers.forEach((value, key) =>
+                    headerEntries.push([key, value])
+                );
+                return new win.Response(body, {
+                    status: subResponse.status,
+                    statusText: subResponse.statusText,
+                    headers: headerEntries,
+                });
+            } catch {
+                // Let happy-dom handle the error (return void = no interception)
+            }
+        },
+    };
+}
+
+// --- Core fetch ---
+
+/**
+ * Fetch HTML from a URL using impit with Chrome 131's TLS fingerprint.
  *
  * @param url - The URL to fetch
- * @param timeoutSeconds - Timeout in seconds
- * @returns The inline JS code string
+ * @param timeoutMs - Timeout in milliseconds
+ * @param allowNet - Network policy to enforce (undefined = no restrictions)
+ * @returns The HTML content and HTTP status code
+ * @throws Error if the URL is blocked by the network policy
  */
-function buildFetchJs(url: string, timeoutSeconds: number): string {
-    const urlJson = JSON.stringify(url);
-    const uaJson = JSON.stringify(CHROME_WINDOWS_UA);
-    const timeoutMs = timeoutSeconds * 1000;
-    const clientHintHeadersJson = JSON.stringify(CHROME_CLIENT_HINT_HEADERS);
-    const secChUaJson = JSON.stringify(CHROME_SEC_CH_UA);
-    const platformJson = JSON.stringify(CHROME_PLATFORM);
-    const profileJson = JSON.stringify(IMPIT_BROWSER_PROFILE);
+async function fetchHtml(
+    url: string,
+    timeoutMs: number,
+    allowNet: boolean | string[] | undefined
+): Promise<{ html: string; httpStatus: number }> {
+    // Check network policy before making any request
+    if (allowNet !== undefined && !isUrlAllowed(url, allowNet)) {
+        throw new Error(
+            "Network access to " +
+            new URL(url).hostname +
+            " is blocked by the sandbox policy. " +
+            "The domain is not in the allowed domains list."
+        );
+    }
 
-    // oxlint-disable-next-line secure-coding/no-graphql-injection -- JS, not GQL
-    return `
-const path = require("path");
-const { Browser, BrowserErrorCaptureEnum } = require("happy-dom");
-const { Defuddle } = require(path.join(process.env.NODE_PATH, "defuddle", "dist", "node.js"));
-const { Impit } = require(path.join(process.env.NODE_PATH, "impit"));
-(async function __fetchPage() {
-    let browser;
-    try {
-        // Use impit for Chrome 131's TLS fingerprint/headers. The chrome131 profile
-        // gives correct Sec-CH-UA brands; we override UA + platform via instance headers.
-        const impit = new Impit({ browser: ${profileJson}, timeout: ${String(timeoutMs)}, headers: ${clientHintHeadersJson} });
-        const impitResponse = await impit.fetch(${urlJson});
-        const httpStatus = impitResponse.status;
-        const html = await impitResponse.text();
-        browser = new Browser({
-            settings: {
-                errorCapture: BrowserErrorCaptureEnum.processLevel,
-                navigator: { userAgent: ${uaJson} },
-                navigation: {
-                    beforeContentCallback: (win) => {
+    const impit = new Impit({
+        browser: IMPIT_BROWSER_PROFILE,
+        timeout: timeoutMs,
+        headers: CHROME_CLIENT_HINT_HEADERS,
+    });
+    const impitResponse = await impit.fetch(url);
+    const httpStatus = impitResponse.status;
+    const html = await impitResponse.text();
 
-                        Object.defineProperty(win.Navigator.prototype, 'vendor', { get: () => 'Google Inc.', configurable: true });
-                        Object.defineProperty(win.Navigator.prototype, 'productSub', { get: () => '20030107', configurable: true });
-                        Object.defineProperty(win.Navigator.prototype, 'platform', { get: () => 'Win32', configurable: true });
+    return { html, httpStatus };
+}
 
-                        const brands = ${secChUaJson}.split(', ').map(part => {
-                            const m = part.match(/"([^"]+)";v="([^"]+)"/);
-                            return m ? { brand: m[1], version: m[2] } : null;
-                        }).filter(Boolean);
-                        Object.defineProperty(win.Navigator.prototype, 'userAgentData', {
-                            get: () => ({
-                                brands: brands,
-                                mobile: false,
-                                platform: ${platformJson},
-                                getHighEntropyValues: async (hints) => {
-                                    const result = { brands: brands, mobile: false, platform: ${platformJson} };
-                                    if (hints.includes('platformVersion')) result.platformVersion = '15.0.0';
-                                    if (hints.includes('architecture')) result.architecture = 'x86';
-                                    if (hints.includes('model')) result.model = '';
-                                    if (hints.includes('bitness')) result.bitness = '64';
-                                    if (hints.includes('fullVersionList')) result.fullVersionList = brands.map(b => ({ brand: b.brand, version: b.version }));
-                                    return result;
-                                },
-                            }),
-                            configurable: true,
-                        });
-                        // Stub Element.prototype.getBoundingClientRect so anti-bot scripts
-                        // that probe element geometry see plausible values instead of zeros.
-                        win.Element.prototype.getBoundingClientRect = function() {
-                            return { width: 100, height: 100, top: 0, left: 0, bottom: 100, right: 100 };
-                        };
-                        // Stub requestAnimationFrame so scripts that rely on the animation
-                        // loop heartbeat get a functional callback instead of a no-op.
-                        win.requestAnimationFrame = (callback) => setTimeout(callback, 16);
-                    },
-                },
-                fetch: {
-                    interceptor: {
-                        beforeAsyncRequest: async ({ request, window: win }) => {
-                            // Route all sub-requests through impit so they also have
-                            // Chrome's TLS fingerprint instead of Node's default
-                            try {
-                                const subImpit = new Impit({ browser: ${profileJson}, timeout: ${String(timeoutMs)}, headers: ${clientHintHeadersJson} });
-                                const subResponse = await subImpit.fetch(request.url, {
-                                    method: request.method,
-                                    headers: Object.fromEntries(request.headers.entries()),
-                                    body: request.method !== "GET" && request.method !== "HEAD" ? await request.text() : undefined,
-                                });
-                                const body = await subResponse.text();
-                                const headerEntries = [];
-                                subResponse.headers.forEach((value, key) => headerEntries.push([key, value]));
-                                return new win.Response(body, {
-                                    status: subResponse.status,
-                                    statusText: subResponse.statusText,
-                                    headers: headerEntries,
-                                });
-                            } catch {
-                                // Let happy-dom handle the error (return void = no interception)
-                            }
-                        },
-                    },
+/**
+ * Render HTML in happy-dom and extract content via defuddle.
+ *
+ * Creates a happy-dom Browser, injects the pre-fetched HTML, waits for
+ * JS execution to complete, then runs CAPTCHA detection, image/SVG cleanup,
+ * and defuddle extraction.
+ *
+ * @param url - The page URL (set as the document's origin)
+ * @param html - The pre-fetched HTML content
+ * @param allowNet - Network policy to enforce on sub-resource requests
+ * @param timeoutMs - Timeout for sub-resource impit requests
+ * @returns The defuddle-extracted content, title, and captcha detection result
+ */
+async function renderAndExtract(
+    url: string,
+    html: string,
+    allowNet: boolean | string[] | undefined,
+    timeoutMs: number
+): Promise<{ content: string; title: string; captchaDetected: boolean }> {
+    const browser = new Browser({
+        settings: {
+            errorCapture: BrowserErrorCaptureEnum.processLevel,
+            navigator: { userAgent: CHROME_WINDOWS_UA },
+            navigation: {
+                beforeContentCallback: (win) => {
+                    patchBunVmGlobals(win);
+                    applyNavigatorPatches(win);
                 },
             },
-        });
+            fetch: {
+                interceptor: buildFetchInterceptor(allowNet, timeoutMs),
+            },
+        },
+    });
+
+    try {
         const page = browser.newPage();
+
+        // Bun vm workaround (see patchBunVmGlobals): beforeContentCallback
+        // does not fire when setting page.content directly, so patch eagerly.
+        patchBunVmGlobals(page.mainFrame.window);
+
         // Inject the impit-fetched HTML directly instead of using page.goto(),
         // which would make a separate HTTP request with Node's generic TLS fingerprint
-        page.url = ${urlJson};
+        page.url = url;
         page.content = html;
         await page.waitUntilComplete();
+
         const document = page.mainFrame.document;
-        // --- CAPTCHA detection ---
-        let captchaDetected = false;
-        const docTitle = (document.title || "").toLowerCase();
-        if (docTitle.includes("just a moment") || docTitle.includes("attention required")) captchaDetected = true;
-        if (document.querySelector("#challenge-running") || document.querySelector("#challenge-stage")) captchaDetected = true;
-        if (document.querySelector(".cf-turnstile")) captchaDetected = true;
-        if (document.querySelector(".g-recaptcha")) captchaDetected = true;
-        if (document.querySelector('iframe[src*="google.com/recaptcha"]')) captchaDetected = true;
-        if (document.querySelector(".h-captcha")) captchaDetected = true;
-        if (document.querySelector('iframe[src*="hcaptcha.com"]')) captchaDetected = true;
-        if (!captchaDetected) {
-            const bodyText = (document.body?.textContent || "").trim();
-            if (bodyText.length > 0 && bodyText.length < 500) {
-                const lower = bodyText.toLowerCase();
-                if (lower.includes("captcha") || lower.includes("verify you") || lower.includes("are you a robot") || lower.includes("are you human") || lower.includes("access denied") || (lower.includes("blocked") && lower.includes("bot"))) captchaDetected = true;
-            }
-        }
-        // Replace img and SVG elements with paragraphs containing their alt text
-        // before passing to defuddle. Huge SVGs (diagrams, icons, charts) dump
-        // pages of markup into the output. For <img>, use the alt attribute.
-        // For <svg>, check aria-label, title attribute, or <title> child.
-        // If no descriptive text is found, remove the element entirely.
-        document.querySelectorAll("img").forEach(el => {
-            const alt = el.getAttribute("alt");
-            if (alt && alt.trim()) {
-                const p = document.createElement("p");
-                p.textContent = "[Image: " + alt.trim() + "]";
-                el.parentNode.replaceChild(p, el);
-            } else {
-                el.remove();
-            }
-        });
-        document.querySelectorAll("svg").forEach(el => {
-            const ariaLabel = el.getAttribute("aria-label");
-            const titleAttr = el.getAttribute("title");
-            const titleEl = el.querySelector("title");
-            const titleText = titleEl ? titleEl.textContent : null;
-            const label = (ariaLabel && ariaLabel.trim()) || (titleAttr && titleAttr.trim()) || (titleText && titleText.trim());
-            if (label) {
-                const p = document.createElement("p");
-                p.textContent = "[Image: " + label + "]";
-                el.parentNode.replaceChild(p, el);
-            } else {
-                el.remove();
-            }
-        });
-        const defuddleResult = await Defuddle(document, ${urlJson}, { markdown: true, removeImages: true });
+
+        const captchaDetected = detectCaptcha(document as unknown as Document);
+        cleanImagesAndSvgs(document as unknown as Document);
+
+        const defuddleResult = await Defuddle(
+            document as unknown as Document,
+            url,
+            { markdown: true, removeImages: true }
+        );
         const content = defuddleResult.content;
         const title = defuddleResult.title || document.title;
-        const result = JSON.stringify({ content, title, captchaDetected, httpStatus });
-        console.log(result);
+
+        return { content, title, captchaDetected };
     } finally {
-        if (browser) await browser.close();
+        await browser.close();
     }
-})().catch(e => { console.error(e.message || e); process.exit(1); });`;
 }
 
-// --- Local (non-sandboxed) fetch ---
-
 /**
- * Fetch a page locally (outside the sandbox) by running the same JS code that
- * `buildFetchJs` produces in a Node subprocess.
+ * Fetch and render a web page in-process using impit → happy-dom → defuddle.
  *
- * Both execution paths (sandboxed and local) share a single source of truth:
- * the inline JS built by `buildFetchJs`. The sandboxed path injects it into
- * `sandbox.exec()`, while this path spawns a plain `node` subprocess with
- * `NODE_PATH` set to the project's `node_modules` so that `require()` can
- * resolve happy-dom, defuddle, and impit.
+ * 1. impit fetches the raw HTML with Chrome 131's TLS fingerprint and headers
+ * 2. happy-dom renders the page (JavaScript execution, DOM construction)
+ * 3. defuddle extracts the main content as Markdown
  *
- * This eliminates all code duplication between the two paths — the navigator
- * patches, fetch interceptor, CAPTCHA detection, img/SVG replacement, and
- * defuddle extraction only exist in `buildFetchJs`.
+ * When `allowNet` is provided (from the sandbox policy), all HTTP requests —
+ * both the initial page fetch and any sub-resource requests triggered by
+ * happy-dom's rendering — are validated against the domain allowlist.
+ * Requests to disallowed domains are silently blocked.
  *
  * @param url - The URL to fetch
- * @param timeout - Timeout in seconds (default: 30)
+ * @param timeoutSeconds - Timeout in seconds (default: 30)
+ * @param allowNet - Network policy from the sandbox (false, true, or domain list).
+ *   When undefined, no network restrictions apply.
  * @returns Parsed content, title, captcha flag, and HTTP status
  */
-async function fetchPageLocally(url: string, timeout: number = 30): Promise<{ content: string; title: string; captchaDetected: boolean; httpStatus: number }> {
-    const jsCode = buildFetchJs(url, timeout);
-    const nodePath = resolve(process.cwd(), "node_modules");
+async function fetchPage(
+    url: string,
+    timeoutSeconds: number = 30,
+    allowNet?: boolean | string[]
+): Promise<{
+    content: string;
+    title: string;
+    captchaDetected: boolean;
+    httpStatus: number;
+}> {
+    const timeoutMs = timeoutSeconds * 1000;
 
-    let stdout: string;
-    try {
-        const result = await execFileAsync("node", ["-e", jsCode], {
-            cwd: process.cwd(),
-            env: { ...process.env, NODE_PATH: nodePath },
-            timeout: (timeout + 15) * 1000, // buffer beyond the fetch timeout
-            maxBuffer: 50 * 1024 * 1024, // 50MB for large pages
-        });
-        stdout = result.stdout;
-    } catch (err: unknown) {
-        // execFile throws on non-zero exit code — include stderr for diagnostics
-        const stderrVal = err instanceof Error && 'stderr' in err && typeof err.stderr === 'string' ? err.stderr.trim() : "";
-        const message = err instanceof Error ? err.message : String(err);
-        const stderrSummary = stderrVal ? " (" + stderrVal.split("\n").slice(-3).join("; ") + ")" : "";
-        throw new Error("Failed to fetch " + url + ": " + message + stderrSummary, { cause: err });
-    }
+    const { html, httpStatus } = await fetchHtml(url, timeoutMs, allowNet);
+    // False positive: this is a DOM render + extraction, not a file operation
+    // oxlint-disable-next-line secure-coding/no-unlimited-resource-allocation
+    const { content, title, captchaDetected } = await renderAndExtract(
+        url,
+        html,
+        allowNet,
+        timeoutMs
+    );
 
-    return parseFetchOutput(stdout, url);
-}
-
-// --- Sandboxed fetch ---
-
-/**
- * Fetch a page inside the zerobox sandbox.
- *
- * @param sandbox - The sandbox instance
- * @param url - The URL to fetch
- * @param timeout - Timeout in seconds (default: 30)
- * @returns Parsed content, title, captcha flag, and HTTP status
- */
-async function fetchPageInSandbox(sandbox: Sandbox, url: string, timeout: number = 30): Promise<{ content: string; title: string; captchaDetected: boolean; httpStatus: number }> {
-    const jsCode = buildFetchJs(url, timeout);
-    // Use sandbox.exec (not sandbox.js) to pass --use-env-proxy. Node ignores
-    // HTTPS_PROXY by default; this flag makes it use the var zerobox injects.
-
-    // sandbox.js doesn't support custom node flags.
-
-    // Always include stderr in errors — happy-dom/defuddle logs diagnostics
-    // there (navigation errors, network failures, script errors, etc.).
-    const result: CommandOutput = await sandbox.exec("node", ["--use-env-proxy", "-e", jsCode]).output();
-    const stderrSummary = result.stderr.trim()
-        ? " (" + result.stderr.trim().split("\n").slice(-3).join("; ") + ")"
-        : "";
-
-    if (result.code !== 0) {
-        throw new Error("Failed to fetch " + url + ": exit code " + String(result.code) + stderrSummary);
-    }
-
-    return parseFetchOutput(result.stdout, url);
+    return { content, title, captchaDetected, httpStatus };
 }
 
 // --- Truncation ---
@@ -451,10 +607,10 @@ const DEFAULT_MAX_CONTENT_CHARS = 500_000;
  * @param maxChars - Maximum character count (default: 500,000)
  * @returns The (possibly truncated) content and truncation flag
  */
-function truncateContent(content: string, maxChars: number = DEFAULT_MAX_CONTENT_CHARS): {
-    content: string;
-    truncated: boolean;
-} {
+function truncateContent(
+    content: string,
+    maxChars: number = DEFAULT_MAX_CONTENT_CHARS
+): { content: string; truncated: boolean } {
     if (content.length <= maxChars) {
         return { content, truncated: false };
     }
@@ -466,8 +622,122 @@ function truncateContent(content: string, maxChars: number = DEFAULT_MAX_CONTENT
         cutPoint = maxChars;
     }
 
-    const notice = "\n\n[Output truncated: showing " + String(cutPoint) + " of " + String(content.length) + " characters]";
+    const notice =
+        "\n\n[Output truncated: showing " +
+        String(cutPoint) +
+        " of " +
+        String(content.length) +
+        " characters]";
     return { content: content.slice(0, cutPoint) + notice, truncated: true };
+}
+
+// --- Tool helpers ---
+
+/**
+ * Build a tool error result with a text message and empty details.
+ *
+ * @param url - The URL that was being fetched
+ * @param text - The error or info message
+ * @param wasSearchResult - Whether the URL was already in search results
+ * @returns A tool result with the error message
+ */
+function buildErrorResult(
+    url: string,
+    text: string,
+    wasSearchResult = false
+): AgentToolResult<FetchToolDetails> {
+    return {
+        content: [{ type: "text" as const, text }],
+        details: {
+            url,
+            title: "",
+            contentLength: 0,
+            truncated: false,
+            content: "",
+            ...(wasSearchResult && { wasSearchResult: true }),
+        },
+    };
+}
+
+/**
+ * Validate and parse a URL for the fetch tool.
+ *
+ * Returns the parsed URL on success, or an AgentToolResult with an error
+ * message if the URL is invalid or uses an unsupported protocol.
+ *
+ * @param rawUrl - The raw URL string to validate
+ * @returns The parsed URL, or an error result
+ */
+function validateFetchUrl(
+    rawUrl: string
+): URL | AgentToolResult<FetchToolDetails> {
+    let parsedUrl: URL;
+    try {
+        parsedUrl = new URL(rawUrl);
+    } catch {
+        return buildErrorResult(
+            rawUrl,
+            "Invalid URL: " + rawUrl + ". Make sure to include the protocol (e.g. https://)."
+        );
+    }
+
+    if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+        return buildErrorResult(
+            rawUrl,
+            "Unsupported protocol: " + parsedUrl.protocol + ". Only http: and https: are supported."
+        );
+    }
+
+    return parsedUrl;
+}
+
+/**
+ * Run the actual fetch and validate the result.
+ *
+ * Calls `fetchPage` with the sandbox's network policy, then validates
+ * the HTTP status, CAPTCHA detection, and content emptiness.
+ * Returns the deduddled content on success, or throws on semantic failures.
+ *
+ * @param url - The URL to fetch
+ * @param timeout - Timeout in seconds
+ * @param sandbox - Optional sandbox for network policy
+ * @returns The fetch result (content, title, captchaDetected, httpStatus)
+ * @throws Error on HTTP errors, CAPTCHA detection, or empty content
+ */
+async function executeFetch(
+    url: string,
+    timeout: number,
+    sandbox?: Sandbox
+): Promise<{ content: string; title: string; captchaDetected: boolean; httpStatus: number }> {
+    const allowNet = sandbox?.options.allowNet;
+    const result = await fetchPage(url, timeout, allowNet);
+
+    // Throwing marks the tool call as isError — correct for semantic failures
+    if (result.httpStatus >= 400) {
+        throw new Error(
+            "The page returned HTTP " +
+            String(result.httpStatus) +
+            ". " +
+            "The site may be blocking automated access or the page may not exist."
+        );
+    }
+
+    if (result.captchaDetected) {
+        throw new Error(
+            "CAPTCHA or anti-bot challenge page detected. " +
+            "The site is blocking automated access and the page content could not be retrieved."
+        );
+    }
+
+    if (!result.content || result.content.trim().length === 0) {
+        throw new Error(
+            "The page returned no readable content. " +
+            "The site may be blocking automated access, require JavaScript that happy-dom doesn't support, " +
+            "or the page may be empty."
+        );
+    }
+
+    return result;
 }
 
 // --- Tool ---
@@ -477,14 +747,16 @@ function truncateContent(content: string, maxChars: number = DEFAULT_MAX_CONTENT
  *
  * Fetches the fully-rendered content of a web page using happy-dom, then
  * extracts the main content as Markdown via defuddle. When a `sandbox` is
- * provided in options, the browser runs inside the zerobox sandbox with its
- * network/filesystem policies enforced. Otherwise, runs directly in the
- * main process.
+ * provided in options, the sandbox's network policy (`allowNet`) is enforced
+ * in-process — URLs are checked against the policy before any request is made.
+ * Otherwise, no network restrictions apply.
  *
  * @param options - Optional configuration (sandbox, search result URL tracker)
  * @returns The fetch AgentTool
  */
-export function createFetchTool(options?: FetchToolOptions): AgentTool<typeof fetchSchema, FetchToolDetails> {
+export function createFetchTool(
+    options?: FetchToolOptions
+): AgentTool<typeof fetchSchema, FetchToolDetails> {
     const sandbox = options?.sandbox;
     const searchResultUrls = options?.searchResultUrls;
 
@@ -509,104 +781,37 @@ export function createFetchTool(options?: FetchToolOptions): AgentTool<typeof fe
             const { url, timeout } = params;
             const effectiveTimeout = timeout ?? 30;
 
-            // Basic URL validation
-            let parsedUrl: URL;
-            try {
-                parsedUrl = new URL(url);
-            } catch {
-                return {
-                    content: [
-                        { type: "text", text: "Invalid URL: " + url + ". Make sure to include the protocol (e.g. https://)." },
-                    ],
-                    details: { url, title: "", contentLength: 0, truncated: false, content: "" },
-                };
-            }
+            const validated = validateFetchUrl(url);
+            if (!(validated instanceof URL)) return validated;
 
-            if (!["http:", "https:"].includes(parsedUrl.protocol)) {
-                return {
-                    content: [
-                        { type: "text", text: "Unsupported protocol: " + parsedUrl.protocol + ". Only http: and https: are supported." },
-                    ],
-                    details: {
-                        url,
-                        title: "",
-                        contentLength: 0,
-                        truncated: false,
-                        content: "",
-                    },
-                };
-            }
-
-            // Check if this URL was already seen in search results — skip re-fetching
-            // and inform the model that the page content is available from the search excerpt.
             if (searchResultUrls?.has(url)) {
-                return {
-                    content: [
-                        { type: "text", text: `This page (${url}) was already included in previous search results. The page content from the search results is typically more complete and higher quality than what a separate fetch would return. Review the search result content for this page — it should contain everything you need. If it seemed incomplete, try a more specific search query instead.` },
-                    ],
-                    details: { url, title: "", contentLength: 0, truncated: false, content: "", wasSearchResult: true },
-                };
+                return buildErrorResult(
+                    url,
+                    `This page (${url}) was already included in previous search results. The page content from the search results is typically more complete and higher quality than what a separate fetch would return. Review the search result content for this page — it should contain everything you need. If it seemed incomplete, try a more specific search query instead.`,
+                    true
+                );
             }
 
             let content: string;
             let title: string;
-            let captchaDetected: boolean;
             let httpStatus: number;
 
             try {
-                const result = sandbox
-                    ? await fetchPageInSandbox(sandbox, url, effectiveTimeout)
-                    : await fetchPageLocally(url, effectiveTimeout);
+                const result = await executeFetch(url, effectiveTimeout, sandbox);
                 content = result.content;
                 title = result.title;
-                captchaDetected = result.captchaDetected;
                 httpStatus = result.httpStatus;
             } catch (err) {
-                // Network/parse errors from the fetch itself — return as tool error
-                // so the model sees what went wrong without the whole tool call failing.
                 const message = err instanceof Error ? err.message : String(err);
-                return {
-                    content: [
-                        { type: "text", text: "Error fetching " + url + ": " + message },
-                    ],
-                    details: { url, title: "", contentLength: 0, truncated: false, content: "" },
-                };
+                return buildErrorResult(url, "Error fetching " + url + ": " + message);
             }
 
-            // Throwing causes the agent loop to mark the tool call as isError,
-            // which is the correct semantic for a semantically failed fetch.
-            if (httpStatus >= 400) {
-                throw new Error(
-                    "The page returned HTTP " + String(httpStatus) + ". " +
-                    "The site may be blocking automated access or the page may not exist."
-                );
-            }
-
-            if (captchaDetected) {
-                throw new Error(
-                    "CAPTCHA or anti-bot challenge page detected. " +
-                    "The site is blocking automated access and the page content could not be retrieved."
-                );
-            }
-
-            // Treat effectively empty content as a failure too — the page didn't
-            // return usable text, so the agent should know it got nothing.
-            if (!content || content.trim().length === 0) {
-                throw new Error(
-                    "The page returned no readable content. " +
-                    "The site may be blocking automated access, require JavaScript that happy-dom doesn't support, " +
-                    "or the page may be empty."
-                );
-            }
-
-            const { content: truncatedContent, truncated } = truncateContent(content);
-
-            const textContent: TextContent[] = [
-                { type: "text", text: truncatedContent },
-            ];
+            void httpStatus; // Used implicitly via executeFetch validation
+            const { content: truncatedContent, truncated } =
+                truncateContent(content);
 
             return {
-                content: textContent,
+                content: [{ type: "text", text: truncatedContent }],
                 details: {
                     url,
                     title,

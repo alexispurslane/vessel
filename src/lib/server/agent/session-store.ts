@@ -554,9 +554,7 @@ function registerVesselTools(
         networkAllowed: isNetworkAllowed(conversationSettings),
     });
 
-    const fetchTool = sandbox
-        ? createFetchTool({ sandbox, searchResultUrls })
-        : createFetchTool({ searchResultUrls });
+    const fetchTool = createFetchTool({ sandbox: sandbox ?? undefined, searchResultUrls });
     const toolRegistry = getToolRegistry(agentSession);
     const toolDefinitions = getToolDefinitions(agentSession);
     const baseToolDefinitions = getBaseToolDefinitions(agentSession);

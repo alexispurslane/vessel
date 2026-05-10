@@ -23,3 +23,4 @@
    // oxlint-disable-next-line secure-coding/<rule-name>
    <flagged code>
    ```
+9. YOU ARE ABSOLUTELY BANNED FROM EVER TOUCHING GIT, ESPECIALLY GIT CHECKOUT OR RESET, WITHOUT EXPRESS PERMISSION

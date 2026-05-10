@@ -70,6 +70,7 @@ Text inputs use [CodeMirror 6](https://codemirror.net/) with:
 - **Authentication**: single-user setup with bcrypt password hashing and JWT sessions
 - **Dark mode**: full dark/light theme support via [mode-watcher](https://mode-watcher.pages.dev/)
 - **Keyboard-first**: comprehensive keyboard shortcuts for power users
+- **Built-In Mermaid rendering**: Watch zoomable, pannable, explorable Mermaid diagrams be built live, on the fly, embedded in agent outputs. LaTeX also renders, and all tables can be downloaded as CSV
 
 ## Tech Stack
 

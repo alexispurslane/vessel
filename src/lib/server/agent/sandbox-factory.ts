@@ -11,17 +11,6 @@
  * So AI provider domains and API keys are irrelevant here — they never traverse
  * the sandbox boundary.
  *
- * Sandbox dependencies:
- *
- * The sandbox does NOT get read access to the project's own source code or
- * node_modules. Instead, a dedicated `data/deps` directory contains a minimal
- * node_modules with only the packages that sandboxed tools need (e.g. happy-dom
- * for the fetch tool). This keeps the sandbox's attack surface small — the
- * agent can't read Vessel's source code or its full dependency tree.
- *
- * `ensureSandboxDeps()` is called at sandbox creation time to set up this
- * directory if it doesn't exist yet (or if the deps are out of date).
- *
  * Settings are stored in the DB `settings` table under keys prefixed with `sandbox.`
  * and are loaded when creating a new sandbox. See the "Sandbox" tab in Settings
  * for the UI to configure these.
@@ -29,7 +18,7 @@
 
 import { Sandbox, type SecretConfig } from "zerobox";
 import { resolve } from "path";
-import { mkdir, stat } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { getDb } from "../db/index.js";
 import { tryJsonParse } from "$lib/utils.js";
 import { type ConversationSettings, conversationSettingsSchema } from "$lib/types.js";
@@ -41,39 +30,6 @@ const IS_LINUX = process.platform === "linux";
 
 const DATA_DIR = resolve(process.cwd(), "data");
 const SESSIONS_DIR = resolve(DATA_DIR, "sessions");
-
-/**
- * Dedicated dependency directory for sandboxed tool execution.
- *
- * Contains a minimal node_modules with packages that sandboxed tools need
- * (e.g. happy-dom). This is the ONLY filesystem path (beyond the session
- * workspace) that sandboxes can read from — they do NOT get access to the
- * project's own source code or its full node_modules.
- */
-export const SANDBOX_DEPS_DIR = resolve(DATA_DIR, "deps");
-
-/**
- * Path to the lockfile that tracks which dependencies are installed in
- * SANDBOX_DEPS_DIR. Used by ensureSandboxDeps() to detect when deps
- * are out of date and need re-installing.
- */
-const SANDBOX_DEPS_LOCKFILE = resolve(SANDBOX_DEPS_DIR, ".installed-deps.json");
-
-/**
- * Packages that sandboxed tools need access to.
- *
- * When a sandboxed tool runs `require("happy-dom")` or similar, it resolves
- * from SANDBOX_DEPS_DIR/node_modules/.
- *
- * Add new entries here when sandboxed tools need additional packages.
- * After changing this list, existing sandboxes will pick up the new deps
- * on the next `ensureSandboxDeps()` call (triggered at sandbox creation).
- */
-const SANDBOX_DEPS_PACKAGES: Record<string, string> = {
-    "happy-dom": "^20.9.0",
-    "defuddle": "^0.18.1",
-    "impit": "^0.13.1",
-};
 
 // --- Linux bash config workaround ---
 
@@ -168,88 +124,6 @@ export interface SandboxPolicy {
     secrets?: Record<string, SecretConfig>;
     /** Environment variable names to allow in the sandbox */
     allowEnv?: string[];
-}
-
-// --- Sandbox dependency setup ---
-
-/**
- * Ensure that the sandbox dependency directory exists and is up to date.
- *
- * Creates `data/deps/node_modules/` with the packages listed in
- * SANDBOX_DEPS_PACKAGES. If the directory already exists and the
- * installed versions match the lockfile, this is a no-op.
- *
- * Called at sandbox creation time so that deps are guaranteed to be
- * available before any sandboxed tool tries to require() them.
- */
-export async function ensureSandboxDeps(): Promise<void> {
-    const nodeModulesDir = resolve(SANDBOX_DEPS_DIR, "node_modules");
-
-    // Check if we need to install/update deps
-    const nodeModulesExists = await stat(nodeModulesDir).then(() => true).catch(() => false);
-    const needsInstall = !nodeModulesExists || !(await Bun.file(SANDBOX_DEPS_LOCKFILE).exists());
-
-    if (!needsInstall) {
-        // Compare installed deps against the current spec
-        try {
-            const installed = await Bun.file(SANDBOX_DEPS_LOCKFILE).json() as Record<string, string>;
-            const specKeys = Object.keys(SANDBOX_DEPS_PACKAGES).sort((a, b) => a.localeCompare(b)).join(",");
-            const installedKeys = Object.keys(installed).sort((a, b) => a.localeCompare(b)).join(",");
-            if (specKeys !== installedKeys) {
-                // Deps list has changed — reinstall
-                await installSandboxDeps();
-                return;
-            }
-        } catch {
-            // Lockfile is corrupted — reinstall
-            await installSandboxDeps();
-            return;
-        }
-        // Deps are up to date
-        return;
-    }
-
-    await installSandboxDeps();
-}
-
-/**
- * Run bun install for sandbox dependencies and write the lockfile.
- */
-async function installSandboxDeps(): Promise<void> {
-    // Ensure the directory exists
-    await mkdir(SANDBOX_DEPS_DIR, { recursive: true });
-
-    // Write a minimal package.json for bun install
-    const packageJson = {
-        name: "vessel-sandbox-deps",
-        private: true,
-        description: "Dependencies for Vessel's sandbox tool execution. Managed by ensureSandboxDeps() — do not edit.",
-        dependencies: { ...SANDBOX_DEPS_PACKAGES },
-    };
-    await Bun.write(
-        resolve(SANDBOX_DEPS_DIR, "package.json"),
-        JSON.stringify(packageJson, null, 2)
-    );
-
-    // Install deps using Bun.spawn
-    const proc = Bun.spawn(["bun", "install", "--production"], {
-        cwd: SANDBOX_DEPS_DIR,
-        stdout: "pipe",
-        stderr: "pipe",
-    });
-    const exitCode = await proc.exited;
-    if (exitCode !== 0) {
-        const stderr = await new Response(proc.stderr).text();
-        throw new Error(`bun install failed (exit ${exitCode}): ${stderr}`);
-    }
-
-    // Write the lockfile so we can detect stale installs
-    await Bun.write(
-        SANDBOX_DEPS_LOCKFILE,
-        JSON.stringify(SANDBOX_DEPS_PACKAGES)
-    );
-
-    log.info("sandbox", `Installed deps to ${SANDBOX_DEPS_DIR}`);
 }
 
 // --- DB helpers ---
@@ -440,12 +314,9 @@ export function loadSandboxPolicyFromDb(conversationSettings?: ConversationSetti
  *
  * The sandbox isolates the agent's tool execution so that:
  * - Writes are confined to the session workspace
- * - Reads are allowed from the deps directory (happy-dom, etc.) and session workspace
+ * - Reads are allowed only from the session workspace
  * - Network is denied by default (AI inference runs outside the sandbox)
  * - Filesystem changes are snapshotted for audit
- *
- * The sandbox does NOT get read access to the project's source code or its
- * full node_modules — only the curated deps in data/deps/node_modules.
  *
  * Returns null if sandboxing is disabled in settings.
  *
@@ -462,17 +333,14 @@ export async function createSessionSandbox(
     // If policy is null, sandboxing is disabled
     if (policy === null) return null;
 
-    // Ensure sandbox deps are installed before creating the sandbox
-    await ensureSandboxDeps();
-
     const sessionWorkDir = resolve(SESSIONS_DIR, conversationId, "workspace");
     await mkdir(sessionWorkDir, { recursive: true });
 
     const sandbox = Sandbox.create({
         cwd: sessionWorkDir,
-        // Allow reads from sandbox deps dir + session workspace (not Vessel source).
+        // Allow reads from session workspace only (not Vessel source).
         // Linux: bash configs read directly to avoid parent-FD race (openai/codex#18337).
-        allowRead: [SANDBOX_DEPS_DIR, sessionWorkDir, ...linuxBashConfigPaths(), ...(policy.extraReadPaths ?? [])],
+        allowRead: [sessionWorkDir, ...linuxBashConfigPaths(), ...(policy.extraReadPaths ?? [])],
         // Allow writes only to the session workspace (plus any extra paths)
         allowWrite: [sessionWorkDir, ...(policy.extraWritePaths ?? [])],
         // Network: configured by policy (false, true, or specific domains)
@@ -481,12 +349,8 @@ export async function createSessionSandbox(
         snapshot: policy.snapshot,
         snapshotPaths: [sessionWorkDir],
         snapshotExclude: ["node_modules", ".git", ".upload-tmp"],
-        // Environment: configured by policy, plus NODE_PATH so require() resolves
-        // from the sandbox deps directory inside sandboxed node processes
+        // Environment: configured by policy
         allowEnv: policy.allowEnv ?? ["PATH", "HOME", "USER", "SHELL", "TERM", "LANG", "NODE_ENV"],
-        env: {
-            NODE_PATH: resolve(SANDBOX_DEPS_DIR, "node_modules"),
-        },
         // Secrets: optional credential injection
         secrets: policy.secrets,
     });
