@@ -28,6 +28,9 @@ export default defineConfig({
             // Stub out glimpseui (optional peer dep of pi-mcp-adapter) so Rolldown
             // doesn't fail trying to resolve it during the build.
             glimpseui: fileURLToPath(new URL("./src/lib/server/stubs/glimpseui.ts", import.meta.url)),
+            // Stub out pi-tui (CLI terminal UI) — the web app never uses it.
+            // Replaces ~2.4MB of terminal rendering code + the koffi FFI addon.
+            "@mariozechner/pi-tui": fileURLToPath(new URL("./src/lib/server/stubs/pi-tui.ts", import.meta.url)),
         },
     },
 });

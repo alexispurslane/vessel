@@ -10,7 +10,13 @@ const config = {
     kit: {
         // Community-maintained adapter optimized for Bun's native HTTP server.
         // See https://github.com/nicobailon/svelte-adapter-bun for configuration options.
-        adapter: adapter(),
+        //
+        // Disable precompression for standalone builds — the binary serves
+        // assets from memory and compresses on-the-fly, so .br/.gz files
+        // would just bloat the binary (~4.7MB saved).
+        adapter: adapter({
+            precompress: process.env.VESSEL_STANDALONE !== "1",
+        }),
     },
 };
 

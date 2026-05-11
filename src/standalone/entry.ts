@@ -84,26 +84,28 @@ function serveEmbeddedAsset(pathname: string): Response | null {
 
 // --- Start the server ---
 
-const { fetch: svelteFetch, websocket } = getHandler();
-const port = env("PORT", "3000");
-const host = env("HOST", "0.0.0.0");
+void (async () => {
+    const { fetch: svelteFetch, websocket } = await getHandler();
+    const port = env("PORT", "3000");
+    const host = env("HOST", "0.0.0.0");
 
-let bunServer: ReturnType<typeof Bun.serve>;
+    let bunServer: ReturnType<typeof Bun.serve>;
 
-const server = Bun.serve({
-    port,
-    hostname: host,
-    fetch(req: Request): Response | Promise<Response> {
-        // Embedded assets bypass sirv (which can't readdirSync
-        // inside $bunfs) in compiled mode.
-        const url = new URL(req.url);
-        const asset = serveEmbeddedAsset(url.pathname);
-        if (asset) return asset;
+    const server = Bun.serve({
+        port,
+        hostname: host,
+        fetch(req: Request): Response | Promise<Response> {
+            // Embedded assets bypass sirv (which can't readdirSync
+            // inside $bunfs) in compiled mode.
+            const url = new URL(req.url);
+            const asset = serveEmbeddedAsset(url.pathname);
+            if (asset) return asset;
 
-        return svelteFetch(req, bunServer);
-    },
-    ...(websocket ? { websocket } : {}),
-});
+            return svelteFetch(req, bunServer);
+        },
+        ...(websocket ? { websocket } : {}),
+    });
 
-bunServer = server;
-console.log(`Listening on ${server.url}`);
+    bunServer = server;
+    console.log(`Listening on ${server.url}`);
+})();
