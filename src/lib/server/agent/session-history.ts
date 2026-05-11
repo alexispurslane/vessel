@@ -253,6 +253,8 @@ function resolveAssistantFields(
  * @param msg - The message object
  * @param role - The message role
  */
+// { id: string } is structurally the same as route params in upload handler, but semantically distinct
+// oxlint-disable similarity-ts/no-duplicates-error
 function handleMessage(
     state: HistoryBuilderState,
     entry: { id: string },

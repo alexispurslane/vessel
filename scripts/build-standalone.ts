@@ -42,7 +42,24 @@ const CLIENT_DIR = join(BUILD_DIR, "client");
 const STANDALONE_DIR = join(BUILD_DIR, "standalone");
 const ENTRY_POINT = "src/standalone/entry.ts";
 const ASSETS_MODULE = join(STANDALONE_DIR, "assets.ts");
-const OUTPUT_BINARY = join(STANDALONE_DIR, "vessel");
+
+// Parse --target and --outfile CLI arguments for cross-compilation support.
+// --target sets the Bun compile target (e.g. bun-windows-x64, bun-darwin-arm64, bun-linux-x64).
+// --outfile sets the output binary path (defaults to build/standalone/vessel).
+const cliArgs = process.argv.slice(2);
+let targetFlag = "bun";
+let outputFileOverride: string | null = null;
+for (let i = 0; i < cliArgs.length; i++) {
+    if (cliArgs[i] === "--target" && cliArgs[i + 1]) {
+        targetFlag = cliArgs[i + 1];
+        i++;
+    } else if (cliArgs[i] === "--outfile" && cliArgs[i + 1]) {
+        outputFileOverride = cliArgs[i + 1];
+        i++;
+    }
+}
+
+const OUTPUT_BINARY = outputFileOverride ?? join(STANDALONE_DIR, "vessel");
 
 // --- Step 1: Vite build ---
 
@@ -348,7 +365,7 @@ const compileResult = Bun.spawnSync(
         "bun",
         "build",
         "--compile",
-        "--target=bun",
+        `--target=${targetFlag}`,
         "--minify",
         join(projectRoot, ENTRY_POINT),
         "--outfile",

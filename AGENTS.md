@@ -18,9 +18,8 @@
 # Code Quality
 
 1. After completing a feature have a subagent run:
-    1. `bun run lint --quiet` to check for type safety errors and code quality lints
-    2. `similarity-ts` to check for code duplication that you may have introduced
-    3. `bun run check` to check for bad Svelte code
+    1. `bun run lint --quiet` to check for type safety errors, code quality lints, and code duplication (similarity-ts is integrated as an oxlint rule)
+    2. `bun run check` to check for bad Svelte code
    Scope all of these to only the files you've modified. Then have the subagent report back to you with a triage table of issues for you to work on.
 2. Comments should only be used for two purposes:
     a) **JSDoc on functions** — to explain what a function does, what arguments it needs, and how it uses them. All functions spanning more than 4 lines must have a JSDoc comment with a description, `@param` for each parameter, and `@returns` for the return value.

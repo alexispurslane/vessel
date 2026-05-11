@@ -17,6 +17,7 @@
             "specifier": "eslint-plugin-jsdoc"
         },
         "./lint-rules/no-long-comment-paragraphs-plugin.js",
+        "./lint-rules/similarity-ts-plugin.js",
         "eslint-plugin-jwt",
         "eslint-plugin-secure-coding",
         "eslint-plugin-ai-guard"
@@ -142,6 +143,8 @@
         "sonarjs/no-nested-conditional": "off",
         "sonarjs/no-unused-vars": "off",
         "local/no-long-comment-paragraphs": "error",
+        "similarity-ts/no-duplicates": "warn",
+        "similarity-ts/no-duplicates-error": "error",
         "jwt/no-algorithm-none": "error",
         "jwt/no-algorithm-confusion": "error",
         "jwt/require-algorithm-whitelist": "warn",

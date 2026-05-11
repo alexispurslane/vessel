@@ -15,11 +15,7 @@
     import Plus from "@lucide/svelte/icons/plus";
     import Check from "@lucide/svelte/icons/check";
     import X from "@lucide/svelte/icons/x";
-
-    interface PillItem {
-        editing?: boolean;
-        [key: string]: unknown;
-    }
+    import type { PillItem } from "./index.js";
 
     interface Props {
         /** The items to display. Each must have a string property named by `labelKey`. */

@@ -38,6 +38,8 @@ async function readBodyAsBlob(body: ReadableStream<Uint8Array>): Promise<Blob> {
  * @param request - The incoming request
  * @returns The validated paths, or an error Response if validation fails
  */
+// { id: string } is structurally the same as session entry in session-history, but semantically distinct
+// oxlint-disable similarity-ts/no-duplicates-error
 async function validateUploadRequest(
     params: { id: string },
     request: Request

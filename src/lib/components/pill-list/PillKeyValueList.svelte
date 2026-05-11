@@ -15,11 +15,7 @@
     import Plus from "@lucide/svelte/icons/plus";
     import Check from "@lucide/svelte/icons/check";
     import X from "@lucide/svelte/icons/x";
-
-    interface KeyValueItem {
-        editing?: boolean;
-        [key: string]: unknown;
-    }
+    import type { KeyValueItem } from "./index.js";
 
     interface FieldDef {
         /** The key on each item that holds the field value. */

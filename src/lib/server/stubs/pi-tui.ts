@@ -87,25 +87,46 @@ export function parseKey(): null {
     return null;
 }
 
-/** Stub: always false. */
+/**
+ * Stub: always false.
+ *
+ * @returns false
+ */
 export function isKeyRelease(): boolean {
     return false;
 }
 
-/** Stub: always false. */
+/**
+ * Stub: always false.
+ *
+ * @returns false
+ */
 export function isKeyRepeat(): boolean {
     return false;
 }
 
-/** Stub: always false. */
+/**
+ * Stub: always false.
+ *
+ * @returns false
+ */
 export function isKittyProtocolActive(): boolean {
     return false;
 }
 
-/** Stub: no-op. */
+/**
+ * Stub: no-op.
+ *
+ * @returns void
+ */
 export function setKittyProtocolActive(): void {}
 
-/** Stub: no-op. */
+/**
+ * Stub: no-op passthrough.
+ *
+ * @param s - Input string
+ * @returns The input string unchanged
+ */
 export function decodeKittyPrintable(s: string): string {
     return s;
 }
@@ -122,12 +143,20 @@ export class KeybindingsManager {
     }
 }
 
-/** Stub: returns empty config. */
+/**
+ * Stub: returns empty config.
+ *
+ * @returns Empty keybindings record
+ */
 export function getKeybindings(): Record<string, unknown> {
     return {};
 }
 
-/** Stub: no-op. */
+/**
+ * Stub: no-op.
+ *
+ * @returns void
+ */
 export function setKeybindings(): void {}
 
 // --- Fuzzy matching ---
@@ -152,92 +181,172 @@ export function fuzzyMatch(): boolean {
 
 // --- Terminal image support ---
 
-/** Stub capabilities. */
+/**
+ * Stub capabilities.
+ *
+ * @returns Empty capabilities record
+ */
 export function getCapabilities(): Record<string, unknown> {
     return {};
 }
 
-/** Stub: no-op. */
+/**
+ * Stub: no-op.
+ *
+ * @returns void
+ */
 export function setCapabilities(): void {}
 
-/** Stub: reset cache. */
+/**
+ * Stub: reset cache.
+ *
+ * @returns void
+ */
 export function resetCapabilitiesCache(): void {}
 
-/** Stub: no-op. */
+/**
+ * Stub: no-op.
+ *
+ * @returns Empty capabilities record
+ */
 export function detectCapabilities(): Record<string, unknown> {
     return {};
 }
 
-/** Stub: no image dimensions. */
+/**
+ * Stub: no image dimensions.
+ *
+ * @returns null
+ */
 export function getImageDimensions(): null {
     return null;
 }
 
-/** Stub: no dimensions. */
+/**
+ * Stub: no dimensions.
+ *
+ * @returns null
+ */
 export function getPngDimensions(): null {
     return null;
 }
 
-/** Stub: no dimensions. */
+/**
+ * Stub: no dimensions.
+ *
+ * @returns null
+ */
 export function getJpegDimensions(): null {
     return null;
 }
 
-/** Stub: no dimensions. */
+/**
+ * Stub: no dimensions.
+ *
+ * @returns null
+ */
 export function getWebpDimensions(): null {
     return null;
 }
 
-/** Stub: no dimensions. */
+/**
+ * Stub: no dimensions.
+ *
+ * @returns null
+ */
 export function getGifDimensions(): null {
     return null;
 }
 
-/** Stub: no cell dimensions. */
+/**
+ * Stub: no cell dimensions.
+ *
+ * @returns null
+ */
 export function getCellDimensions(): null {
     return null;
 }
 
-/** Stub: no-op. */
+/**
+ * Stub: no-op.
+ *
+ * @returns void
+ */
 export function setCellDimensions(): void {}
 
-/** Stub: no-op. */
+/**
+ * Stub: no-op.
+ *
+ * @returns 0
+ */
 export function calculateImageRows(): number {
     return 0;
 }
 
-/** Stub: no image ID. */
+/**
+ * Stub: no image ID.
+ *
+ * @returns Empty string
+ */
 export function allocateImageId(): string {
     return "";
 }
 
-/** Stub: no-op. */
+/**
+ * Stub: no-op.
+ *
+ * @returns void
+ */
 export function deleteKittyImage(): void {}
 
-/** Stub: no-op. */
+/**
+ * Stub: no-op.
+ *
+ * @returns void
+ */
 export function deleteAllKittyImages(): void {}
 
-/** Stub: empty string. */
+/**
+ * Stub: empty string.
+ *
+ * @returns Empty string
+ */
 export function encodeKitty(): string {
     return "";
 }
 
-/** Stub: empty string. */
+/**
+ * Stub: empty string.
+ *
+ * @returns Empty string
+ */
 export function encodeITerm2(): string {
     return "";
 }
 
-/** Stub: empty string. */
+/**
+ * Stub: empty string.
+ *
+ * @returns Empty string
+ */
 export function hyperlink(): string {
     return "";
 }
 
-/** Stub: no fallback. */
+/**
+ * Stub: no fallback.
+ *
+ * @returns Empty string
+ */
 export function imageFallback(): string {
     return "";
 }
 
-/** Stub: no-op. */
+/**
+ * Stub: no-op.
+ *
+ * @returns Empty string
+ */
 export function renderImage(): string {
     return "";
 }
@@ -258,7 +367,11 @@ export class Container {
     setFocus(): void {}
 }
 
-/** Stub focusable check. */
+/**
+ * Stub focusable check.
+ *
+ * @returns false
+ */
 export function isFocusable(): boolean {
     return false;
 }
