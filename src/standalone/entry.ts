@@ -19,9 +19,12 @@
  */
 
 import { file as bunFile } from "bun";
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { assetMap, zeroboxBinPath } from "../../build/standalone/assets.js";
+
 import { getHandler } from "../../build/handler.js";
 import { env } from "../../build/env.js";
-import { assetMap } from "../../build/standalone/assets.js";
 
 // --- MIME types ---
 
@@ -85,6 +88,35 @@ function serveEmbeddedAsset(pathname: string): Response | null {
 // --- Start the server ---
 
 void (async () => {
+    // $bunfs files can't be exec'd by child processes — extract zerobox
+    // to disk. Filename includes content hash for upgrade re-extraction.
+    if (zeroboxBinPath) {
+        try {
+            const dataDir = resolve(process.env.VESSEL_DATA_DIR || resolve(process.cwd(), "data"));
+            const hashMatch = zeroboxBinPath.match(/zerobox-([a-z0-9]+)/);
+            const hash = hashMatch?.[1] ?? "unknown";
+            const extractedBin = resolve(dataDir, `.zerobox-bin-${hash}`);
+            mkdirSync(dataDir, { recursive: true });
+            if (!existsSync(extractedBin)) {
+                // 50 MiB max — zerobox binaries are ~18 MiB
+                const MAX_ZEROBOX_SIZE = 50 * 1024 * 1024;
+                const embeddedFile = Bun.file(zeroboxBinPath);
+                if ((embeddedFile.size ?? 0) > MAX_ZEROBOX_SIZE) {
+                    throw new Error(`Embedded zerobox binary too large: ${embeddedFile.size} bytes`);
+                }
+                // size checked above against MAX_ZEROBOX_SIZE
+                // oxlint-disable-next-line secure-coding/no-unlimited-resource-allocation
+                const bytes = await embeddedFile.arrayBuffer();
+                writeFileSync(extractedBin, Buffer.from(bytes));
+                chmodSync(extractedBin, 0o755);
+            }
+            process.env.ZEROBOX_BIN = extractedBin;
+        } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : String(e);
+            console.error(`[zerobox] Failed to extract embedded binary: ${msg}`);
+        }
+    }
+
     const { fetch: svelteFetch, websocket } = await getHandler();
     const port = env("PORT", "3000");
     const host = env("HOST", "0.0.0.0");

@@ -16,12 +16,15 @@ jobs:
                     - target: bun-darwin-arm64
                       os: macos-latest
                       artifact: vessel-darwin-arm64
+                      zerobox_pkg: "@zerobox/cli-darwin-arm64"
                     - target: bun-windows-x64
                       os: ubuntu-latest
                       artifact: vessel-windows-x64.exe
+                      zerobox_pkg: ""
                     - target: bun-linux-x64
                       os: ubuntu-latest
                       artifact: vessel-linux-x64
+                      zerobox_pkg: "@zerobox/cli-linux-x64"
 
         runs-on: ${{ matrix.os }}
 
@@ -31,6 +34,10 @@ jobs:
             - uses: oven-sh/setup-bun@v2
 
             - run: bun install
+
+            - name: Install zerobox platform binary
+              if: matrix.zerobox_pkg != ''
+              run: bun add --optional "${{ matrix.zerobox_pkg }}"
 
             - name: Build standalone binary
               run: bun scripts/build-standalone.ts --target "${{ matrix.target }}" --outfile "build/standalone/${{ matrix.artifact }}"

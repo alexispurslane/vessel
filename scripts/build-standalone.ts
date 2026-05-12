@@ -25,7 +25,7 @@
  *   generated asset module and serves embedded assets in compiled mode.
  */
 
-import { join } from "path";
+import { join, resolve } from "path";
 import {
     existsSync,
     mkdirSync,
@@ -37,24 +37,31 @@ import {
     writeFileSync,
 } from "node:fs";
 
+const projectRoot = import.meta.dir.replace(/\/scripts$/, "");
+
 const BUILD_DIR = "build";
 const CLIENT_DIR = join(BUILD_DIR, "client");
 const STANDALONE_DIR = join(BUILD_DIR, "standalone");
 const ENTRY_POINT = "src/standalone/entry.ts";
 const ASSETS_MODULE = join(STANDALONE_DIR, "assets.ts");
 
-// Parse --target and --outfile CLI arguments for cross-compilation support.
+// Parse --target, --outfile, and --zerobox-bin CLI arguments.
 // --target sets the Bun compile target (e.g. bun-windows-x64, bun-darwin-arm64, bun-linux-x64).
 // --outfile sets the output binary path (defaults to build/standalone/vessel).
+// --zerobox-bin sets the path to the zerobox binary to embed (auto-detected if omitted).
 const cliArgs = process.argv.slice(2);
 let targetFlag = "bun";
 let outputFileOverride: string | null = null;
+let zeroboxBinOverride: string | null = null;
 for (let i = 0; i < cliArgs.length; i++) {
     if (cliArgs[i] === "--target" && cliArgs[i + 1]) {
         targetFlag = cliArgs[i + 1];
         i++;
     } else if (cliArgs[i] === "--outfile" && cliArgs[i + 1]) {
         outputFileOverride = cliArgs[i + 1];
+        i++;
+    } else if (cliArgs[i] === "--zerobox-bin" && cliArgs[i + 1]) {
+        zeroboxBinOverride = cliArgs[i + 1];
         i++;
     }
 }
@@ -223,6 +230,72 @@ for (let i = 0; i < staticFiles.length; i++) {
     mappingEntries.push(`  assetMap["/${relPath}"] = ${varName};`);
 }
 
+// --- Step 3b: Embed zerobox binary ---
+
+// Map Bun compile targets to @zerobox/cli-* package names.
+const ZEROBOX_PLATFORM_MAP: Record<string, string> = {
+    "darwin-arm64": "@zerobox/cli-darwin-arm64",
+    "darwin-x64": "@zerobox/cli-darwin-x64",
+    "linux-arm64": "@zerobox/cli-linux-arm64",
+    "linux-x64": "@zerobox/cli-linux-x64",
+};
+
+/**
+ * Resolve the zerobox binary path for the compile target platform.
+ *
+ * @param target - Bun compile target (e.g. "bun-darwin-arm64", "bun", or bare "bun-linux-x64")
+ * @param override - Explicit --zerobox-bin path from CLI
+ * @returns Absolute path to the zerobox binary, or null if not found
+ */
+function resolveZeroboxBinary(target: string, override: string | null): string | null {
+    if (override) {
+        if (!existsSync(override)) {
+            console.error(`  --zerobox-bin path does not exist: ${override}`);
+            process.exit(1);
+        }
+        return resolve(projectRoot, override);
+    }
+
+    // Extract platform key from target (e.g. "bun-darwin-arm64" → "darwin-arm64")
+    // Default target "bun" means current host platform.
+    let platformKey: string;
+    if (target === "bun") {
+        platformKey = `${process.platform}-${process.arch}`;
+    } else {
+        platformKey = target.replace(/^bun-/, "");
+    }
+    const pkgName = ZEROBOX_PLATFORM_MAP[platformKey];
+    if (!pkgName) {
+        console.warn(`  No zerobox platform mapping for target "${target}" — sandbox will not work in standalone binary.`);
+        console.warn(`  Use --zerobox-bin <path> to specify the binary manually.`);
+        return null;
+    }
+
+    // Try to find the binary in node_modules
+    const pkgDir = join(projectRoot, "node_modules", pkgName);
+    const binPath = join(pkgDir, "zerobox");
+    if (existsSync(binPath)) {
+        return binPath;
+    }
+
+    console.warn(`  zerobox binary not found at ${binPath} — sandbox will not work in standalone binary.`);
+    console.warn(`  Install the platform package: npm install ${pkgName}`);
+    console.warn(`  Or use --zerobox-bin <path> to specify the binary manually.`);
+    return null;
+}
+
+const zeroboxBinPath = resolveZeroboxBinary(targetFlag, zeroboxBinOverride);
+let zeroboxImportLine = "";
+let zeroboxExportLine = "";
+if (zeroboxBinPath) {
+    console.log(`  Embedding zerobox binary: ${zeroboxBinPath}`);
+    zeroboxImportLine = `import zeroboxBin from "${zeroboxBinPath}" with { type: "file" };`;
+    zeroboxExportLine = `/** Path to the embedded zerobox binary in $bunfs. Set ZEROBOX_BIN to this before using Sandbox. */\nexport const zeroboxBinPath: string = zeroboxBin;`;
+} else {
+    zeroboxImportLine = `const zeroboxBin: string = "";`;
+    zeroboxExportLine = `/** Zerobox binary not embedded — sandbox features will not work. */\nexport const zeroboxBinPath: string = zeroboxBin;`;
+}
+
 const assetsModuleContent = `/**
  * @file Auto-generated embedded asset map for standalone Vessel binary.
  *
@@ -234,6 +307,7 @@ const assetsModuleContent = `/**
  */
 
 ${importLines.join("\n")}
+${zeroboxImportLine}
 
 /**
  * Maps URL paths to embedded file paths in the $bunfs virtual filesystem.
@@ -241,6 +315,8 @@ ${importLines.join("\n")}
  */
 export const assetMap: Record<string, string> = {};
 ${mappingEntries.join("\n")}
+
+${zeroboxExportLine}
 `;
 
 writeFileSync(ASSETS_MODULE, assetsModuleContent, "utf-8");
@@ -253,7 +329,6 @@ console.log(
 // bun build --compile resolves @mariozechner/pi-tui from node_modules,
 // pulling in the full ~2.4MB terminal UI library + koffi FFI addon.
 // We swap the real package with our stub before compiling, then restore it.
-const projectRoot = import.meta.dir.replace(/\/scripts$/, "");
 const PI_TUI_DIR = join(projectRoot, "node_modules/@mariozechner/pi-tui");
 const PI_TUI_BACKUP = join(
     projectRoot,
