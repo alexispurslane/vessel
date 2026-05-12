@@ -220,9 +220,11 @@ function disposeIfIdle(conversationId: string): void {
 export async function createConversation(title?: string, modelId?: string): Promise<string> {
     const id = randomUUID();
 
-    // Create pi session file
+    // Create pi session file and workspace directory
     await mkdir(SESSIONS_DIR, { recursive: true });
-    const sessionManager = SessionManager.create(process.cwd(), SESSIONS_DIR);
+    const sessionWorkDir = getSessionWorkDir(id);
+    await mkdir(sessionWorkDir, { recursive: true });
+    const sessionManager = SessionManager.create(sessionWorkDir, SESSIONS_DIR);
     sessionManager.newSession({ id });
     const sessionFilePath = sessionManager.getSessionFile();
 
@@ -583,7 +585,7 @@ function registerVesselTools(options: RegisterVesselToolsOptions): void {
     });
     baseToolDefinitions.set(searchTool.name, searchTool);
 
-    const sessionWorkDir = sandbox ? getSessionWorkDir(conversationId) : process.cwd();
+    const sessionWorkDir = getSessionWorkDir(conversationId);
 
     if (sandbox) {
         const sandboxedTools = createSandboxedCodingTools(sessionWorkDir, sandbox, { searchResultUrls });
@@ -782,8 +784,9 @@ export async function getOrHydrateSession(conversationId: string): Promise<PiAge
 
     // Load per-conversation settings and compute session work dir before opening
     const conversationSettings = loadConversationSettingsFromDb(conversationId);
+    const sessionWorkDir = getSessionWorkDir(conversationId);
+    await mkdir(sessionWorkDir, { recursive: true });
     const sandbox = await createSessionSandbox(conversationId, conversationSettings);
-    const sessionWorkDir = sandbox ? getSessionWorkDir(conversationId) : process.cwd();
     const sessionManager = openSessionManager(row, sessionWorkDir);
 
     // Resolve the model for this conversation

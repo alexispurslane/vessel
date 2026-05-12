@@ -33,8 +33,12 @@ RUN bun run build:standalone
 # --- Stage 2: Clean runtime with just the binary ---
 FROM debian:bookworm-slim
 
+# bubblewrap is required for zerobox sandboxing on Linux.
+# The container must be run with user namespace support for bwrap to work:
+#   docker run --security-opt seccomp=unconfined ...
+# or set sysctl kernel.unprivileged_userns_clone=1 on the host.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates && \
+    apt-get install -y --no-install-recommends ca-certificates bubblewrap && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/build/standalone/vessel /usr/local/bin/vessel

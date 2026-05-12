@@ -1,5 +1,5 @@
 /**
- * @file SvelteKit server hook: auth, rate limiting, and route protection.
+ * @file SvelteKit server hook: auth and route protection.
  */
 import type { Handle, RequestEvent } from "@sveltejs/kit";
 import { validateSessionToken, SESSION_COOKIE_NAME, sessionCookie } from "$lib/server/auth/index.js";
@@ -30,45 +30,6 @@ function jsonError(error: string, status: number): Response {
 
 function redirect(to: string): Response {
     return new Response(null, { status: 302, headers: { Location: to } });
-}
-
-// --- Rate limiting (unauthenticated only) ---
-
-const rateLimits = new Map<string, { count: number; resetAt: number }>();
-
-setInterval(() => {
-    const now = Date.now();
-    for (const [key, entry] of rateLimits) {
-        if (now >= entry.resetAt) rateLimits.delete(key);
-    }
-}, 5 * 60 * 1000);
-
-const RATE_LIMIT_CONFIGS = {
-    auth: { max: 10, windowMs: 60_000 },   // 10 req/min on login/auth
-    general: { max: 60, windowMs: 60_000 }, // 60 req/min elsewhere
-} as const;
-
-function rateLimitResponse(ip: string, max: number, windowMs: number): Response | null {
-    const now = Date.now();
-    let entry = rateLimits.get(ip);
-
-    if (!entry || now >= entry.resetAt) {
-        entry = { count: 0, resetAt: now + windowMs };
-        rateLimits.set(ip, entry);
-    }
-
-    entry.count++;
-
-    if (entry.count > max && !import.meta.env.DEV) {
-        return new Response(JSON.stringify({ error: "Too many requests" }), {
-            status: 429,
-            headers: {
-                "Content-Type": "application/json",
-                "Retry-After": String(Math.ceil((entry.resetAt - now) / 1000)),
-            },
-        });
-    }
-    return null;
 }
 
 /**
@@ -102,24 +63,6 @@ async function resolveAuth(event: RequestEvent): Promise<{ token: string | undef
 }
 
 /**
- * Apply rate limiting for unauthenticated requests.
- *
- * Uses different limits for auth routes vs. general routes.
- * Returns a 429 response if the limit is exceeded, or null if allowed.
- *
- * @param event - The SvelteKit request event
- * @returns A blocked response, or null if the request is allowed
- */
-function applyRateLimit(event: RequestEvent): Response | null {
-    if (event.locals.authenticated) return null;
-
-    const config = isAuthRoute(event.url.pathname)
-        ? RATE_LIMIT_CONFIGS.auth
-        : RATE_LIMIT_CONFIGS.general;
-    return rateLimitResponse(event.getClientAddress(), config.max, config.windowMs);
-}
-
-/**
  * Migrate a legacy session cookie to the current cookie name.
  *
  * If the user authenticated via the legacy `talkai_session` cookie,
@@ -142,9 +85,8 @@ function migrateLegacyCookie(token: string | undefined, hasLegacyCookie: boolean
 // --- Main hook ---
 
 /**
- * SvelteKit server hook: auth, rate limiting, and route protection.
- * Resolves session tokens, rate-limits unauthenticated requests,
- * and redirects unauthenticated users to the login page.
+ * SvelteKit server hook: auth and route protection.
+ * Resolves session tokens and redirects unauthenticated users to the login page.
  *
  * @param root0 - The hook params
  * @param root0.event - The request event
@@ -157,21 +99,17 @@ export const handle: Handle = async ({ event, resolve }) => {
     // 1. Resolve session
     const { token, hasLegacyCookie } = await resolveAuth(event);
 
-    // 2. Rate limit unauthenticated users
-    const blocked = applyRateLimit(event);
-    if (blocked) return blocked;
-
-    // 3. Auth routes always pass through
+    // 2. Auth routes always pass through
     if (isAuthRoute(url.pathname)) return resolve(event);
 
-    // 4. Protect routes
+    // 3. Protect routes
     if (!event.locals.authenticated) {
         if (url.pathname.startsWith("/api/")) return jsonError("Unauthorized", 401);
         if (isStaticAsset(url.pathname)) return resolve(event);
         return redirect("/login");
     }
 
-    // 5. Resolve and migrate legacy cookie
+    // 4. Resolve and migrate legacy cookie
     const response = await resolve(event);
     migrateLegacyCookie(token, hasLegacyCookie, response);
 
