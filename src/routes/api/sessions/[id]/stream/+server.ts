@@ -40,14 +40,13 @@ export const GET: RequestHandler = async ({ params, request, url: _url }) => {
                 controller.enqueue(encoder.encode(lines.join("\n") + "\n"));
             };
 
-            // Heartbeat every 30s to keep the connection alive
             const heartbeat = setInterval(() => {
                 try {
                     controller.enqueue(encoder.encode(": heartbeat\n\n"));
                 } catch {
                     clearInterval(heartbeat);
                 }
-            }, 30_000);
+            }, 5_000);
 
             // Send initial connection event FIRST so the client knows the link is up
             // before any potential stream_recovery event arrives

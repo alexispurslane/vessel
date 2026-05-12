@@ -23,8 +23,10 @@ import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { assetMap, zeroboxBinPath } from "../../build/standalone/assets.js";
 
-import { getHandler } from "../../build/handler.js";
-import { env } from "../../build/env.js";
+// The pi-coding-agent SDK reads package.json at module-evaluation time. Handler is imported
+// dynamically so we can set PI_PACKAGE_DIR first to something we control.
+let getHandler: () => { fetch: ReturnType<typeof Bun.serve>["fetch"]; websocket?: any };
+let env: (name: string, fallback?: string) => string;
 
 // --- MIME types ---
 
@@ -88,15 +90,30 @@ function serveEmbeddedAsset(pathname: string): Response | null {
 // --- Start the server ---
 
 void (async () => {
+    const dataDir = resolve(process.env.VESSEL_DATA_DIR || resolve(process.cwd(), "data"));
+    mkdirSync(dataDir, { recursive: true });
+
+    // Set PI_PACKAGE_DIR before loading pi-coding-agent, which does a top-level
+    // readFileSync(getPackageJsonPath()) that fails in compiled binaries.
+    if (!process.env.PI_PACKAGE_DIR) {
+        const packageJsonPath = resolve(dataDir, "package.json");
+        if (!existsSync(packageJsonPath)) {
+            writeFileSync(
+                packageJsonPath,
+                JSON.stringify({ name: "vessel", version: "0.0.1" }),
+                "utf-8",
+            );
+        }
+        process.env.PI_PACKAGE_DIR = dataDir;
+    }
+
     // $bunfs files can't be exec'd by child processes — extract zerobox
     // to disk. Filename includes content hash for upgrade re-extraction.
     if (zeroboxBinPath) {
         try {
-            const dataDir = resolve(process.env.VESSEL_DATA_DIR || resolve(process.cwd(), "data"));
             const hashMatch = zeroboxBinPath.match(/zerobox-([a-z0-9]+)/);
             const hash = hashMatch?.[1] ?? "unknown";
             const extractedBin = resolve(dataDir, `.zerobox-bin-${hash}`);
-            mkdirSync(dataDir, { recursive: true });
             if (!existsSync(extractedBin)) {
                 // 50 MiB max — zerobox binaries are ~18 MiB
                 const MAX_ZEROBOX_SIZE = 50 * 1024 * 1024;
@@ -117,7 +134,14 @@ void (async () => {
         }
     }
 
-    const { fetch: svelteFetch, websocket } = await getHandler();
+    // Dynamic import: pi-coding-agent reads package.json at module-evaluation time,
+    // so PI_PACKAGE_DIR must already be set (done above).
+    const handlerModule = await import("../../build/handler.js");
+    getHandler = handlerModule.getHandler;
+    const envModule = await import("../../build/env.js");
+    env = envModule.env;
+
+    const { fetch: svelteFetch, websocket } = getHandler();
     const port = env("PORT", "3000");
     const host = env("HOST", "0.0.0.0");
 
@@ -126,6 +150,7 @@ void (async () => {
     const server = Bun.serve({
         port,
         hostname: host,
+        idleTimeout: 30,
         fetch(req: Request): Response | Promise<Response> {
             // Embedded assets bypass sirv (which can't readdirSync
             // inside $bunfs) in compiled mode.

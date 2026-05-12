@@ -15,9 +15,8 @@
  *   2. Scan `build/client/` for every static asset
  *   3. Auto-generate `build/standalone/assets.ts` with `import ... with { type: "file" }`
  *      for each asset and a URL→path mapping
- *   4. Swap pi-tui with stub (excludes ~400KB of TUI code + koffi from binary)
- *   5. Compile `src/standalone/entry.ts` + the generated assets into a standalone binary
- *   6. (Optional) Compress the binary with UPX for smaller distribution size
+ *   4. Compile `src/standalone/entry.ts` + the generated assets into a standalone binary
+ *   5. (Optional) Compress the binary with UPX for smaller distribution size
  *
  * Usage:
  *   bun run scripts/build-standalone.ts [--upx [/path/to/upx]]
@@ -40,8 +39,6 @@ import {
     mkdirSync,
     readdirSync,
     readFileSync,
-    renameSync,
-    rmSync,
     statSync,
     writeFileSync,
 } from "node:fs";
@@ -85,7 +82,7 @@ const OUTPUT_BINARY = outputFileOverride ?? join(STANDALONE_DIR, "vessel");
 
 // --- Step 1: Vite build ---
 
-console.log("[1/5] Running vite build (adapter-bun)...");
+console.log("[1/4] Running vite build (adapter-bun)...");
 // Set VESSEL_STANDALONE so svelte.config.js can disable precompression
 // (the binary doesn't need .br/.gz files — it serves from memory).
 const viteResult = Bun.spawnSync(["bun", "--bun", "vite", "build"], {
@@ -99,42 +96,12 @@ if (viteResult.exitCode !== 0) {
     process.exit(1);
 }
 
-// --- Step 1b: Patch handler.js for bytecode compatibility ---
-//
-// svelte-adapter-bun's handler.js uses top-level `await server.init(...)`,
-// which Bun's bytecode compiler doesn't support ("await can only be used
-// inside an async function"). We wrap it in an async IIFE and make
-// getHandler() await the init promise before returning.
-
-const HANDLER_FILE = join(BUILD_DIR, "handler.js");
-if (existsSync(HANDLER_FILE)) {
-    console.log("  Patching handler.js for bytecode compatibility...");
-    let handlerSrc = readFileSync(HANDLER_FILE, "utf-8");
-
-    // Wrap:  await server.init({...});
-    // Into:  const __initPromise = (async () => { await server.init({...}); })();
-    const initPattern =
-        /await server\.init\(\{\s*env:\s*Bun\.env,\s*read:\s*\(file\)\s*=>\s*Bun\.file\(`[^`]+`\)\.stream\(\)\s*\}\);/;
-    handlerSrc = handlerSrc.replace(
-        initPattern,
-        (match) => `const __initPromise = (async () => { ${match} })();`,
-    );
-
-    // Make getHandler() async and await the init promise
-    handlerSrc = handlerSrc.replace(
-        "var getHandler = () => {",
-        "var getHandler = async () => {\n  await __initPromise;",
-    );
-
-    writeFileSync(HANDLER_FILE, handlerSrc, "utf-8");
-}
-
 // Create standalone dir AFTER vite build (vite may clean build/)
 mkdirSync(STANDALONE_DIR, { recursive: true });
 
 // --- Step 2: Collect files ---
 
-console.log("[2/5] Scanning client assets...");
+console.log("[2/4] Scanning client assets...");
 
 /**
  * Collect all file paths under a directory using depth-first search.
@@ -220,7 +187,7 @@ console.log(
 
 // --- Step 3: Generate assets.ts ---
 
-console.log("[3/5] Generating build/standalone/assets.ts...");
+console.log("[3/4] Generating build/standalone/assets.ts...");
 
 const importLines: string[] = [];
 const mappingEntries: string[] = [];
@@ -339,116 +306,9 @@ console.log(
     `  Generated ${ASSETS_MODULE} (${clientFiles.length + staticFiles.length} asset imports)`,
 );
 
-// --- Step 4: Stub pi-tui for compile ---
+// --- Step 4: Compile ---
 
-// bun build --compile resolves @mariozechner/pi-tui from node_modules,
-// pulling in the full ~2.4MB terminal UI library + koffi FFI addon.
-// We swap the real package with our stub before compiling, then restore it.
-const PI_TUI_DIR = join(projectRoot, "node_modules/@mariozechner/pi-tui");
-const PI_TUI_BACKUP = join(
-    projectRoot,
-    "node_modules/@mariozechner/.pi-tui-real",
-);
-const PI_TUI_STUB = join(projectRoot, "src/lib/server/stubs/pi-tui.ts");
-
-/**
- * Restore the real pi-tui package from backup (used in error paths).
- */
-function restorePiTui(): void {
-    if (existsSync(PI_TUI_BACKUP)) {
-        rmSync(PI_TUI_DIR, { recursive: true, force: true });
-        renameSync(PI_TUI_BACKUP, PI_TUI_DIR);
-    }
-}
-
-let swappedPiTui = false;
-if (existsSync(PI_TUI_DIR)) {
-    console.log("[4/5] Swapping pi-tui with stub for compile...");
-    renameSync(PI_TUI_DIR, PI_TUI_BACKUP);
-    mkdirSync(PI_TUI_DIR, { recursive: true });
-    writeFileSync(
-        join(PI_TUI_DIR, "package.json"),
-        JSON.stringify({
-            name: "@mariozechner/pi-tui",
-            version: "0.0.0-stub",
-            type: "module",
-            main: "index.js",
-            exports: { ".": "./index.js" },
-        }),
-        "utf-8",
-    );
-    // Export only value exports (no `export type` — JS files can't use that).
-    // Type-only imports from pi-tui will be erased by the bundler.
-    const stubExports = [
-        "getSegmenter",
-        "visibleWidth",
-        "truncateFragmentToWidth",
-        "truncateToWidth",
-        "matchesKey",
-        "parseKey",
-        "isKeyRelease",
-        "isKeyRepeat",
-        "isKittyProtocolActive",
-        "setKittyProtocolActive",
-        "decodeKittyPrintable",
-        "TUI_KEYBINDINGS",
-        "KeybindingsManager",
-        "getKeybindings",
-        "setKeybindings",
-        "fuzzyFilter",
-        "fuzzyMatch",
-        "getCapabilities",
-        "setCapabilities",
-        "resetCapabilitiesCache",
-        "detectCapabilities",
-        "getImageDimensions",
-        "getPngDimensions",
-        "getJpegDimensions",
-        "getWebpDimensions",
-        "getGifDimensions",
-        "getCellDimensions",
-        "setCellDimensions",
-        "calculateImageRows",
-        "allocateImageId",
-        "deleteKittyImage",
-        "deleteAllKittyImages",
-        "encodeKitty",
-        "encodeITerm2",
-        "hyperlink",
-        "imageFallback",
-        "renderImage",
-        "StdinBuffer",
-        "Container",
-        "isFocusable",
-        "CURSOR_MARKER",
-        "TUI",
-        "ProcessTerminal",
-        "Box",
-        "CancellableLoader",
-        "Editor",
-        "Image",
-        "Input",
-        "Loader",
-        "Markdown",
-        "SelectList",
-        "SettingsList",
-        "Spacer",
-        "Text",
-        "TruncatedText",
-        "Key",
-        "CombinedAutocompleteProvider",
-    ].join(", ");
-    writeFileSync(
-        join(PI_TUI_DIR, "index.js"),
-        `export { ${stubExports} } from ${JSON.stringify(PI_TUI_STUB)};\n`,
-        "utf-8",
-    );
-    swappedPiTui = true;
-}
-
-// --- Step 5: Compile ---
-
-console.log("[5/5] Compiling standalone binary...");
+console.log("[4/4] Compiling standalone binary...");
 
 const compileResult = Bun.spawnSync(
     [
@@ -469,18 +329,11 @@ const compileResult = Bun.spawnSync(
 );
 
 if (compileResult.exitCode !== 0) {
-    restorePiTui();
     console.error("Compilation failed — aborting.");
     process.exit(1);
 }
 
-// Restore real pi-tui
-if (swappedPiTui) {
-    restorePiTui();
-    console.log("  Restored real pi-tui package.");
-}
-
-// --- Step 6: UPX compression (optional) ---
+// --- Step 5: UPX compression (optional) ---
 
 let compressedMb: string | null = null;
 if (upxPath) {
@@ -504,7 +357,7 @@ if (upxPath) {
     } else {
         const preCompressSize = statSync(join(projectRoot, OUTPUT_BINARY)).size;
         const preMb = (preCompressSize / 1024 / 1024).toFixed(1);
-        console.log(`[6/6] Compressing binary with UPX (${resolvedUpx})...`);
+        console.log(`[5/5] Compressing binary with UPX (${resolvedUpx})...`);
         console.log(`  Pre-compression size: ${preMb} MB`);
 
         const upxResult = Bun.spawnSync(
@@ -529,7 +382,7 @@ if (upxPath) {
         }
     }
 } else {
-    console.log("[6/6] UPX compression skipped (use --upx to enable).");
+    console.log("[5/5] UPX compression skipped (use --upx to enable).");
 }
 
 // --- Report ---

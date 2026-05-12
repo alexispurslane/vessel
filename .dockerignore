@@ -1,0 +1,10 @@
+node_modules
+build
+.svelte-kit
+data
+.git
+.github
+*.md
+test_debug.webp
+vessel.png
+vessel_banner.webp
