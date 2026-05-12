@@ -239,13 +239,10 @@ export function createSendHandlers(ctx: ChatHandlerContext) {
 
         try {
             const uploadedNames = await uploadFiles(currentId, filesToSend, ctx);
-            const fileList = uploadedNames.join(", ");
-            statusUpdates.push(`Files with names ${fileList} added to your sandbox`);
+            statusUpdates.push(`Files with names ${uploadedNames.join(", ")} added to your sandbox`);
             ctx.setSandboxFiles([...ctx.getSandboxFiles(), ...uploadedNames]);
-
-            const statusText = statusUpdates.join("\n\n");
             ctx.setUploadProgress(null);
-            void chat.sendToApi(text, ctx.getSelectedModelId() || undefined, statusText || undefined);
+            void chat.sendToApi(text, ctx.getSelectedModelId() || undefined, statusUpdates.join("\n\n") || undefined);
         } catch (err) {
             console.error("[chat] File upload failed:", err);
             chat.setError(err instanceof Error ? err.message : "File upload failed");
@@ -277,7 +274,8 @@ export function createSendHandlers(ctx: ChatHandlerContext) {
         const filesToSend = [...ctx.getPendingFiles()];
         const hasStatus = ctx.getPendingStatusUpdates().length > 0;
         console.log(
-            `[chat-lifecycle] handleSend: text=${String(!!text)}, files=${String(filesToSend.length)}, connected=${String(chat.connected)}, generating=${String(chat.generating)}`
+            `[chat-lifecycle] handleSend: text=${String(!!text)}, files=${String(filesToSend.length)}, ` +
+            `connected=${String(chat.connected)}, generating=${String(chat.generating)}`
         );
         if ((!text && filesToSend.length === 0 && !hasStatus) || !chat.connected || chat.generating)
             return;
@@ -291,8 +289,6 @@ export function createSendHandlers(ctx: ChatHandlerContext) {
             handleSendWithoutFiles(text, statusUpdates);
         }
     }
-
-    // --- onConnectStream — callback after connectStream resolves ---
 
     return {
         handleSend,
@@ -316,8 +312,7 @@ export function createConnectStreamHandler(ctx: ChatHandlerContext) {
     /**
      * Send the initial message passed via URL params.
      * Waits for the SSE stream to be connected first — the server can't deliver
-     * events until the subscriber is registered, so sending before the stream
-     * is up means all SSE events are silently lost.
+     * events until the subscriber is registered.
      * @param currentId - The current conversation ID
      * @param initialMessage - The initial message text
      * @param initialModel - Optional model ID override
@@ -332,24 +327,19 @@ export function createConnectStreamHandler(ctx: ChatHandlerContext) {
     }
 
     /**
-     * Called after `connectStream` resolves. Handles:
-     * - Setting hydrated flag to switch rendering from SSR to live store
-     * - Scrolling to anchored message if hash is present
-     * - Restoring model selection from the conversation's last model
-     * - Restoring in-progress message draft from sessionStorage
-     * - Sending an initial message if one was passed via URL params
+     * Called after `connectStream` resolves. Handles hydration, model restoration,
+     * draft restoration, and initial messages.
      * @param currentId - The current conversation ID
      */
     function onConnectStream(currentId: string) {
         console.log(
-            `[chat-lifecycle] $effect: connectStream resolved, chat.messages.length=${String(chat.messages.length)}, connected=${String(chat.connected)}, generating=${String(chat.generating)}`
+            `[chat-lifecycle] connectStream resolved, msgs=${String(chat.messages.length)}, ` +
+            `connected=${String(chat.connected)}, generating=${String(chat.generating)}`
         );
         ctx.setHydrated(true);
 
         ctx.scrollToHashMessage();
-
-        // Sync the model selector from the conversation's default.
-        // The selector always reflects the conversation's default on (re)connect.
+        // Sync model selector from the conversation's default on (re)connect.
         if (chat.conversationDefaultModel && !ctx.getModelInitialized()) {
             const defaultModelId = ctx.getConversationDefaultModelId();
             if (defaultModelId) {
@@ -361,8 +351,7 @@ export function createConnectStreamHandler(ctx: ChatHandlerContext) {
             ctx.setModelInitialized(true);
         }
 
-        // Refresh sandbox files from the server now that the
-        // session is hydrated and the workspace is accessible.
+        // Refresh sandbox files now that the session is hydrated.
         listWorkspaceFiles(currentId)
             .then((result) => {
                 console.log(`[chat-lifecycle] sandboxFiles from API: length=${String(result.files.length)}, files=${JSON.stringify(result.files)}`);
@@ -379,8 +368,7 @@ export function createConnectStreamHandler(ctx: ChatHandlerContext) {
         const initialMessage = url.searchParams.get("initialMessage");
         const initialModel = url.searchParams.get("initialModel");
         if (initialMessage) {
-            // Strip params synchronously before the async send;
-            // HMR re-runs $effect and would re-send the message.
+            // Strip params before async send; HMR re-runs $effect.
             window.history.replaceState({}, "", `/chat/${currentId}`);
             void sendInitialMessage(currentId, initialMessage, initialModel);
         }

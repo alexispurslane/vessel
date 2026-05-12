@@ -22,7 +22,6 @@
 
 import { Type, type Static } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
-import type { TextContent } from "@mariozechner/pi-ai";
 import type { SearchResultItem } from "$lib/types/search.js";
 
 // --- Settings keys ---
@@ -31,6 +30,8 @@ export const SEARCH_SETTINGS_KEYS = {
     /** Base URL for the search API (default: "https://api.exa.ai/search") */
     BASE_URL: "search.baseUrl",
     /** API key for the search API (required) */
+    // Settings key name, not a real API key
+    // oxlint-disable-next-line secure-coding/no-hardcoded-credentials
     API_KEY: "search.apiKey",
 };
 
@@ -206,7 +207,82 @@ export interface SearchToolOptions {
  * Settings (base URL, API key) are provided at creation time. When the user
  * changes settings in the UI, all active sessions are restarted so they
  * pick up the new values.
- *
+ */
+
+/**
+ * Options for executing a web search query.
+ */
+interface ExecuteSearchOptions {
+    /** The search query */
+    query: string;
+    /** Number of results to request */
+    numResults: number | undefined;
+    /** The search API base URL */
+    baseUrl: string;
+    /** The search API key */
+    apiKey: string | undefined;
+    /** Set to track result URLs for fetch allowlisting */
+    searchResultUrls: Set<string> | undefined;
+    /** Optional abort signal */
+    signal?: AbortSignal;
+}
+
+/**
+ * Execute a web search query against the configured search API.
+ * @param opts - The search execution options
+ * @returns The search tool result
+ */
+async function executeSearch(opts: ExecuteSearchOptions): Promise<AgentToolResult<SearchToolDetails>> {
+    const { query, numResults, baseUrl, apiKey, searchResultUrls, signal } = opts;
+    if (!apiKey) {
+        return {
+            content: [
+                { type: "text", text: "Web search is not configured. Please set a search API key in Settings → Search Grounding." },
+            ],
+            details: { query, resultCount: 0, results: [] },
+        };
+    }
+
+    try {
+        const requestBody = buildSearchRequestBody(query, numResults, baseUrl);
+
+        const response = await fetch(baseUrl, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                // Bearer works for both Exa and Synthetic providers
+                // oxlint-disable-next-line secure-coding/no-hardcoded-credentials
+                Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify(requestBody),
+            signal: signal ?? undefined,
+        });
+
+        if (!response.ok) {
+            await throwForNonOkResponse(response);
+        }
+
+        const data: unknown = await response.json();
+        const results = normalizeResults(data);
+        trackSearchResultUrls(results, searchResultUrls);
+
+        const text = formatResults(results, query);
+
+        return {
+            content: [{ type: "text", text }],
+            details: { query, resultCount: results.length, results },
+        };
+    } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+            content: [{ type: "text", text: `Error searching for "${query}": ${message}` }],
+            details: { query, resultCount: 0, results: [] },
+        };
+    }
+}
+
+/**
+ * Create a web search tool for the pi-coding-agent framework.
  * @param options - Optional configuration (base URL, API key, search result URL tracker)
  * @returns The web search AgentTool
  */
@@ -232,68 +308,7 @@ export function createSearchTool(options?: SearchToolOptions): AgentTool<typeof 
             params: SearchToolInput,
             _signal?: AbortSignal
         ): Promise<AgentToolResult<SearchToolDetails>> {
-            const { query, numResults } = params;
-
-            if (!apiKey) {
-                return {
-                    content: [
-                        {
-                            type: "text",
-                            text: "Web search is not configured. Please set a search API key in Settings → Search Grounding.",
-                        },
-                    ],
-                    details: { query, resultCount: 0, results: [] },
-                };
-            }
-
-            try {
-                const requestBody = buildSearchRequestBody(query, numResults, baseUrl);
-
-                const response = await fetch(baseUrl, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        // Using Bearer works for both Exa (also supports x-api-key)
-                        // and Synthetic (only supports Bearer).
-                        Authorization: `Bearer ${apiKey}`,
-                    },
-                    body: JSON.stringify(requestBody),
-                    signal: _signal ?? undefined,
-                });
-
-                if (!response.ok) {
-                    // Throwing marks the tool call as isError — the correct
-                    // semantic for a semantically failed search.
-                    await throwForNonOkResponse(response);
-                }
-
-                const data: unknown = await response.json();
-                const results = normalizeResults(data);
-                trackSearchResultUrls(results, searchResultUrls);
-
-                const text = formatResults(results, query);
-
-                const textContent: TextContent[] = [
-                    { type: "text", text },
-                ];
-
-                return {
-                    content: textContent,
-                    details: {
-                        query,
-                        resultCount: results.length,
-                        results,
-                    },
-                };
-            } catch (err) {
-                const message = err instanceof Error ? err.message : String(err);
-                return {
-                    content: [
-                        { type: "text", text: `Error searching for "${query}": ${message}` },
-                    ],
-                    details: { query, resultCount: 0, results: [] },
-                };
-            }
+            return executeSearch({ query: params.query, numResults: params.numResults, baseUrl, apiKey, searchResultUrls, signal: _signal });
         },
     };
 }

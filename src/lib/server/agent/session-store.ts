@@ -363,7 +363,7 @@ export async function destroyConversation(conversationId: string): Promise<void>
  * @param sessionWorkDir - Working directory for the session
  * @returns The opened SessionManager
  */
-function openSessionManager(row: { session_file_path: string }, sessionWorkDir: string): SessionManager {
+function openSessionManager(row: SessionModelRow, sessionWorkDir: string): SessionManager {
     return SessionManager.open(row.session_file_path, SESSIONS_DIR, sessionWorkDir);
 }
 
@@ -511,22 +511,28 @@ async function createSessionInfrastructure(
 }
 
 /**
+ * Options for registering Vessel-specific tools.
+ */
+interface RegisterVesselToolsOptions {
+    /** The agent session to register tools on */
+    agentSession: PiAgentSession;
+    /** The conversation ID (used to resolve workspace path) */
+    conversationId: string;
+    /** Per-conversation settings for tool resolution */
+    conversationSettings: ConversationSettings | null;
+    /** Optional sandbox instance for sandboxed tools */
+    sandbox: Sandbox | null;
+    /** Set to collect search result URLs */
+    searchResultUrls: Set<string>;
+}
+
+/**
  * Register Vessel-specific tools (fetch, search, sandboxed tools) and set active tools.
- *
- * @param agentSession - The agent session to register tools on
- * @param conversationId - The conversation ID (used to resolve workspace path)
- * @param conversationSettings - Per-conversation settings for tool resolution
- * @param sandbox - Optional sandbox instance for sandboxed tools
- * @param searchResultUrls - Set to collect search result URLs
+ * @param options - The registration options
  * @returns {void}
  */
-function registerVesselTools(
-    agentSession: PiAgentSession,
-    conversationId: string,
-    conversationSettings: ConversationSettings | null,
-    sandbox: Sandbox | null,
-    searchResultUrls: Set<string>
-): void {
+function registerVesselTools(options: RegisterVesselToolsOptions): void {
+    const { agentSession, conversationId, conversationSettings, sandbox, searchResultUrls } = options;
     const db = getDb();
 
     // Determine the effective tool set for this conversation.
@@ -798,7 +804,7 @@ export async function getOrHydrateSession(conversationId: string): Promise<PiAge
 
     // Register Vessel-specific tools and set active tools
     const searchResultUrls = new Set<string>();
-    registerVesselTools(agentSession, conversationId, conversationSettings, sandbox, searchResultUrls);
+    registerVesselTools({ agentSession, conversationId, conversationSettings, sandbox, searchResultUrls });
 
     // Apply custom/append system prompt overrides
     applySystemPromptOverrides(agentSession, conversationSettings);

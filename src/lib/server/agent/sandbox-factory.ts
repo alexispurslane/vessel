@@ -98,6 +98,8 @@ export const SANDBOX_SETTINGS_KEYS = {
     /** JSON array of allowed network domains (used when allowNet is true and allowAllDomains is false) */
     ALLOWED_NET_DOMAINS: "sandbox.allowedNetDomains",
     /** JSON object of secrets: { ENV_VAR_NAME: { value: string, hosts: string[] } } */
+    // Settings key name, not a real credential
+    // oxlint-disable-next-line secure-coding/no-hardcoded-credentials
     SECRETS: "sandbox.secrets",
     /** Whether snapshot is enabled (default: true) */
     SNAPSHOT_ENABLED: "sandbox.snapshotEnabled",

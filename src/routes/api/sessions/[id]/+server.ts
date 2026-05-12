@@ -55,6 +55,54 @@ export const GET = tryApi(({ params }) => {
 });
 
 /**
+ * Build SQL SET clause parts and corresponding values from the patch fields.
+ * @param fields - The parsed patch body fields
+ * @param fields.title - Optional new title
+ * @param fields.tags - Optional new tags array
+ * @param fields.model_id - Optional new model ID
+ * @param fields.pinned - Optional pinned flag
+ * @param fields.archived - Optional archived flag
+ * @returns Tuple of [updates array, values array]
+ */
+function buildPatchUpdates(fields: {
+    title?: string;
+    tags?: string[];
+    model_id?: string;
+    pinned?: boolean;
+    archived?: boolean;
+}): [string[], (string | number | null)[]] {
+    const updates: string[] = [];
+    const values: (string | number | null)[] = [];
+
+    if (fields.title !== undefined) {
+        updates.push("title = ?");
+        values.push(fields.title);
+    }
+    if (fields.tags !== undefined) {
+        updates.push("tags = ?");
+        values.push(JSON.stringify(fields.tags));
+        upsertTags(fields.tags);
+    }
+    if (fields.model_id !== undefined) {
+        updates.push("model_id = ?");
+        values.push(fields.model_id);
+        const provider = fields.model_id ? resolveModelProvider(fields.model_id) : null;
+        updates.push("model_provider = ?");
+        values.push(provider);
+    }
+    if (fields.pinned !== undefined) {
+        updates.push("pinned = ?");
+        values.push(fields.pinned ? 1 : 0);
+    }
+    if (fields.archived !== undefined) {
+        updates.push("archived = ?");
+        values.push(fields.archived ? 1 : 0);
+    }
+
+    return [updates, values];
+}
+
+/**
  * PATCH /api/sessions/[id]
  * Update conversation metadata (title, tags, model).
  * When model_id is provided, the provider is resolved automatically.
@@ -62,37 +110,8 @@ export const GET = tryApi(({ params }) => {
 export const PATCH = apiHandler(PatchBody, ({ body, event }) => {
     const id = event.params.id;
     if (!id) return notFound("Conversation not found");
-    const { title, tags, model_id, pinned, archived } = body;
 
-    const updates: string[] = [];
-    const values: (string | number | null)[] = [];
-
-    if (title !== undefined) {
-        updates.push("title = ?");
-        values.push(title);
-    }
-    if (tags !== undefined) {
-        updates.push("tags = ?");
-        values.push(JSON.stringify(tags));
-        // Ensure these tags exist in the global tags table
-        upsertTags(tags);
-    }
-    if (model_id !== undefined) {
-        updates.push("model_id = ?");
-        values.push(model_id);
-        // Auto-resolve the provider from the model ID
-        const provider = model_id ? resolveModelProvider(model_id) : null;
-        updates.push("model_provider = ?");
-        values.push(provider);
-    }
-    if (pinned !== undefined) {
-        updates.push("pinned = ?");
-        values.push(pinned ? 1 : 0);
-    }
-    if (archived !== undefined) {
-        updates.push("archived = ?");
-        values.push(archived ? 1 : 0);
-    }
+    const [updates, values] = buildPatchUpdates(body);
 
     // Safety check — the Zod refine should prevent this, but keep the guard
     if (updates.length === 0) {

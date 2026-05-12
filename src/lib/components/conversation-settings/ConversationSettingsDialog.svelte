@@ -162,6 +162,30 @@
         }
     }
 
+    /**
+     * Build the secrets object from the current secrets pill list state.
+     * @returns The secrets record, or null if custom secrets are disabled
+     */
+    function buildSecrets(): Record<string, { value: string; hosts: string[] }> | null {
+        if (!useCustomSecrets) return null;
+        const secretsObj: Record<string, { value: string; hosts: string[] }> = {};
+        for (const s of secrets) {
+            const key = s["key"] as string;
+            const value = s["value"] as string;
+            const hosts = s["hosts"] as string;
+            if (key.trim()) {
+                secretsObj[key.trim()] = {
+                    value,
+                    hosts: hosts
+                        .split(",")
+                        .map((h: string) => h.trim())
+                        .filter(Boolean),
+                };
+            }
+        }
+        return secretsObj;
+    }
+
     async function saveSettings() {
         saving = true;
         error = null;
@@ -190,26 +214,7 @@
                 ? allowedEnvVars.map((e) => e["name"] as string).filter(Boolean)
                 : null;
 
-            if (useCustomSecrets) {
-                const secretsObj: Record<string, { value: string; hosts: string[] }> = {};
-                for (const s of secrets) {
-                    const key = s["key"] as string;
-                    const value = s["value"] as string;
-                    const hosts = s["hosts"] as string;
-                    if (key.trim()) {
-                        secretsObj[key.trim()] = {
-                            value,
-                            hosts: hosts
-                                .split(",")
-                                .map((h: string) => h.trim())
-                                .filter(Boolean),
-                        };
-                    }
-                }
-                settings.secrets = secretsObj;
-            } else {
-                settings.secrets = null;
-            }
+            settings.secrets = buildSecrets();
 
             // Save agent mode
             settings.agentMode = agentMode;

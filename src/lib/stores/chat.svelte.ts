@@ -200,6 +200,57 @@ function handleError(s: ChatState): void {
 // --- EventSource setup ---
 
 /**
+ * Map of SSE event names to their typed handlers.
+ * Events with MessageEvent arg need `(s, e)` signature; others need `(s)` only.
+ */
+const SSE_HANDLERS = {
+    connected: (s: ChatState) => handleConnected(s),
+    stream_recovery: (s: ChatState, e: MessageEvent) => handleStreamRecovery(s, e),
+    message_start: (s: ChatState, e: MessageEvent) => handleMessageStart(s, e),
+    message_update: (s: ChatState, e: MessageEvent) => handleMessageUpdate(s, e),
+    message_end: (s: ChatState, e: MessageEvent) => handleMessageEnd(s, e),
+    tool_execution_start: (s: ChatState, e: MessageEvent) => handleToolExecutionStart(s, e),
+    tool_execution_update: (s: ChatState, e: MessageEvent) => handleToolExecutionUpdate(s, e),
+    tool_execution_end: (s: ChatState, e: MessageEvent) => handleToolExecutionEnd(s, e),
+    turn_start: (s: ChatState) => handleTurnStart(s),
+    turn_end: (s: ChatState) => handleTurnEnd(s),
+    agent_start: (s: ChatState) => handleAgentStart(s),
+    agent_end: (s: ChatState) => handleAgentEnd(s),
+    error: (s: ChatState) => handleError(s),
+    fetched_sources: (s: ChatState, e: MessageEvent) => handleFetchedSources(s, e),
+    turn_timing: (s: ChatState, e: MessageEvent) => handleTurnTiming(s, e),
+    session_tree: (s: ChatState) => handleSessionTree(s),
+} as const;
+
+type SseEventName = keyof typeof SSE_HANDLERS;
+
+/**
+ * Wire all SSE event listeners onto an EventSource instance.
+ * Each listener checks staleness before delegating to the per-event handler.
+ * @param es - The EventSource to wire
+ * @param s - The chat state
+ * @param isStale - Function to check if this connection is stale
+ */
+function wireEventListeners(es: EventSource, s: ChatState, isStale: () => boolean): void {
+    for (const name of Object.keys(SSE_HANDLERS) as SseEventName[]) {
+        es.addEventListener(name, (e: MessageEvent) => {
+            if (isStale()) return;
+            SSE_HANDLERS[name](s, e);
+        });
+    }
+
+    es.onmessage = (e: MessageEvent) => {
+        console.log(`[chat] SSE onmessage (catch-all): type=${e.type}, lastEventId=${e.lastEventId}, data=${String(e.data).substring(0, 200)}`);
+    };
+
+    es.onerror = () => {
+        if (isStale()) return;
+        console.log(`[chat] SSE onerror: EventSource error`);
+        s.connected = false;
+    };
+}
+
+/**
  * Create an EventSource for a conversation's SSE stream and wire up all event handlers.
  * @param s - The chat state
  * @param conversationId - The conversation to stream
@@ -215,112 +266,8 @@ function setupEventSource(
     console.log(`[chat] connectStream: EventSource URL=${streamUrl}`);
 
     const es = new EventSource(streamUrl);
-
-    /**
-     * Returns true if this connection has been superseded by a newer connectStream call.
-     * @returns Whether the connection is stale
-     */
     const isStale = () => thisGeneration !== s.connectGeneration;
-
-    es.addEventListener("connected", () => {
-        if (isStale()) return;
-        handleConnected(s);
-    });
-
-    es.addEventListener("stream_recovery", (e: MessageEvent) => {
-        if (isStale()) return;
-        handleStreamRecovery(s, e);
-    });
-
-    es.addEventListener("message_start", (e: MessageEvent) => {
-        if (isStale()) return;
-        handleMessageStart(s, e);
-    });
-
-    es.addEventListener("message_update", (e: MessageEvent) => {
-        if (isStale()) return;
-        handleMessageUpdate(s, e);
-    });
-
-    es.addEventListener("message_end", (e: MessageEvent) => {
-        if (isStale()) return;
-        handleMessageEnd(s, e);
-    });
-
-    es.addEventListener("tool_execution_start", (e: MessageEvent) => {
-        if (isStale()) return;
-        handleToolExecutionStart(s, e);
-    });
-
-    es.addEventListener("tool_execution_update", (e: MessageEvent) => {
-        if (isStale()) return;
-        handleToolExecutionUpdate(s, e);
-    });
-
-    es.addEventListener("tool_execution_end", (e: MessageEvent) => {
-        if (isStale()) return;
-        handleToolExecutionEnd(s, e);
-    });
-
-    es.addEventListener("turn_start", () => {
-        if (isStale()) return;
-        handleTurnStart(s);
-    });
-
-    es.addEventListener("turn_end", () => {
-        if (isStale()) return;
-        handleTurnEnd(s);
-    });
-
-    es.addEventListener("agent_start", () => {
-        if (isStale()) return;
-        handleAgentStart(s);
-    });
-
-    es.addEventListener("agent_end", () => {
-        if (isStale()) return;
-        handleAgentEnd(s);
-    });
-
-    es.addEventListener("open", () => {
-        console.log(`[chat] SSE 'open' event: EventSource connection opened`);
-    });
-
-    es.addEventListener("error", () => {
-        if (isStale()) return;
-        handleError(s);
-    });
-
-    // Attach fetched sources to the producing assistant msg;
-    // fall back to last assistant msg if streaming ID cleared.
-    es.addEventListener("fetched_sources", (e: MessageEvent) => {
-        if (isStale()) return;
-        handleFetchedSources(s, e);
-    });
-
-    // Attach timing metrics (TTFT, TPS) to the producing assistant msg.
-    es.addEventListener("turn_timing", (e: MessageEvent) => {
-        if (isStale()) return;
-        handleTurnTiming(s, e);
-    });
-
-    // When the session tree is navigated (by us or another client), reload messages
-    es.addEventListener("session_tree", () => {
-        if (isStale()) return;
-        handleSessionTree(s);
-    });
-
-    // Catch-all handler for any unnamed events — useful for debugging
-    es.onmessage = (e: MessageEvent) => {
-        console.log(`[chat] SSE onmessage (catch-all): type=${e.type}, lastEventId=${e.lastEventId}, data=${String(e.data).substring(0, 200)}`);
-    };
-
-    es.onerror = () => {
-        if (isStale()) return;
-        console.log(`[chat] SSE onerror: EventSource error`);
-        s.connected = false;
-        // EventSource will auto-reconnect
-    };
+    wireEventListeners(es, s, isStale);
 
     return es;
 }
@@ -358,6 +305,67 @@ function resetChatState(s: ChatState, conversationId: string): number {
 // --- Public API ---
 
 /**
+ * Add a user message to the local list only (does NOT send to the API).
+ * Use sendToApi() after to actually trigger the AI response.
+ * @param content - The message text
+ * @returns The generated message ID
+ */
+function addLocalUserMessage(content: string): string {
+    const id = `user-${Date.now()}`;
+    state.messages.push({
+        id,
+        role: "user",
+        content,
+        timestamp: Date.now(),
+    });
+    console.log(`[chat-lifecycle] addLocalUserMessage: pushed user msg id=${id}, messages.length=${state.messages.length}`);
+    return id;
+}
+
+/**
+ * Update the content of a local message by ID.
+ * @param id - The message ID to update
+ * @param content - The new content
+ */
+function updateLocalMessage(id: string, content: string) {
+    const msg = state.messages.find((m) => m.id === id);
+    if (msg) {
+        msg.content = content;
+    }
+}
+
+/**
+ * Send a message to the API without adding it to the local message list.
+ * The AI response will come through the SSE stream.
+ * Use after addLocalUserMessage() when you've already pushed the
+ * message locally (e.g. to show it before file uploads finish).
+ * @param content - The message text
+ * @param modelId - Optional model override
+ * @param statusContent - Invisible context sent to the AI
+ * @returns {Promise<void>}
+ */
+async function sendToApi(content: string, modelId?: string, statusContent?: string): Promise<void> {
+    if (!state.currentConversationId) return;
+    state.error = null;
+    state.generating = true;
+    try {
+        await apiSend(state.currentConversationId, content, modelId, statusContent);
+    } catch (e) {
+        state.error = e instanceof Error ? e.message : "Failed to send message";
+        state.generating = false;
+    }
+}
+
+/** Wait for the SSE stream to be connected before sending messages.
+ *  Returns immediately if already connected.
+ * @returns {Promise<void>}
+ */
+async function waitForConnected(): Promise<void> {
+    if (state.connected) return;
+    await state.connectPromise;
+}
+
+/**
  * Get the shared chat store instance with reactive getters and mutation methods.
  * @returns The chat store API object
  */
@@ -385,12 +393,7 @@ export function getChat() {
         get conversationId() {
             return state.currentConversationId;
         },
-        /** Wait for the SSE stream to be connected before sending messages.
-         *  Returns immediately if already connected. */
-        async waitForConnected(): Promise<void> {
-            if (state.connected) return;
-            await state.connectPromise;
-        },
+        waitForConnected,
         get conversationDefaultModel() {
             return state.conversationDefaultModel;
         },
@@ -422,55 +425,9 @@ export function getChat() {
         get timing() {
             return state.timing;
         },
-        /**
-         * Add a user message to the local list only (does NOT send to the API).
-         * Use sendToApi() after to actually trigger the AI response.
-         * @param content - The message text
-         * @returns The generated message ID
-         */
-        addLocalUserMessage(content: string): string {
-            const id = `user-${Date.now()}`;
-            state.messages.push({
-                id,
-                role: "user",
-                content,
-                timestamp: Date.now(),
-            });
-            console.log(`[chat-lifecycle] addLocalUserMessage: pushed user msg id=${id}, messages.length=${state.messages.length}`);
-            return id;
-        },
-        /**
-         * Update the content of a local message by ID.
-         * @param id - The message ID to update
-         * @param content - The new content
-         */
-        updateLocalMessage(id: string, content: string) {
-            const msg = state.messages.find((m) => m.id === id);
-            if (msg) {
-                msg.content = content;
-            }
-        },
-        /**
-         * Send a message to the API without adding it to the local message list.
-         * The AI response will come through the SSE stream.
-         * Use after addLocalUserMessage() when you've already pushed the
-         * message locally (e.g. to show it before file uploads finish).
-         * @param content - The message text
-         * @param modelId - Optional model override
-         * @param statusContent - Invisible context sent to the AI
-         * @returns {Promise<void>}
-         */
-        async sendToApi(content: string, modelId?: string, statusContent?: string): Promise<void> {
-            if (!state.currentConversationId) return;
-            state.error = null;
-            state.generating = true;
-            try {
-                await apiSend(state.currentConversationId, content, modelId, statusContent);
-            } catch (e) {
-                state.error = e instanceof Error ? e.message : "Failed to send message";
-                state.generating = false;
-            }
-        },
+        addLocalUserMessage,
+        updateLocalMessage,
+        sendToApi,
     };
 }
 
