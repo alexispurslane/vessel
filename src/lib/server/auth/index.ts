@@ -2,7 +2,7 @@
  * @file User authentication: bcrypt passwords, JWT sessions, and cookie management.
  */
 
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import { randomBytes } from "crypto";
 import * as jose from "jose";
 import { getDb } from "../db/index.js";
