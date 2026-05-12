@@ -23,7 +23,7 @@
  * in a single shared `fetchPage` function — no code duplication.
  */
 
-import { Type, type Static } from "@sinclair/typebox";
+import { Type, type Static } from "typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { Sandbox } from "zerobox";
 import { Browser, BrowserErrorCaptureEnum } from "happy-dom";

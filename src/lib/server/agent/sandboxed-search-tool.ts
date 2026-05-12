@@ -20,7 +20,7 @@
  * fetch tool. It's auto-disabled when network is off.
  */
 
-import { Type, type Static } from "@sinclair/typebox";
+import { Type, type Static } from "typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { SearchResultItem } from "$lib/types/search.js";
 
