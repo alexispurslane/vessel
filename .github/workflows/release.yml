@@ -18,11 +18,6 @@ jobs:
                       artifact: vessel-darwin-arm64
                       zerobox_pkg: "@zerobox/cli-darwin-arm64"
                       upx: false
-                    - target: bun-windows-x64
-                      os: ubuntu-latest
-                      artifact: vessel-windows-x64.exe
-                      zerobox_pkg: ""
-                      upx: true
                     - target: bun-linux-x64
                       os: ubuntu-latest
                       artifact: vessel-linux-x64
@@ -78,7 +73,6 @@ jobs:
                   TAG="${GITHUB_REF_NAME}"
                   gh release create "$TAG" \
                       artifacts/vessel-darwin-arm64 \
-                      artifacts/vessel-windows-x64.exe \
                       artifacts/vessel-linux-x64 \
                       --title "$TAG" \
                       --notes "Standalone binaries for $TAG"
