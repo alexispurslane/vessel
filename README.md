@@ -108,10 +108,27 @@ The `dev` script uses `bun --bun vite dev` to run Vite with Bun's runtime instea
 
 ### Production Build
 
+Vessel's production build produces a **standalone self-contained binary** — the Bun runtime, all server code, and all client assets (JS, CSS, fonts, images) are compiled into a single executable. The only external requirement at runtime is a `data/` directory for the SQLite database and session JSONL files.
+
 ```sh
-bun run build
-bun run preview
+bun run build:standalone
 ```
+
+The binary is output to `build/standalone/vessel`. To run it:
+
+```sh
+mkdir -p data
+./build/standalone/vessel
+```
+
+Optional flags:
+
+| Flag | Description |
+|---|---|
+| `--target <target>` | Bun compile target (e.g. `bun-linux-x64`, `bun-darwin-arm64`) |
+| `--outfile <path>` | Output binary path (defaults to `build/standalone/vessel`) |
+| `--zerobox-bin <path>` | Path to zerobox binary to embed |
+| `--upx [path]` | Compress the binary with UPX after compilation |
 
 ### Other Commands
 
