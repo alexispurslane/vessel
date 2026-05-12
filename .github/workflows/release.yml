@@ -17,14 +17,17 @@ jobs:
                       os: macos-latest
                       artifact: vessel-darwin-arm64
                       zerobox_pkg: "@zerobox/cli-darwin-arm64"
+                      upx: false
                     - target: bun-windows-x64
                       os: ubuntu-latest
                       artifact: vessel-windows-x64.exe
                       zerobox_pkg: ""
+                      upx: true
                     - target: bun-linux-x64
                       os: ubuntu-latest
                       artifact: vessel-linux-x64
                       zerobox_pkg: "@zerobox/cli-linux-x64"
+                      upx: true
 
         runs-on: ${{ matrix.os }}
 
@@ -39,8 +42,15 @@ jobs:
               if: matrix.zerobox_pkg != ''
               run: bun add --optional "${{ matrix.zerobox_pkg }}"
 
+            - name: Install UPX (Linux)
+              if: matrix.upx
+              run: |
+                  UPX_VER="4.2.4"
+                  curl -L "https://github.com/upx/upx/releases/download/v${UPX_VER}/upx-${UPX_VER}-amd64_linux.tar.xz" \
+                      | tar xJ --strip-components=1 -C /usr/local/bin "upx-${UPX_VER}-amd64_linux/upx"
+
             - name: Build standalone binary
-              run: bun scripts/build-standalone.ts --target "${{ matrix.target }}" --outfile "build/standalone/${{ matrix.artifact }}"
+              run: bun scripts/build-standalone.ts --target "${{ matrix.target }}" --outfile "build/standalone/${{ matrix.artifact }}" ${{ matrix.upx && '--upx' || '' }}
 
             - name: Upload binary artifact
               uses: actions/upload-artifact@v4

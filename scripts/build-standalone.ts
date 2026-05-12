@@ -17,9 +17,18 @@
  *      for each asset and a URL→path mapping
  *   4. Swap pi-tui with stub (excludes ~400KB of TUI code + koffi from binary)
  *   5. Compile `src/standalone/entry.ts` + the generated assets into a standalone binary
+ *   6. (Optional) Compress the binary with UPX for smaller distribution size
  *
  * Usage:
- *   bun run scripts/build-standalone.ts
+ *   bun run scripts/build-standalone.ts [--upx [/path/to/upx]]
+ *
+ * Flags:
+ *   --target <target>   Bun compile target (e.g. bun-linux-x64)
+ *   --outfile <path>    Output binary path (defaults to build/standalone/vessel)
+ *   --zerobox-bin <path> Path to zerobox binary to embed
+ *   --upx [/path/to/upx] Compress the binary with UPX after compilation.
+ *                       If a path is given it is used directly; otherwise
+ *                       the `upx` executable is looked up on PATH.
  *
  * @see src/standalone/entry.ts — the persistent entry point that loads the
  *   generated asset module and serves embedded assets in compiled mode.
@@ -45,14 +54,16 @@ const STANDALONE_DIR = join(BUILD_DIR, "standalone");
 const ENTRY_POINT = "src/standalone/entry.ts";
 const ASSETS_MODULE = join(STANDALONE_DIR, "assets.ts");
 
-// Parse --target, --outfile, and --zerobox-bin CLI arguments.
+// Parse --target, --outfile, --zerobox-bin, and --upx CLI arguments.
 // --target sets the Bun compile target (e.g. bun-windows-x64, bun-darwin-arm64, bun-linux-x64).
 // --outfile sets the output binary path (defaults to build/standalone/vessel).
 // --zerobox-bin sets the path to the zerobox binary to embed (auto-detected if omitted).
+// --upx enables UPX compression of the compiled binary (auto-detects or accepts a path).
 const cliArgs = process.argv.slice(2);
 let targetFlag = "bun";
 let outputFileOverride: string | null = null;
 let zeroboxBinOverride: string | null = null;
+let upxPath: string | null = null;
 for (let i = 0; i < cliArgs.length; i++) {
     if (cliArgs[i] === "--target" && cliArgs[i + 1]) {
         targetFlag = cliArgs[i + 1];
@@ -63,6 +74,10 @@ for (let i = 0; i < cliArgs.length; i++) {
     } else if (cliArgs[i] === "--zerobox-bin" && cliArgs[i + 1]) {
         zeroboxBinOverride = cliArgs[i + 1];
         i++;
+    } else if (cliArgs[i] === "--upx") {
+        // --upx with no argument → auto-detect; --upx /path/to/upx → use that path
+        upxPath = cliArgs[i + 1] && !cliArgs[i + 1].startsWith("--") ? cliArgs[i + 1] : "upx";
+        if (upxPath !== "upx") i++;
     }
 }
 
@@ -465,15 +480,70 @@ if (swappedPiTui) {
     console.log("  Restored real pi-tui package.");
 }
 
+// --- Step 6: UPX compression (optional) ---
+
+let compressedMb: string | null = null;
+if (upxPath) {
+    const resolvedUpx = (() => {
+        // If the user gave an explicit path, use it directly.
+        if (upxPath !== "upx") return upxPath;
+        // Otherwise try to find `upx` on PATH.
+        const which = Bun.spawnSync(["which", "upx"], {
+            stdout: "pipe",
+            stderr: "pipe",
+        });
+        if (which.exitCode === 0) return which.stdout.toString().trim();
+        return null;
+    })();
+
+    if (!resolvedUpx) {
+        console.warn(
+            "⚠️  --upx was requested but UPX is not installed. " +
+            "Install it from https://upx.github.io/ or pass an explicit path with --upx /path/to/upx",
+        );
+    } else {
+        const preCompressSize = statSync(join(projectRoot, OUTPUT_BINARY)).size;
+        const preMb = (preCompressSize / 1024 / 1024).toFixed(1);
+        console.log(`[6/6] Compressing binary with UPX (${resolvedUpx})...`);
+        console.log(`  Pre-compression size: ${preMb} MB`);
+
+        const upxResult = Bun.spawnSync(
+            [resolvedUpx, "--best", join(projectRoot, OUTPUT_BINARY)],
+            { cwd: projectRoot, stdout: "inherit", stderr: "inherit" },
+        );
+
+        if (upxResult.exitCode !== 0) {
+            console.warn(
+                "⚠️  UPX compression failed — binary is still functional but uncompressed.",
+            );
+        } else {
+            const postStat = statSync(join(projectRoot, OUTPUT_BINARY));
+            compressedMb = (postStat.size / 1024 / 1024).toFixed(1);
+            const savings = (
+                ((preCompressSize - postStat.size) / preCompressSize) *
+                100
+            ).toFixed(1);
+            console.log(
+                `  Post-compression size: ${compressedMb} MB (${savings}% smaller)`,
+            );
+        }
+    }
+} else {
+    console.log("[6/6] UPX compression skipped (use --upx to enable).");
+}
+
 // --- Report ---
 
 const binaryStat = statSync(join(projectRoot, OUTPUT_BINARY));
 const mb = (binaryStat.size / 1024 / 1024).toFixed(1);
+const sizeLine = compressedMb
+    ? `${mb} MB → ${compressedMb} MB (UPX compressed)`
+    : `${mb} MB`;
 
 console.log(`
 ✅ Standalone Vessel binary built successfully!
 
-   Binary:  ${OUTPUT_BINARY} (${mb} MB)
+   Binary:  ${OUTPUT_BINARY} (${sizeLine})
    Assets:  ${clientFiles.length + staticFiles.length} embedded
 
    Usage:
