@@ -218,8 +218,9 @@ export function generateModelsJson(): void {
         // Add any custom models for this provider
         const modelsForProvider = customModels.filter((m) => m.provider === prov.provider);
         if (modelsForProvider.length > 0) {
-            // Infer API from provider name for known providers
-            const api = inferApiForProvider(prov.provider);
+            // Infer API from provider name for known providers,
+            // falling back to custom_models.api for unknown ones.
+            const api = inferApiForProvider(prov.provider) || (modelsForProvider[0].api as string | undefined);
             if (api) providerEntry.api = api;
 
             providerEntry.models = modelsForProvider.map((m) => {
@@ -237,6 +238,11 @@ export function generateModelsJson(): void {
                         cacheWrite: m.cost_cache_write,
                     },
                 };
+
+                // Include model-level api and baseUrl so custom providers
+                // still work without a provider-level api field.
+                if (m.api) model.api = m.api;
+                if (m.base_url) model.baseUrl = m.base_url;
 
                 if (m.compat) {
                     try {

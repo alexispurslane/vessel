@@ -16,6 +16,9 @@
         "lint:fix": "oxlint --fix",
         "lint:audit": "bun audit",
         "build:standalone": "bun run scripts/build-standalone.ts",
+        "test:e2e": "playwright test",
+        "test:e2e:ui": "playwright test --ui",
+        "test:e2e:debug": "playwright test --debug",
         "clean": "rm -rf build; find . -name '*bun-build*' | xargs rm -rf"
     },
     "devDependencies": {
@@ -56,6 +59,7 @@
         "tailwindcss": "^4.3.0",
         "tw-animate-css": "^1.4.0",
         "typescript": "^6.0.3",
+        "@playwright/test": "^1.52.0",
         "vite": "^8.0.12"
     },
     "overrides": {

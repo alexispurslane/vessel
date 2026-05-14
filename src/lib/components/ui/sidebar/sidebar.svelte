@@ -98,13 +98,14 @@
             )}
             {...restProps}
         >
-            <div
+            <nav
                 data-sidebar="sidebar"
                 data-slot="sidebar-inner"
+                aria-label="Sidebar navigation"
                 class="bg-sidebar group-data-[variant=floating]:ring-sidebar-border group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:shadow-sm group-data-[variant=floating]:ring-1 flex size-full flex-col"
             >
                 {@render children?.()}
-            </div>
+            </nav>
         </div>
     </div>
 {/if}

@@ -26,9 +26,51 @@ import { assetMap, zeroboxBinPath } from "../../build/standalone/assets.js";
 // The pi-coding-agent SDK reads package.json at module-evaluation time. Handler is imported
 // dynamically so we can set PI_PACKAGE_DIR first to something we control.
 let getHandler: () => { fetch: ReturnType<typeof Bun.serve>["fetch"]; websocket?: any };
-let env: (name: string, fallback?: string) => string;
 
-// --- MIME types ---
+// --- Help message ---
+
+const HELP = `
+Vessel — AI coding agent with a chat UI
+
+USAGE
+  vessel [options]
+
+OPTIONS
+  -h, --help    Show this help message
+
+ENVIRONMENT VARIABLES
+
+  VESSEL_DATA_DIR      Directory for the SQLite database, session
+                       files, agent workspace, and MCP config.
+                       Default: <cwd>/data
+
+  VESSEL_PORT          Port the server listens on.
+                       Default: 3000
+
+  VESSEL_HOST          Hostname the server binds to.
+                       Default: 0.0.0.0
+
+  VESSEL_IN_MEMORY_DB  Set to "1" to use an in-memory SQLite database
+                       instead of the on-disk file. Intended for E2E
+                       testing only — data is lost on process exit.
+                       Default: (unset, uses on-disk DB)
+
+  JWT_SECRET           Secret key for signing JWT session tokens.
+                       If unset, a random secret is generated on each
+                       startup (tokens won't survive restarts).
+
+  LOG_LEVEL            Logging verbosity. One of: trace, debug, info,
+                       warn, error, fatal. Default: debug (dev),
+                       error (production)
+
+  PI_PACKAGE_DIR      Directory where package.json lives for the
+                       pi-coding-agent SDK. Set automatically in
+                       standalone mode.
+
+  ZEROBOX_BIN          Path to the zerobox binary for sandboxed
+                       code execution. Set automatically in
+                       standalone mode.
+`;
 
 const MIME_TYPES: Record<string, string> = {
     ".js": "application/javascript",
@@ -87,7 +129,51 @@ function serveEmbeddedAsset(pathname: string): Response | null {
     });
 }
 
+// --- Zerobox binary extraction ---
+
+/**
+ * Extract the embedded zerobox binary to disk if not already present.
+ *
+ * $bunfs files can't be exec'd by child processes, so zerobox must
+ * be extracted to a real filesystem path. The filename includes a
+ * content hash so upgrades trigger re-extraction.
+ *
+ * @param dataDir - The data directory to extract the binary into
+ */
+async function extractZerobox(dataDir: string): Promise<void> {
+    if (!zeroboxBinPath) return;
+
+    try {
+        const hashMatch = zeroboxBinPath.match(/zerobox-([a-z0-9]+)/);
+        const hash = hashMatch?.[1] ?? "unknown";
+        const extractedBin = resolve(dataDir, `.zerobox-bin-${hash}`);
+        if (!existsSync(extractedBin)) {
+            // 50 MiB max — zerobox binaries are ~18 MiB
+            const MAX_ZEROBOX_SIZE = 50 * 1024 * 1024;
+            const embeddedFile = Bun.file(zeroboxBinPath);
+            if ((embeddedFile.size ?? 0) > MAX_ZEROBOX_SIZE) {
+                throw new Error(`Embedded zerobox binary too large: ${embeddedFile.size} bytes`);
+            }
+            // size checked above against MAX_ZEROBOX_SIZE
+            // oxlint-disable-next-line secure-coding/no-unlimited-resource-allocation
+            const bytes = await embeddedFile.arrayBuffer();
+            writeFileSync(extractedBin, Buffer.from(bytes));
+            chmodSync(extractedBin, 0o755);
+        }
+        process.env.ZEROBOX_BIN = extractedBin;
+    } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[zerobox] Failed to extract embedded binary: ${msg}`);
+    }
+}
+
 // --- Start the server ---
+
+// Check for --help / -h before any I/O
+if (process.argv.includes("--help") || process.argv.includes("-h")) {
+    console.log(HELP);
+    process.exit(0);
+}
 
 void (async () => {
     const dataDir = resolve(process.env.VESSEL_DATA_DIR || resolve(process.cwd(), "data"));
@@ -107,43 +193,16 @@ void (async () => {
         process.env.PI_PACKAGE_DIR = dataDir;
     }
 
-    // $bunfs files can't be exec'd by child processes — extract zerobox
-    // to disk. Filename includes content hash for upgrade re-extraction.
-    if (zeroboxBinPath) {
-        try {
-            const hashMatch = zeroboxBinPath.match(/zerobox-([a-z0-9]+)/);
-            const hash = hashMatch?.[1] ?? "unknown";
-            const extractedBin = resolve(dataDir, `.zerobox-bin-${hash}`);
-            if (!existsSync(extractedBin)) {
-                // 50 MiB max — zerobox binaries are ~18 MiB
-                const MAX_ZEROBOX_SIZE = 50 * 1024 * 1024;
-                const embeddedFile = Bun.file(zeroboxBinPath);
-                if ((embeddedFile.size ?? 0) > MAX_ZEROBOX_SIZE) {
-                    throw new Error(`Embedded zerobox binary too large: ${embeddedFile.size} bytes`);
-                }
-                // size checked above against MAX_ZEROBOX_SIZE
-                // oxlint-disable-next-line secure-coding/no-unlimited-resource-allocation
-                const bytes = await embeddedFile.arrayBuffer();
-                writeFileSync(extractedBin, Buffer.from(bytes));
-                chmodSync(extractedBin, 0o755);
-            }
-            process.env.ZEROBOX_BIN = extractedBin;
-        } catch (e: unknown) {
-            const msg = e instanceof Error ? e.message : String(e);
-            console.error(`[zerobox] Failed to extract embedded binary: ${msg}`);
-        }
-    }
+    await extractZerobox(dataDir);
 
     // Dynamic import: pi-coding-agent reads package.json at module-evaluation time,
     // so PI_PACKAGE_DIR must already be set (done above).
     const handlerModule = await import("../../build/handler.js");
     getHandler = handlerModule.getHandler;
-    const envModule = await import("../../build/env.js");
-    env = envModule.env;
 
     const { fetch: svelteFetch, websocket } = getHandler();
-    const port = env("PORT", "3000");
-    const host = env("HOST", "0.0.0.0");
+    const port = process.env.VESSEL_PORT ?? "3000";
+    const host = process.env.VESSEL_HOST ?? "0.0.0.0";
 
     let bunServer: ReturnType<typeof Bun.serve>;
 

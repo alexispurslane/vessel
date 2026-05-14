@@ -3,6 +3,7 @@
  */
 import type { Handle, RequestEvent } from "@sveltejs/kit";
 import { validateSessionToken, SESSION_COOKIE_NAME, sessionCookie } from "$lib/server/auth/index.js";
+import { isInMemoryDb } from "$lib/server/db/index.js";
 import { parse } from "cookie";
 
 // Legacy cookie name kept temporarily so existing sessions survive the TalkAI → Vessel rename.
@@ -104,6 +105,8 @@ export const handle: Handle = async ({ event, resolve }) => {
 
     // 3. Protect routes
     if (!event.locals.authenticated) {
+        // Test endpoints bypass auth when running with in-memory DB
+        if (isInMemoryDb && url.pathname.startsWith("/api/test/")) return resolve(event);
         if (url.pathname.startsWith("/api/")) return jsonError("Unauthorized", 401);
         if (isStaticAsset(url.pathname)) return resolve(event);
         return redirect("/login");

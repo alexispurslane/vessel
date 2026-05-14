@@ -14,6 +14,7 @@
 4. Always prefer shadcn-provided tooltips over built-in HTML tooltips
 5. Adhere to Svelte 5 + shadcn-svelte best-practices, for a pristine codebase.
 6. Make sure all types that represent the domain model, or a contract between the client and server, are placed in `src/lib/types` for import from both sides
+7. Always use `apiHandler` (from `$lib/server/api-errors`) for API route handlers that accept a JSON body. It handles JSON parsing, Zod validation, and error formatting — never re-implement that pipeline manually. For bodyless handlers (GET, DELETE with params only), use `tryApi`.
 
 # Code Quality
 

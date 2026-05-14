@@ -64,8 +64,15 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 
     if (!res.ok) {
         if (res.status === 401) {
-            window.location.href = "/login";
-            throw new ApiError(401, "Unauthorized");
+            // Don't hard-redirect on /login — the form needs the error
+            // message; a redirect would wipe the auth store's state.
+            if (window.location.pathname !== "/login") {
+                window.location.href = "/login";
+            }
+            /* eslint-disable @typescript-eslint/no-unsafe-assignment */
+            const body: { error: string } = await res.json().catch((): { error: string } => ({ error: "Unauthorized" }));
+            /* eslint-enable @typescript-eslint/no-unsafe-assignment */
+            throw new ApiError(401, body.error || "Unauthorized");
         }
         /* eslint-disable @typescript-eslint/no-unsafe-assignment */
         const body: { error: string } = await res.json().catch((): { error: string } => ({ error: "Unknown error" }));

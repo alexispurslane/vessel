@@ -13,15 +13,27 @@ const DB_PATH = join(DATA_DIR, "vessel.db");
 let _db: Database | null = null;
 
 /**
+ * Whether the database is running in-memory for testing.
+ * Set when `VESSEL_IN_MEMORY_DB=1` is present in the environment.
+ */
+export const isInMemoryDb = process.env.VESSEL_IN_MEMORY_DB === "1";
+
+/**
  * Get the singleton SQLite database, running schema migrations on first call.
+ *
+ * When `VESSEL_IN_MEMORY_DB=1` is set, opens an in-memory database
+ * instead of the on-disk file. This is intended for E2E testing only —
+ * the database is ephemeral and will not survive a process restart.
  *
  * @returns The Database instance
  */
 export function getDb(): Database {
     if (_db) return _db;
 
-    _db = new Database(DB_PATH);
-    _db.run("PRAGMA journal_mode = WAL");
+    _db = isInMemoryDb ? new Database(":memory:") : new Database(DB_PATH);
+
+    // WAL mode is irrelevant for in-memory databases — skip it.
+    if (!isInMemoryDb) _db.run("PRAGMA journal_mode = WAL");
     _db.run("PRAGMA foreign_keys = ON");
 
     // Run schema migration
