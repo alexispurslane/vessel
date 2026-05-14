@@ -34,6 +34,12 @@
    <flagged code>
    ```
 
+# Testing
+
+1. Testing is done using `@playwright/test` and the e2e/bdd.ts custom library, which you should consult for usage.
+2. Run tests with `bun run test:e2e` exclusively.
+3. For failing tests, traces can be found in test-results/test-name-id/trace.zip, which will give you frame snapshot entires with html dumps, as well as the actions taken.
+
 # Warnings
 
 YOU ARE ABSOLUTELY BANNED FROM EVER TOUCHING GIT, ESPECIALLY GIT CHECKOUT OR RESET, WITHOUT EXPRESS PERMISSION

@@ -57,6 +57,20 @@ export interface MockTurn {
     tools?: MockToolCall[];
     /** Whether to emit a text paragraph before tool calls (or as the main content). */
     text?: boolean;
+    /**
+     * Number of text paragraphs to emit for this turn.
+     * Defaults to 1-2 random paragraphs when not set.
+     * Set to a high number (e.g. 30) to create a long-running
+     * text stream for testing stream recovery on reload.
+     */
+    textParagraphs?: number;
+    /**
+     * Number of thinking paragraphs to emit before any output.
+     * Defaults to 1 when not set.
+     * Set to a high number (e.g. 20) to create a long-running
+     * thinking stream for testing stream recovery on reload.
+     */
+    thinkingParagraphs?: number;
 }
 
 /**
@@ -68,6 +82,12 @@ export interface MockTurn {
  */
 export interface MockTurnPlan {
     turns: MockTurn[];
+    /**
+     * Override the inter-chunk delay in milliseconds.
+     * Defaults to 5-15ms random. Set higher (e.g. 50) to slow
+     * down streaming so tests can reload mid-stream.
+     */
+    chunkDelayMs?: number;
 }
 
 /** Lorem ipsum paragraphs for generating text deltas. */
@@ -294,11 +314,14 @@ function appendToolCallChunks(
 function appendThinkingChunks(
     lines: string[],
     makeChunk: (delta: Record<string, unknown>, finishReason: string | null) => string,
+    numParagraphs = 1,
 ): void {
-    const paragraph = randomFrom(LOREM);
-    const chunks = splitIntoChunks(paragraph, 2, 5);
-    for (const chunk of chunks) {
-        lines.push(makeChunk({ reasoning_content: chunk + " " }, null));
+    for (let p = 0; p < numParagraphs; p++) {
+        const paragraph = randomFrom(LOREM);
+        const chunks = splitIntoChunks(paragraph, 2, 5);
+        for (const chunk of chunks) {
+            lines.push(makeChunk({ reasoning_content: chunk + " " }, null));
+        }
     }
     lines.push(makeChunk({ reasoning_content: "\n\n" }, null));
 }
@@ -358,7 +381,7 @@ function buildTurnResponse(modelId: string, turn: MockTurn): string[] {
     lines.push(makeChunk({ role: "assistant" }, null));
 
     // Thinking before any output
-    appendThinkingChunks(lines, makeChunk);
+    appendThinkingChunks(lines, makeChunk, turn.thinkingParagraphs);
 
     if (hasTools) {
         // Text before tool calls (optional)
@@ -375,7 +398,7 @@ function buildTurnResponse(modelId: string, turn: MockTurn): string[] {
         lines.push(makeChunk({}, "tool_calls"));
     } else {
         // Text-only turn — end the loop
-        const numParagraphs = 1 + Math.floor(Math.random() * 2);
+        const numParagraphs = turn.textParagraphs ?? (1 + Math.floor(Math.random() * 2));
         for (let p = 0; p < numParagraphs; p++) {
             appendTextParagraphChunks(lines, makeChunk, p === numParagraphs - 1);
         }
@@ -404,8 +427,9 @@ function buildTurnResponse(modelId: string, turn: MockTurn): string[] {
  *
  * @param lines - The SSE data lines to send
  * @param res - The HTTP response to write to
+ * @param chunkDelayMs - Override inter-chunk delay (default: 5-15ms random)
  */
-function streamLines(lines: string[], res: ServerResponse): void {
+function streamLines(lines: string[], res: ServerResponse, chunkDelayMs?: number): void {
     let i = 0;
 
     const sendNext = (): void => {
@@ -415,7 +439,7 @@ function streamLines(lines: string[], res: ServerResponse): void {
         }
         res.write(lines[i] + "\n\n");
         i++;
-        const delay = 5 + Math.floor(Math.random() * 15);
+        const delay = chunkDelayMs ?? (5 + Math.floor(Math.random() * 15));
         setTimeout(sendNext, delay);
     };
 
@@ -486,7 +510,7 @@ function handleCompletions(req: IncomingMessage, res: ServerResponse): void {
         });
 
         const lines = buildTurnResponse(modelId, turn);
-        streamLines(lines, res);
+        streamLines(lines, res, plan?.chunkDelayMs);
     });
 }
 

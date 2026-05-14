@@ -70,6 +70,7 @@
         "data-sidebar": "menu-button",
         "data-size": size,
         "data-active": isActive,
+        "aria-current": isActive ? true : undefined,
         ...restProps,
     });
 </script>

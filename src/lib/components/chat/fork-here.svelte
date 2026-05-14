@@ -44,6 +44,8 @@
     onclick={handleClick}
     onkeydown={handleKeydown}
     aria-label="Fork conversation here"
+    data-testid="fork-here-zone"
+    data-active={hovered}
 >
     <div class="fork-here-line">
         <div class="fork-here-dot-line"></div>

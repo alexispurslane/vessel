@@ -128,7 +128,7 @@
     let showActions = $derived(!group.streaming && !navigating && (onregenerate || ondelete));
 </script>
 
-<div class="flex flex-col gap-1.5 w-full font-sans group/tg">
+<div class="flex flex-col gap-1.5 w-full font-sans group/tg" data-testid="thinking-group">
     <details
         class="group rounded-lg border bg-background text-sm"
         open={thinkingIsOpen ?? group.streaming}

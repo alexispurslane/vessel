@@ -80,6 +80,7 @@
 <SidebarMenuItem
     id="sidebar-conv-{conv.id}"
     class={cn(isFocused && "ring-2 ring-ring ring-offset-1 rounded-md")}
+    data-testid="conversation-item"
 >
     <ContextMenu>
         <ContextMenuTrigger>

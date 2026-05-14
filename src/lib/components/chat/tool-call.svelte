@@ -50,12 +50,15 @@
     class={compact
         ? "group/tc rounded border bg-muted/30 text-xs my-1"
         : "group rounded-lg border bg-background text-sm"}
+    data-testid="tool-call"
+    data-tool-name={toolCall.toolName}
 >
     <summary
         class={compact
             ? "flex items-center gap-2 px-2 py-1 cursor-pointer select-none hover:bg-muted/50 transition-colors rounded text-xs"
             : "flex items-center gap-2 px-3 py-1.5 cursor-pointer select-none hover:bg-muted/50 transition-colors rounded-lg text-xs"}
         aria-label="{toolCall.toolName} tool call, {statusLabel}"
+        data-status={toolCall.status}
     >
         <Wrench class="size-3 text-muted-foreground shrink-0" aria-hidden="true" />
         <span class="font-medium shrink-0">{toolCall.toolName}</span>

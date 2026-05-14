@@ -994,6 +994,7 @@
                 ? 'bg-background'
                 : 'bg-background/80 backdrop-blur-sm'}"
             transition:fade={{ duration: isMobile.current ? 0 : 150 }}
+            data-testid="chat-top-bar"
         >
             <!-- Left: Context usage + token counts -->
             <div class="flex items-center {isMobile.current ? 'gap-2' : 'gap-3'}">
@@ -1001,7 +1002,11 @@
                     <Tooltip>
                         <TooltipTrigger>
                             {#snippet child({ props })}
-                                <div {...props} class="flex items-center gap-1.5">
+                                <div
+                                    {...props}
+                                    class="flex items-center gap-1.5"
+                                    aria-label="Context usage ring"
+                                >
                                     <ContextUsageRing
                                         fraction={contextUsageFraction}
                                         size={isMobile.current ? 28 : 22}
@@ -1023,6 +1028,7 @@
                                     <div
                                         {...props}
                                         class="flex items-center gap-1 text-[11px] text-muted-foreground"
+                                        aria-label="Input tokens"
                                     >
                                         <ArrowUp class="size-3" />
                                         <span>{formatTokens(chat.totalInputTokens)}</span>
@@ -1041,6 +1047,7 @@
                                     <div
                                         {...props}
                                         class="flex items-center gap-1 text-[11px] text-muted-foreground"
+                                        aria-label="Output tokens"
                                     >
                                         <ArrowDown class="size-3" />
                                         <span>{formatTokens(chat.totalOutputTokens)}</span>
@@ -1257,11 +1264,19 @@
                             >
                                 <div class="flex flex-col gap-6 p-6">
                                     {#if displayMessages.length === 0}
-                                        <div class="flex items-center justify-center py-24">
+                                        <div
+                                            class="flex items-center justify-center py-24"
+                                            data-testid="empty-chat-state"
+                                        >
                                             <div
                                                 class="flex flex-col items-center gap-4 text-muted-foreground"
+                                                role="status"
+                                                aria-label="No messages yet"
                                             >
-                                                <div class="rounded-full bg-muted p-4">
+                                                <div
+                                                    class="rounded-full bg-muted p-4"
+                                                    aria-hidden="true"
+                                                >
                                                     <Bot
                                                         class="size-8 opacity-60"
                                                         aria-hidden="true"
@@ -1462,6 +1477,7 @@
                                 <div
                                     class="flex items-center gap-2 mb-2 px-3 py-1.5 rounded-md bg-muted/50 text-xs text-muted-foreground border border-muted/50"
                                     transition:fade={{ duration: 150 }}
+                                    data-testid="draft-restore-banner"
                                 >
                                     <Undo2 class="size-3 shrink-0" />
                                     <span class="flex-1">Restored unsent message</span>
@@ -1503,12 +1519,19 @@
                                 onswitchtoglobaldefault={handleSwitchToGlobalDefault}
                             />
                             <!-- Connection status / error -->
-                            <div class="flex items-center gap-1.5 mt-1.5 min-h-4">
+                            <div
+                                class="flex items-center gap-1.5 mt-1.5 min-h-4"
+                                aria-live="polite"
+                                data-testid="connection-status"
+                            >
                                 {#if chat.error}
-                                    <p class="text-xs text-destructive">{chat.error}</p>
+                                    <p class="text-xs text-destructive" role="alert">
+                                        {chat.error}
+                                    </p>
                                 {:else if !chat.connected}
                                     <span
                                         class="flex items-center gap-1.5 text-xs text-muted-foreground"
+                                        role="status"
                                     >
                                         <span
                                             class="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-pulse"
