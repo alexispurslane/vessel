@@ -1,7 +1,10 @@
 import { test, expect } from "@playwright/test";
 import { givenLoggedInUser, sendChatMessage } from "./givens";
 
-test("debug: inspect DOM after navigating to conversation", async ({ page }) => {
+test.describe("sidebar-debug", () => {
+    test.describe.configure({ mode: "serial" });
+
+    test("debug: inspect DOM after navigating to conversation", async ({ page }) => {
   await givenLoggedInUser(page);
   await sendChatMessage(page, "Hello, this is a test!");
   await expect(page).toHaveURL(/\/chat\//, { timeout: 10_000 });
@@ -22,4 +25,5 @@ test("debug: inspect DOM after navigating to conversation", async ({ page }) => 
   });
   // This will appear in the trace's console log
   console.log("CHAT SECTION HTML:", domDump);
+});
 });

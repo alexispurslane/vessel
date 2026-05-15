@@ -7,144 +7,13 @@
 
 import { test, given, expect } from "./bdd";
 import { givenLoggedInUser, seedSql, sendChatMessage, workspaceHasFile } from "./givens";
+import { sendChatAndWait, assertNoConsoleErrors, collectConsoleErrors, expectMessageSequence } from "./whens";
 import { mockTurnPlan } from "./mock-llm-server.js";
-import type { ConsoleMessage } from "@playwright/test";
 
-// The in-memory SQLite DB is shared across all workers.
-// afterEach in the BDD framework resets it, which would wipe data
-// that other workers' tests still need. Serial mode prevents this.
+// Serial mode: each `when` test gets a fresh browser context from the
+// `given` setup, so state from one test doesn't leak to the next.
 test.describe("chat", () => {
   test.describe.configure({ mode: "serial" });
-
-/**
- * Wait for the assistant's response to finish streaming.
- *
- * Polls until the "Stop" button disappears (replaced by the
- * idle send button), indicating the model has finished generating.
- *
- * @param page - The Playwright Page fixture
- * @param timeoutMs - Maximum time to wait (default 30s)
- */
-async function waitForResponse(page: import("@playwright/test").Page, timeoutMs = 30_000): Promise<void> {
-  // Stop button visible during generation; hidden when done
-  await expect(page.getByRole("button", { name: /stop/i })).toBeHidden({ timeout: timeoutMs });
-}
-
-/**
- * Send a chat message and wait for the full agentic response to finish.
- *
- * If starting from the home page, also waits for navigation to /chat/.
- *
- * @param page - The Playwright Page fixture
- * @param message - The message text to send
- * @param timeoutMs - Maximum time to wait for streaming to finish
- */
-async function sendChatAndWait(page: import("@playwright/test").Page, message: string, timeoutMs = 30_000): Promise<void> {
-  const isHomePage = page.url().endsWith("/") || page.url().endsWith("");
-  await sendChatMessage(page, message);
-  if (isHomePage) {
-    // Wait for navigation from home page to /chat/[id]
-    await expect(page).toHaveURL(/\/chat\//, { timeout: 10_000 });
-  }
-  await waitForResponse(page, timeoutMs);
-}
-
-/**
- * Assert that no browser console errors were emitted during the test so far.
- *
- * Collects all `console.error` messages logged on the page and asserts the
- * list is empty.  This is the baseline "no errors" check for happy-path
- * tests — it validates the *UI* didn't produce errors, not just the mock.
- *
- * @param _page - The Playwright Page fixture (unused, kept for API symmetry)
- * @param consoleErrors - The accumulated error list (captured via listener)
- */
-async function assertNoConsoleErrors(
-  _page: import("@playwright/test").Page,
-  consoleErrors: string[],
-): Promise<void> {
-  // Ignore known benign noise from dev tools / HMR
-  const filtered = consoleErrors.filter(
-    (msg) =>
-      !msg.includes("[HMR]") &&
-      !msg.includes("Download the React DevTools"),
-  );
-  expect(filtered, `Unexpected console errors: ${filtered.join("; ")}`).toEqual([]);
-}
-
-/**
- * Set up a console-error collector on the page.
- *
- * Returns the mutable array that will accumulate error messages.
- * Callers should pass this array to `assertNoConsoleErrors`.
- *
- * @param page - The Playwright Page fixture
- * @returns The array that will collect console error messages
- */
-function collectConsoleErrors(page: import("@playwright/test").Page): string[] {
-  const errors: string[] = [];
-  page.on("console", (msg: ConsoleMessage) => {
-    if (msg.type() === "error") {
-      errors.push(msg.text());
-    }
-  });
-  return errors;
-}
-
-/**
- * Verify an ordered sequence of chat message texts, skipping thinking
- * blocks and tool calls.
- *
- * Finds article elements with aria-label "You message" or
- * "Assistant message", scopes text reads to the `[id^='msg-']` content
- * div (to avoid matching thinking-section text), and asserts each
- * message's role and text against the expected sequence.
- *
- * Uses `[role='article'][aria-label]` rather than `article[aria-label]`
- * because chat messages are rendered as `<div role="article">` not
- * `<article>` elements.
- *
- * @param page - The Playwright Page fixture
- * @param expected - Ordered list of { role, text } entries.
- *   `role` is "user" or "assistant". `text` is a string (exact match)
- *   or RegExp (partial match via toContainText).
- */
-async function expectMessageSequence(
-  page: import("@playwright/test").Page,
-  expected: Array<{ role: "user" | "assistant"; text: string | RegExp }>,
-): Promise<void> {
-  // Track how many of each role we've matched so far for .nth() selection
-  const roleIndex: Record<string, number> = { user: 0, assistant: 0 };
-
-  for (let matchIdx = 0; matchIdx < expected.length; matchIdx++) {
-    const expectedMsg = expected[matchIdx];
-    const roleName = expectedMsg.role === "user" ? "You" : "Assistant";
-    const ariaLabel = `${roleName} message`;
-    const nth = roleIndex[expectedMsg.role]!;
-
-    // Use getByRole for ARIA-aware matching (handles <div role="article">)
-    const articles = page.getByRole("article", { name: ariaLabel });
-    // Wait for at least nth+1 articles to exist
-    await expect(async () => {
-      const count = await articles.count();
-      expect(
-        count,
-        `Expected at least ${nth + 1} "${ariaLabel}" article(s) for message ${matchIdx} but found ${count}`,
-      ).toBeGreaterThanOrEqual(nth + 1);
-    }).toPass({ timeout: 10_000 });
-
-    const article = articles.nth(nth);
-
-    // Scope text check to the [id^='msg-'] div to avoid thinking-section text
-    const contentDiv = article.locator("[id^='msg-']");
-    if (typeof expectedMsg.text === "string") {
-      await expect(contentDiv).toContainText(expectedMsg.text);
-    } else {
-      await expect(contentDiv).toContainText(expectedMsg.text);
-    }
-    roleIndex[expectedMsg.role]!++;
-  }
-}
 
 given("I am on the home page", async ({ page }) => {
     await givenLoggedInUser(page);
@@ -245,8 +114,13 @@ given("I am on a chat page with sandbox on", async ({ page }) => {
       const groupSummary = thinkingGroup.locator("summary").first();
       await groupSummary.click();
 
-      // Verify each bash tool call within the thinking group contains its command
+      // Expand each tool call <details> so content is visible
       const bashCalls = thinkingGroup.locator('[data-testid="tool-call"][data-tool-name="bash"]');
+      const count = await bashCalls.count();
+      for (let i = 0; i < count; i++) {
+        await bashCalls.nth(i).evaluate((el: HTMLDetailsElement) => { el.open = true; });
+      }
+
       await expect(bashCalls.filter({ hasText: /ls/ }).first()).toBeVisible();
       await expect(bashCalls.filter({ hasText: /whoami/ }).first()).toBeVisible();
       await expect(bashCalls.filter({ hasText: /pwd/ }).first()).toBeVisible();
@@ -515,15 +389,8 @@ given("I am on a chat page and the model starts generating", async ({ page }) =>
     });
   });
 });
-// Test: Stream recovery — reload mid-stream restores the in-flight message
-//
-// Every scenario follows the same invariant:
-//   The in-flight streaming message survives a page reload.
-//   Its partial content (text, thinking, or tool call) is restored
-//   and new content continues arriving until completion.
-//
-// We always confirm we ARE mid-stream (Stop button visible)
-// before capturing partial content and reloading.
+// Stream recovery: the in-flight streaming message survives a page reload.
+// Partial content is restored and new content continues arriving.
 
 given("I am on a chat page and the model is streaming a long text response", async ({ page }) => {
     await givenLoggedInUser(page);
@@ -627,11 +494,8 @@ given("I am on a chat page and the model is streaming a long text response", asy
     });
   });
 });
-// Test: Stream recovery — reload mid-tool-call
-//
-// Tool calls execute server-side (e.g. bash sleep 10), giving us a
-// long window where the tool is "running". Reloading during that
-// window must restore the running tool call via stream_recovery.
+// Stream recovery: reload mid-tool-call.
+// Server-side tool calls give a long running window; reload must restore.
 
 given("I am on a chat page and the model is executing a slow tool call", async ({ page }) => {
     await givenLoggedInUser(page);

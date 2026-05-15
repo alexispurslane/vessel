@@ -1,6 +1,6 @@
 import { TEST_PASSWORD, baselineSeedSql } from "./global-setup";
-import type { Page } from "@playwright/test";
-import type { Locator } from "@playwright/test";
+import { expect } from "@playwright/test";
+import type { Page, Locator } from "@playwright/test";
 
 /** Base URL for the test dev server (matches playwright.config.ts). */
 const BASE_URL = "http://localhost:5174";
@@ -63,7 +63,9 @@ export async function typeInCodeMirror(editor: Locator, text: string): Promise<v
 export async function sendChatMessage(page: Page, text: string): Promise<void> {
     const input = page.getByRole("textbox", { name: /message/i });
     await typeInCodeMirror(input, text);
-    await page.getByRole("button", { name: /send/i }).click();
+    const sendBtn = page.getByRole("button", { name: /send/i });
+    await expect(sendBtn).toBeEnabled({ timeout: 5_000 });
+    await sendBtn.click();
 }
 
 /**
