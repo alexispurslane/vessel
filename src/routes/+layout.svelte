@@ -27,6 +27,7 @@
     import AppSidebar from "$lib/components/sidebar/index.svelte";
     import SwipeToOpen from "$lib/components/sidebar/swipe-to-open.svelte";
     import ShortcutsHelp from "$lib/components/shortcuts-help/ShortcutsHelp.svelte";
+    import { LinuxSandboxWarning } from "$lib/components/linux-sandbox-warning/index.js";
     import {
         handleGlobalKeydown,
         SHORTCUT_EVENT_TYPE,
@@ -160,6 +161,8 @@
         };
     });
 
+    let isLinux: boolean = $derived(page.data.isLinux ?? false);
+
     let { children } = $props<{ children: import("svelte").Snippet }>();
 </script>
 
@@ -208,9 +211,12 @@
                     </div>
                 </header>
 
-                <main class="flex flex-1 flex-col min-h-0 overflow-auto">
-                    {@render children()}
-                </main>
+                <div class="flex flex-1 flex-col min-h-0 overflow-auto">
+                    <LinuxSandboxWarning {isLinux} />
+                    <main class="flex-1 min-h-0 overflow-auto">
+                        {@render children()}
+                    </main>
+                </div>
             </SidebarInset>
         </SwipeToOpen>
     </SidebarProvider>

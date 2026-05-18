@@ -15,8 +15,10 @@
     import { Separator } from "$lib/components/ui/separator";
     import { Switch } from "$lib/components/ui/switch";
     import { Spinner } from "$lib/components/ui/spinner";
+    import { Alert, AlertTitle, AlertDescription } from "$lib/components/ui/alert/index.js";
     import { getSettings, updateSettings, restartAllSessions } from "$lib/api.js";
     import Check from "@lucide/svelte/icons/check";
+    import AlertTriangle from "@lucide/svelte/icons/alert-triangle";
     import {
         PillList,
         PathAutocompletePillList,
@@ -24,6 +26,11 @@
         type PillItem,
         type KeyValueItem,
     } from "$lib/components/pill-list/index.js";
+
+    import { page } from "$app/state";
+
+    /** Whether the server is running on Linux (from layout server data). */
+    let isLinux: boolean = $derived(page.data.isLinux ?? false);
 
     // --- Sandbox settings state ---
     let sandboxEnabled = $state(true);
@@ -92,7 +99,7 @@
     function loadSandboxSettings() {
         sandboxSettingsLoading = true;
         try {
-            sandboxEnabled = appSettings["sandbox.enabled"] !== "false";
+            sandboxEnabled = isLinux ? false : appSettings["sandbox.enabled"] !== "false";
             sandboxAllowNet = appSettings["sandbox.allowNet"] === "true";
             sandboxAllowAllDomains = appSettings["sandbox.allowAllDomains"] === "true";
             loadPillListsFromSettings();
@@ -106,6 +113,9 @@
     }
 
     async function saveSandboxSettings() {
+        // No-op on Linux — sandboxing is forcibly disabled
+        if (isLinux) return;
+
         sandboxSettingsError = null;
         sandboxSettingsSaved = false;
         try {
@@ -183,6 +193,20 @@
                     <p class="text-sm text-green-600">Settings saved.</p>
                 {/if}
 
+                {#if isLinux}
+                    <!-- Linux: sandboxing is forcibly disabled -->
+                    <Alert variant="destructive" class="mb-4">
+                        <AlertTriangle class="size-4" />
+                        <AlertTitle>Sandboxing unavailable on Linux</AlertTitle>
+                        <AlertDescription>
+                            Due to a known upstream bug, the Zerobox sandbox runtime does not work
+                            properly on Linux yet. All sandboxing and permissions are disabled —
+                            agent tools run without isolation. This setting is locked and cannot be
+                            changed.
+                        </AlertDescription>
+                    </Alert>
+                {/if}
+
                 <!-- Enable/Disable -->
                 <div class="flex items-center justify-between rounded-lg border p-4">
                     <div class="space-y-0.5">
@@ -192,10 +216,10 @@
                             execution of AI-generated commands and file operations.
                         </p>
                     </div>
-                    <Switch bind:checked={sandboxEnabled} />
+                    <Switch bind:checked={sandboxEnabled} disabled={isLinux} />
                 </div>
 
-                {#if sandboxEnabled}
+                {#if sandboxEnabled && !isLinux}
                     <!-- Extra Read Paths -->
                     <div class="rounded-lg border p-4 space-y-3">
                         <div>
@@ -366,15 +390,17 @@
                 {/if}
 
                 <!-- Save Button -->
-                <div class="flex justify-end pt-2">
-                    <Button onclick={saveSandboxSettings}>
-                        {#if sandboxSettingsSaved}
-                            <Check class="mr-1.5 h-4 w-4" /> Saved
-                        {:else}
-                            Save Sandbox Settings
-                        {/if}
-                    </Button>
-                </div>
+                {#if !isLinux}
+                    <div class="flex justify-end pt-2">
+                        <Button onclick={saveSandboxSettings}>
+                            {#if sandboxSettingsSaved}
+                                <Check class="mr-1.5 h-4 w-4" /> Saved
+                            {:else}
+                                Save Sandbox Settings
+                            {/if}
+                        </Button>
+                    </div>
+                {/if}
             </div>
         {/if}
     </CardContent>

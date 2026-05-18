@@ -24,6 +24,9 @@
     } from "./useConversationSecuritySettings.svelte.ts";
     import Shield from "@lucide/svelte/icons/shield";
     import Check from "@lucide/svelte/icons/check";
+    import { Alert, AlertTitle, AlertDescription } from "$lib/components/ui/alert/index.js";
+    import AlertTriangle from "@lucide/svelte/icons/alert-triangle";
+    import { page } from "$app/state";
 
     interface Props {
         /** The conversation ID */
@@ -31,6 +34,9 @@
     }
 
     let { conversationId }: Props = $props();
+
+    /** Whether the server is running on Linux (from layout server data). */
+    let isLinux: boolean = $derived(page.data.isLinux ?? false);
 
     const s: ConversationSecuritySettingsState = useConversationSecuritySettings(
         () => conversationId
@@ -63,19 +69,36 @@
                     </p>
                 {/if}
 
+                {#if isLinux}
+                    <!-- Linux: sandboxing is forcibly disabled -->
+                    <Alert variant="destructive" class="mb-2">
+                        <AlertTriangle class="size-4" />
+                        <AlertTitle>Sandboxing unavailable</AlertTitle>
+                        <AlertDescription>
+                            Due to a known upstream bug, the Zerobox sandbox runtime does not work
+                            properly on Linux. Sandboxing is disabled and cannot be enabled.
+                        </AlertDescription>
+                    </Alert>
+                {/if}
+
                 <!-- Sandbox Enabled -->
                 <SettingCard
                     label="Sandbox"
-                    description="Control whether this conversation uses a sandbox."
+                    description={isLinux
+                        ? "Disabled on Linux due to a known upstream bug in the Zerobox runtime."
+                        : "Control whether this conversation uses a sandbox."}
                 >
                     <TriStateToggle
-                        value={s.sandboxEnabledState}
+                        value={isLinux ? false : s.sandboxEnabledState}
+                        disabled={isLinux}
                         options={[
                             { value: null, label: "Inherit" },
                             { value: true, label: "On" },
                             { value: false, label: "Off" },
                         ]}
-                        onChange={(v) => (s.sandboxEnabledState = v as boolean | null)}
+                        onChange={isLinux
+                            ? () => {}
+                            : (v) => (s.sandboxEnabledState = v as boolean | null)}
                     />
                 </SettingCard>
 
@@ -107,7 +130,7 @@
                     />
                 {/if}
 
-                {#if s.sandboxEnabledState !== false}
+                {#if s.sandboxEnabledState !== false && !isLinux}
                     <!-- Extra Read Paths -->
                     <SwitchSettingCard
                         label="Read Paths"

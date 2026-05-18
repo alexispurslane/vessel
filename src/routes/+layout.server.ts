@@ -1,4 +1,5 @@
 import { userExists, getUsername } from "$lib/server/auth/index.js";
+import { IS_LINUX } from "$lib/server/agent/sandbox-factory.js";
 
 /**
  * Server-side auth check — runs during SSR so the layout can render
@@ -20,5 +21,6 @@ export const load = ({ locals }: { locals: App.Locals }) => {
             authenticated: locals.authenticated,
             username: setup ? (locals.username ?? getUsername() ?? undefined) : undefined,
         },
+        isLinux: IS_LINUX,
     };
 };

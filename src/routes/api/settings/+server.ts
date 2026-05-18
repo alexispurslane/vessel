@@ -2,6 +2,7 @@ import { json } from "@sveltejs/kit";
 import { z } from "zod";
 import { getDb } from "$lib/server/db/index.js";
 import { apiHandler, tryApi } from "$lib/server/api-errors.js";
+import { IS_LINUX } from "$lib/server/agent/sandbox-factory.js";
 
 const PutBody = z.record(z.string(), z.string());
 
@@ -32,6 +33,12 @@ export const GET = tryApi(() => {
  * Body: { key1: "value1", key2: "value2", ... }
  */
 export const PUT = apiHandler(PutBody, ({ body }) => {
+    // On Linux, force sandbox.enabled to "false" regardless of what the client
+    // sent — the Zerobox runtime doesn't work properly on Linux (upstream bug).
+    if (IS_LINUX) {
+        body["sandbox.enabled"] = "false";
+    }
+
     const db = getDb();
     const upsert = db.prepare(
         `INSERT INTO settings (key, value) VALUES (?, ?)

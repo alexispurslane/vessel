@@ -5,6 +5,7 @@ import { getDb } from "$lib/server/db/index.js";
 import {
     loadConversationSettingsFromDb,
     saveConversationSettingsToDb,
+    IS_LINUX,
 } from "$lib/server/agent/sandbox-factory.js";
 import { restartSession } from "$lib/server/agent/session-store.js";
 import type { ConversationSettings } from "$lib/types.js";
@@ -59,8 +60,13 @@ export const PUT = apiHandler(PutBody, ({ body, event }) => {
     // Build a clean ConversationSettings object from the validated input
     const settings: ConversationSettings = {};
 
-    // Only include fields that were explicitly provided
-    if (body.sandboxEnabled !== undefined) settings.sandboxEnabled = body.sandboxEnabled;
+    // On Linux, force sandboxEnabled off because the Zerobox runtime
+    // is broken due to an upstream bug.
+    if (IS_LINUX) {
+        settings.sandboxEnabled = false;
+    } else if (body.sandboxEnabled !== undefined) {
+        settings.sandboxEnabled = body.sandboxEnabled;
+    }
     if (body.extraReadPaths !== undefined) settings.extraReadPaths = body.extraReadPaths;
     if (body.extraWritePaths !== undefined) settings.extraWritePaths = body.extraWritePaths;
     if (body.allowNet !== undefined) settings.allowNet = body.allowNet;

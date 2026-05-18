@@ -27,7 +27,7 @@ import { SESSIONS_DIR } from "$lib/server/data-dir.js";
 
 // --- Constants ---
 
-const IS_LINUX = process.platform === "linux";
+export const IS_LINUX = process.platform === "linux";
 
 // --- Linux bash config workaround ---
 
@@ -248,6 +248,10 @@ function resolveNetDomains(domains: string[]): boolean | string[] {
  * @returns The resolved sandbox policy, or null if sandboxing is disabled.
  */
 export function loadSandboxPolicyFromDb(conversationSettings?: ConversationSettings | null): SandboxPolicy | null {
+    // Zerobox sandbox runtime does not work properly on Linux due to an
+    // upstream bug. Force sandboxing off and return null immediately.
+    if (IS_LINUX) return null;
+
     // Per-conversation sandboxEnabled takes precedence; null = use global default
     const globalEnabled = getSetting(SANDBOX_SETTINGS_KEYS.ENABLED);
     const enabled = conversationSettings?.sandboxEnabled ?? (globalEnabled !== "false");

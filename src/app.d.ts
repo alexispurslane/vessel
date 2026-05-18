@@ -16,6 +16,8 @@ declare global {
                 authenticated: boolean;
                 username?: string;
             };
+            /** Whether the server is running on Linux. */
+            isLinux?: boolean;
         }
         // interface PageState {}
         // interface Platform {}

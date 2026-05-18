@@ -8,9 +8,11 @@
         value: unknown;
         options: Option[];
         onChange: (value: unknown) => void;
+        /** Whether the toggle is disabled (no interaction, dimmed appearance). */
+        disabled?: boolean;
     }
 
-    let { value, options, onChange }: Props = $props();
+    let { value, options, onChange, disabled = false }: Props = $props();
 </script>
 
 <div class="flex gap-1.5">
@@ -18,8 +20,11 @@
         <button
             class="px-2.5 py-1 text-xs rounded-md border transition-colors {value === option.value
                 ? 'bg-primary text-primary-foreground'
-                : 'hover:bg-muted'}"
-            onclick={() => onChange(option.value)}
+                : 'hover:bg-muted'} {disabled ? 'opacity-50 cursor-not-allowed' : ''}"
+            onclick={() => {
+                if (!disabled) onChange(option.value);
+            }}
+            {disabled}
         >
             {option.label}
         </button>
