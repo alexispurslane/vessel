@@ -124,7 +124,7 @@ export async function expectMessageSequence(
         const expectedMsg = expected[matchIdx];
         const roleName = expectedMsg.role === "user" ? "You" : "Assistant";
         const ariaLabel = `${roleName} message`;
-        const nth = roleIndex[expectedMsg.role]!;
+        const nth = roleIndex[expectedMsg.role];
 
         const articles = page.getByRole("article", { name: ariaLabel });
         await expect(async () => {
@@ -143,7 +143,7 @@ export async function expectMessageSequence(
         } else {
             await expect(contentDiv).toContainText(expectedMsg.text);
         }
-        roleIndex[expectedMsg.role]!++;
+        roleIndex[expectedMsg.role]++;
     }
 }
 

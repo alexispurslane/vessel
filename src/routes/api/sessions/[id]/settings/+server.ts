@@ -54,12 +54,12 @@ export const GET = tryApi(({ params }) => {
  * Replaces all settings for this conversation (full replacement, not partial merge).
  * If sandbox-affecting settings changed, restarts the in-memory session.
  */
-export const PUT = apiHandler(PutBody, ({ body, event }) => {
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    const id = event.params.id!;
-    // Build a clean ConversationSettings object from the validated input
-    const settings: ConversationSettings = {};
-
+/**
+ * Copy defined body fields into the settings object.
+ * @param settings - Mutable settings object to populate
+ * @param body - Validated request body
+ */
+function applyBodyToSettings(settings: ConversationSettings, body: z.infer<typeof PutBody>): void {
     // On Linux, force sandboxEnabled off because the Zerobox runtime
     // is broken due to an upstream bug.
     if (IS_LINUX) {
@@ -67,6 +67,7 @@ export const PUT = apiHandler(PutBody, ({ body, event }) => {
     } else if (body.sandboxEnabled !== undefined) {
         settings.sandboxEnabled = body.sandboxEnabled;
     }
+
     if (body.extraReadPaths !== undefined) settings.extraReadPaths = body.extraReadPaths;
     if (body.extraWritePaths !== undefined) settings.extraWritePaths = body.extraWritePaths;
     if (body.allowNet !== undefined) settings.allowNet = body.allowNet;
@@ -79,6 +80,14 @@ export const PUT = apiHandler(PutBody, ({ body, event }) => {
     if (body.customSystemPrompt !== undefined) settings.customSystemPrompt = body.customSystemPrompt;
     if (body.appendSystemPrompt !== undefined) settings.appendSystemPrompt = body.appendSystemPrompt;
     if (body.enabledMcpServers !== undefined) settings.enabledMcpServers = body.enabledMcpServers;
+}
+
+export const PUT = apiHandler(PutBody, ({ body, event }) => {
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const id = event.params.id!;
+    const settings: ConversationSettings = {};
+
+    applyBodyToSettings(settings, body);
 
     const db = getDb();
 

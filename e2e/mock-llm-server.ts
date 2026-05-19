@@ -310,6 +310,7 @@ function appendToolCallChunks(
  *
  * @param lines - The SSE lines array to append to
  * @param makeChunk - The chunk factory function
+ * @param numParagraphs - Number of thinking paragraphs to generate
  */
 function appendThinkingChunks(
     lines: string[],
