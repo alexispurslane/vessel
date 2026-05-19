@@ -10,6 +10,7 @@ import {
     uploadFile,
     updateConversationSettings,
     listWorkspaceFiles,
+    listCanvasFiles,
 } from "$lib/api.js";
 import type { ConversationSettings } from "$lib/types.js";
 import type { PageData } from "./$types.js";
@@ -81,6 +82,10 @@ export interface ChatHandlerContext {
     setDraftRestored: (v: boolean) => void;
     /** Setter for the conversation ID the draft was restored for */
     setDraftRestoredForId: (v: string | null) => void;
+    /** Setter for canvas-ized file paths */
+    setCanvasFiles: (v: Set<string>) => void;
+    /** Getter for canvas-ized file paths */
+    getCanvasFiles: () => Set<string>;
     /** Callback to scroll to a hash-anchored message */
     scrollToHashMessage: () => void;
     /** Callback to hide the top bar */
@@ -356,6 +361,13 @@ export function createConnectStreamHandler(ctx: ChatHandlerContext) {
             .then((result) => {
                 console.log(`[chat-lifecycle] sandboxFiles from API: length=${String(result.files.length)}, files=${JSON.stringify(result.files)}`);
                 ctx.setSandboxFiles(result.files);
+            })
+            .catch(() => { /* non-critical */ });
+
+        // Refresh canvas files list so the file pills show the correct icons.
+        listCanvasFiles(currentId)
+            .then((result) => {
+                ctx.setCanvasFiles(new Set(result.canvases.map((c) => c.filePath)));
             })
             .catch(() => { /* non-critical */ });
 

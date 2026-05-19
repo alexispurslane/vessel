@@ -67,6 +67,8 @@ export interface ChatState {
     connectPromise: Promise<void> | null;
     /** Resolver for connectPromise — called from handleConnected. */
     resolveConnect: (() => void) | null;
+    /** Registered listeners for canvas_update SSE events. CanvasPanel registers here. */
+    canvasUpdateListeners: Set<(event: import("$lib/types/canvas.js").CanvasUpdateEvent) => void>;
 }
 
 /** Single reactive state object for the chat store. */
@@ -87,6 +89,7 @@ const state = $state<ChatState>({
     timing: null,
     connectPromise: null,
     resolveConnect: null,
+    canvasUpdateListeners: new Set(),
 });
 
 // --- Helper functions that stay in this module ---
@@ -188,6 +191,23 @@ function handleSessionTree(s: ChatState): void {
 }
 
 /**
+ * Handle the 'canvas_update' SSE event.
+ * Forwards the event to all registered canvas listeners (CanvasPanel components).
+ * @param s - The chat state
+ * @param e - The MessageEvent containing the canvas update data
+ */
+function handleCanvasUpdate(s: ChatState, e: MessageEvent): void {
+    try {
+        const data = JSON.parse(e.data as string) as import("$lib/types/canvas.js").CanvasUpdateEvent;
+        for (const listener of s.canvasUpdateListeners) {
+            listener(data);
+        }
+    } catch {
+        // Malformed canvas_update event — ignore
+    }
+}
+
+/**
  * Handle the 'error' SSE event (connection-level error).
  * @param s - The chat state
  */
@@ -220,6 +240,7 @@ const SSE_HANDLERS = {
     fetched_sources: (s: ChatState, e: MessageEvent) => handleFetchedSources(s, e),
     turn_timing: (s: ChatState, e: MessageEvent) => handleTurnTiming(s, e),
     session_tree: (s: ChatState) => handleSessionTree(s),
+    canvas_update: (s: ChatState, e: MessageEvent) => handleCanvasUpdate(s, e),
 } as const;
 
 type SseEventName = keyof typeof SSE_HANDLERS;
@@ -424,6 +445,21 @@ export function getChat() {
          */
         get timing() {
             return state.timing;
+        },
+        /**
+         * Register a listener for canvas_update SSE events.
+         * The CanvasPanel component uses this to receive remote changes.
+         * @param listener - The listener function to register
+         */
+        registerCanvasUpdateListener(listener: (event: import("$lib/types/canvas.js").CanvasUpdateEvent) => void) {
+            state.canvasUpdateListeners.add(listener);
+        },
+        /**
+         * Unregister a previously registered canvas_update listener.
+         * @param listener - The listener function to remove
+         */
+        unregisterCanvasUpdateListener(listener: (event: import("$lib/types/canvas.js").CanvasUpdateEvent) => void) {
+            state.canvasUpdateListeners.delete(listener);
         },
         addLocalUserMessage,
         updateLocalMessage,

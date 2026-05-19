@@ -40,6 +40,8 @@ export interface SandboxedCodingToolsOptions {
      * returns a message indicating the page was already seen in search results.
      */
     searchResultUrls?: Set<string>;
+    /** The conversation ID, used to serve in-memory canvas content for read operations. */
+    conversationId: string;
 }
 
 /**
@@ -56,16 +58,16 @@ export interface SandboxedCodingToolsOptions {
  *
  * @param cwd - The working directory for the tools
  * @param sandbox - The zerobox sandbox instance
- * @param options - Optional configuration (search result URL tracker)
+ * @param options - Configuration including conversationId and optional search result URL tracker
  * @returns Array of sandboxed AgentTool instances
  */
-export function createSandboxedCodingTools(cwd: string, sandbox: Sandbox, options?: SandboxedCodingToolsOptions): AnyAgentTool[] {
+export function createSandboxedCodingTools(cwd: string, sandbox: Sandbox, options: SandboxedCodingToolsOptions): AnyAgentTool[] {
     return [
         createBashTool(cwd, {
             operations: createSandboxedBashOps(sandbox),
         }),
         createReadTool(cwd, {
-            operations: createSandboxedReadOps(sandbox),
+            operations: createSandboxedReadOps(sandbox, { conversationId: options.conversationId, workDir: cwd }),
         }),
         createWriteTool(cwd, {
             operations: createSandboxedWriteOps(sandbox),

@@ -18,6 +18,7 @@ import type { AgentToolInfo, AgentSkillInfo, AgentInfo } from "$lib/types/agent.
 import type { SessionTreeNodeData, SessionTreeRelation } from "$lib/types/session-tree.js";
 import type { CodeBlock, ExportFormat, ExportOptions } from "$lib/types/export.js";
 import type { McpServerEntry, McpServerInfo, McpServerStatus } from "$lib/types/mcp.js";
+import type { SerializedUpdate } from "$lib/types/canvas.js";
 
 export type {
     BulkAction,
@@ -881,6 +882,74 @@ export async function checkBaseUrl(
         method: 'POST',
         body: JSON.stringify({ url }),
     });
+}
+
+// --- Canvas ---
+
+/**
+ * Push client changes to a canvas file.
+ *
+ * @param conversationId - The conversation ID
+ * @param filePath - The workspace-relative file path
+ * @param version - The client's last synced version
+ * @param updates - Serialized updates from the client (with clientIDs)
+ * @returns Push response with new version and server updates for rebase catch-up
+ */
+export async function pushCanvasChanges(
+    conversationId: string,
+    filePath: string,
+    version: number,
+    updates: SerializedUpdate[],
+): Promise<{ version: number; serverUpdates: SerializedUpdate[] }> {
+    return apiFetch<{ version: number; serverUpdates: SerializedUpdate[] }>(`/api/sessions/${conversationId}/canvas/${encodeURIComponent(filePath)}`, {
+        method: 'POST',
+        body: JSON.stringify({ version, updates }),
+    });
+}
+
+/**
+ * Catch up on missed canvas updates after SSE reconnection.
+ *
+ * @param conversationId - The conversation ID
+ * @param filePath - The workspace-relative file path
+ * @param sinceVersion - The version to get updates since
+ * @returns Catch-up response with current version and updates
+ */
+export async function getCanvasUpdates(
+    conversationId: string,
+    filePath: string,
+    sinceVersion: number,
+): Promise<{ version: number; updates: SerializedUpdate[] }> {
+    return apiFetch<{ version: number; updates: SerializedUpdate[] }>(`/api/sessions/${conversationId}/canvas/${encodeURIComponent(filePath)}?since=${sinceVersion}`);
+}
+
+/**
+ * Toggle a file as a canvas.
+ *
+ * @param conversationId - The conversation ID
+ * @param filePath - The workspace-relative file path
+ * @returns Toggle response indicating whether file is now a canvas
+ */
+export async function toggleCanvas(
+    conversationId: string,
+    filePath: string,
+): Promise<{ isCanvas: boolean; version?: number }> {
+    return apiFetch<{ isCanvas: boolean; version?: number }>(`/api/sessions/${conversationId}/canvas`, {
+        method: 'PUT',
+        body: JSON.stringify({ filePath }),
+    });
+}
+
+/**
+ * List all canvas files for a conversation.
+ *
+ * @param conversationId - The conversation ID
+ * @returns Object with array of canvas entries
+ */
+export async function listCanvasFiles(
+    conversationId: string,
+): Promise<{ canvases: { filePath: string }[] }> {
+    return apiFetch<{ canvases: { filePath: string }[] }>(`/api/sessions/${conversationId}/canvas`);
 }
 
 // --- Filesystem ---

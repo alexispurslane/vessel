@@ -62,18 +62,44 @@ export function createSandboxedBashOps(sandbox: Sandbox): BashOperations {
 
 // --- Read ---
 
+/** Options for creating sandboxed read operations. */
+export interface SandboxedReadOpsOptions {
+    /** The conversation ID, used to look up in-memory canvas documents. */
+    conversationId: string;
+    /** The session workspace directory, used to convert absolute paths to workspace-relative paths. */
+    workDir: string;
+}
+
 /**
  * Create sandboxed read operations.
  * File reads go through zerobox so the sandbox's allowRead/denyRead policies apply.
  *
+ * For canvas files that have an active in-memory document, reads are served from
+ * that document instead of hitting disk, avoiding race conditions between user
+ * edits (applied in-memory first) and agent reads.
+ *
  * @param sandbox - The zerobox sandbox instance to route reads through.
+ * @param options - Conversation ID and work directory for canvas interception.
  * @returns ReadOperations implementation backed by the sandbox.
  */
-export function createSandboxedReadOps(sandbox: Sandbox): ReadOperations {
+export function createSandboxedReadOps(sandbox: Sandbox, options: SandboxedReadOpsOptions): ReadOperations {
+    const { conversationId, workDir } = options;
+
     return {
         async readFile(absolutePath: string): Promise<Buffer> {
-            // macOS base64 needs stdin, not positional args.
-            // Pipe via cat with single-quote escaping for spaces.
+            // Check in-memory canvas doc first (authoritative, avoids race conditions)
+            if (absolutePath.startsWith(workDir + "/")) {
+                const relativePath = absolutePath.slice(workDir.length + 1);
+                // Dynamic import to avoid circular dependency at module load time
+                const { getCanvasDocContentIfExists } = await import("$lib/server/canvas-store.js");
+                const canvasContent = getCanvasDocContentIfExists(conversationId, relativePath);
+                if (canvasContent !== null) {
+                    return Buffer.from(canvasContent, "utf-8");
+                }
+            }
+
+            // Fall through to sandbox disk read (macOS base64 via stdin)
+            // Pipe with single-quote escaping for spaces.
             const escaped = absolutePath.replace(/'/g, "'\\''");
             const output = await sandbox.exec("sh", ["-c", `cat '${escaped}' | base64`]).output();
             if (output.code !== 0) {

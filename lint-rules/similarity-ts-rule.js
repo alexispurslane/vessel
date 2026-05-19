@@ -33,7 +33,7 @@ let hasRun = false;
 const DEFAULT_THRESHOLD = 0.87;
 
 /** Default threshold above which findings are reported as errors (0-1). */
-const DEFAULT_ERROR_THRESHOLD = 0.95;
+const DEFAULT_ERROR_THRESHOLD = 0.96;
 
 /**
  * Parse the text output of `similarity-ts` into a map from file path

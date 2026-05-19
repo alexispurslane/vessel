@@ -17,7 +17,7 @@
  */
 
 import { resolve } from "path";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { safeDeleteFile, safeDeleteDir } from "../fs-utils.js";
 import { randomUUID } from "crypto";
 import { log } from "$lib/server/logger.js";
@@ -332,11 +332,15 @@ export async function destroyConversation(conversationId: string): Promise<void>
     // 1. Dispose in-memory session if loaded
     disposeSession(conversationId, { force: true });
 
-    // 2. Load settings to check workspace deletion preference
+    // 2. Clean up in-memory canvas state
+    const { cleanupCanvasConversation } = await import("$lib/server/canvas-store.js");
+    cleanupCanvasConversation(conversationId);
+
+    // 3. Load settings to check workspace deletion preference
     const convSettings = loadConversationSettingsFromDb(conversationId);
     const deleteWorkspace = convSettings?.deleteWorkspaceWithConversation !== false;
 
-    // 3. Delete the pi session .jsonl file
+    // 4. Delete the pi session .jsonl file
     const db = getDb();
     const row = db
         .prepare("SELECT session_file_path FROM conversations WHERE id = ?")
@@ -344,7 +348,7 @@ export async function destroyConversation(conversationId: string): Promise<void>
 
     if (row?.session_file_path) await safeDeleteFile(row.session_file_path, "pi session file");
 
-    // 4. Delete workspace and session directories (if setting allows)
+    // 5. Delete workspace and session directories (if setting allows)
     if (deleteWorkspace) {
         await safeDeleteDir(getSessionWorkDir(conversationId), "workspace directory");
         await safeDeleteDir(resolve(SESSIONS_DIR, conversationId), "session directory");
@@ -352,7 +356,7 @@ export async function destroyConversation(conversationId: string): Promise<void>
         log.info("session-store", `Keeping workspace for conversation ${conversationId} (deleteWorkspaceWithConversation = false)`);
     }
 
-    // 5. Delete the DB rows (conversation_settings is ON DELETE CASCADE)
+    // 6. Delete the DB rows (conversation_settings is ON DELETE CASCADE)
     db.prepare("DELETE FROM conversations WHERE id = ?").run(conversationId);
     log.info("session-store", `Destroyed conversation ${conversationId} (explicit user delete)`);
 }
@@ -588,7 +592,7 @@ function registerVesselTools(options: RegisterVesselToolsOptions): void {
     const sessionWorkDir = getSessionWorkDir(conversationId);
 
     if (sandbox) {
-        const sandboxedTools = createSandboxedCodingTools(sessionWorkDir, sandbox, { searchResultUrls });
+        const sandboxedTools = createSandboxedCodingTools(sessionWorkDir, sandbox, { searchResultUrls, conversationId });
         for (const tool of sandboxedTools) {
             toolRegistry.set(tool.name, tool);
         }
@@ -695,6 +699,55 @@ function applySystemPromptOverrides(
 }
 
 /**
+ * Handle an agent write/edit tool completing on a file that may be a canvas.
+ * If the file is a canvas, reads the new content from disk, applies it
+ * as a full-replacement ChangeSet through the OT system, and broadcasts
+ * a canvas_update SSE event so all connected editors converge.
+ *
+ * @param conversationId - The conversation ID
+ * @param rawPath - The file path the agent tool received (may be relative)
+ */
+async function handleCanvasFileWrite(conversationId: string, rawPath: string): Promise<void> {
+    try {
+        const { isCanvasFile, applyAgentEdit } = await import("$lib/server/canvas-store.js");
+
+        // Resolve relative paths — raw args may be relative (e.g. "file.md")
+        // because the tool resolves internally but we only see the raw arg.
+        const workDir = getSessionWorkDir(conversationId);
+        const resolvedPath = resolve(workDir, rawPath);
+
+        // Extract workspace-relative path for the canvas store
+        if (!resolvedPath.startsWith(workDir + "/") && resolvedPath !== workDir) return;
+        const relativePath = resolvedPath === workDir ? "" : resolvedPath.slice(workDir.length + 1);
+        if (!relativePath) return;
+
+        const isCanvas = await isCanvasFile(conversationId, relativePath);
+        if (!isCanvas) return;
+
+        // Read the new content from disk (the agent tool already wrote it)
+        let newContent: string;
+        try {
+            newContent = await readFile(resolvedPath, "utf-8");
+        } catch {
+            // File might not exist yet — treat as empty
+            newContent = "";
+        }
+
+        // Apply through the OT system
+        const canvasEvent = await applyAgentEdit(conversationId, relativePath, newContent);
+
+        // Broadcast canvas_update to all SSE subscribers
+        const sseEvent: ChatSSEEvent = {
+            event: "canvas_update",
+            data: canvasEvent,
+        };
+        broadcastToSession(conversationId, sseEvent);
+    } catch {
+        // Best-effort — canvas sync failure shouldn't break the agent
+    }
+}
+
+/**
  * Wire up agent + EventBus subscriptions to broadcast SSE events.
  *
  * @param agentSession - The agent session to subscribe to
@@ -707,6 +760,10 @@ function setupSessionEventSubscriptions(
     eventBus: ReturnType<typeof createEventBus>,
     conversationId: string
 ): () => void {
+    // tool_execution_end events lack `args`, so we capture them
+    // from tool_execution_start and match by toolCallId.
+    const pendingToolArgs = new Map<string, Record<string, unknown>>();
+
     const unsubscribeAgent = agentSession.subscribe((event: PiAgentSessionEvent) => {
         const session = sessions.get(conversationId);
 
@@ -726,6 +783,30 @@ function setupSessionEventSubscriptions(
         }
 
         broadcast({ sessions, scheduleDispose, disposeIfIdle }, conversationId, sseEvent);
+
+        // Capture write/edit tool args at start time so we can use
+        // them at end time (tool_execution_end lacks args).
+        if (event.type === "tool_execution_start") {
+            const startEvent = event as { toolCallId: string; toolName: string; args: Record<string, unknown> };
+            if ((startEvent.toolName === "write" || startEvent.toolName === "edit") && startEvent.args) {
+                pendingToolArgs.set(startEvent.toolCallId, startEvent.args);
+            }
+        }
+
+        // After a write/edit tool completes on a canvas file, update
+        // the OT state and broadcast canvas_update so editors converge.
+        if (event.type === "tool_execution_end") {
+            const endEvent = event as { toolCallId: string; toolName: string; isError: boolean };
+            const isWriteTool = endEvent.toolName === "write" || endEvent.toolName === "edit";
+            const args = pendingToolArgs.get(endEvent.toolCallId);
+            pendingToolArgs.delete(endEvent.toolCallId);
+            if (isWriteTool && !endEvent.isError && args) {
+                const filePath = args.path;
+                if (typeof filePath === "string") {
+                    void handleCanvasFileWrite(conversationId, String(filePath));
+                }
+            }
+        }
     });
 
     const unsubscribeFetchSources = eventBus.on("fetched_sources", (data) => {
@@ -877,6 +958,22 @@ export function subscribeToConversation(
             scheduleDispose(conversationId);
         }
     };
+}
+
+/**
+ * Broadcast an arbitrary SSE event to all subscribers of a session.
+ * Used by the canvas system to push canvas_update events.
+ *
+ * @param conversationId - The conversation ID to broadcast to
+ * @param event - The SSE event to broadcast
+ */
+export function broadcastToSession(conversationId: string, event: ChatSSEEvent): void {
+    const session = sessions.get(conversationId);
+    if (!session) return;
+
+    for (const [, subscriber] of session.subscribers) {
+        subscriber.send(event);
+    }
 }
 
 /**

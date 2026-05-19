@@ -33,6 +33,8 @@
         exportConversation,
         forkConversation as apiForkConversation,
         updateConversation,
+        toggleCanvas,
+        listCanvasFiles,
     } from "$lib/api.js";
     import type { ExportFormat, ExportOptions } from "$lib/api.js";
     import type {
@@ -54,6 +56,7 @@
     import Download from "@lucide/svelte/icons/download";
     import FileJson from "@lucide/svelte/icons/file-json";
     import FileType from "@lucide/svelte/icons/file-type";
+    import Paintbrush from "@lucide/svelte/icons/paintbrush";
     import { onMount, untrack } from "svelte";
     import { fade } from "svelte/transition";
     import { goto } from "$app/navigation";
@@ -98,6 +101,7 @@
     } from "$lib/stores/notifications.svelte.js";
     import { IsMobile } from "$lib/hooks/is-mobile.svelte.js";
     import AriaLiveRegion from "$lib/components/chat/a11y/aria-live-region.svelte";
+    import { CanvasPanel } from "$lib/components/canvas/index.js";
 
     const isMobile = new IsMobile();
 
@@ -108,6 +112,7 @@
 
     type PanelState = {
         sidePanel: "security" | "history" | "agent" | null;
+        canvasOpen?: boolean;
     };
 
     function panelStateKey(conversationId: string) {
@@ -118,15 +123,23 @@
         try {
             const raw = localStorage.getItem(panelStateKey(conversationId));
             if (raw) {
-                const parsed = JSON.parse(raw) as PanelState;
+                const parsed = JSON.parse(raw) as Record<string, unknown>;
+                // Migrate legacy sidePanel="canvas" to canvasOpen=true
+                const sp = parsed.sidePanel as string | null | undefined;
+                const isCanvas = sp === "canvas";
+                const validPanels = new Set(["security", "history", "agent"]);
                 return {
-                    sidePanel: parsed.sidePanel ?? null,
+                    sidePanel:
+                        isCanvas || !sp || !validPanels.has(sp)
+                            ? null
+                            : (sp as "security" | "history" | "agent"),
+                    canvasOpen: parsed.canvasOpen === true || isCanvas,
                 };
             }
         } catch {
             // localStorage may be unavailable
         }
-        return { sidePanel: null };
+        return { sidePanel: null, canvasOpen: false };
     }
 
     function savePanelState(conversationId: string, state: PanelState) {
@@ -178,6 +191,8 @@
     let pendingFiles = $state<PendingFile[]>([]);
     /** Names of files already uploaded to the sandbox (persists across messages) */
     let sandboxFiles = $state<string[]>([]);
+    /** Set of sandbox file paths that are currently canvas-ized */
+    let canvasFiles = $state<Set<string>>(new Set());
 
     /** Re-fetch sandbox files after every agent turn completes. */
     let wasGenerating = $state(false);
@@ -191,6 +206,15 @@
                 })
                 .catch(() => {
                     // Non-critical — the file list just won't update
+                });
+
+            // Refresh canvas files in case the agent created or modified canvas files
+            listCanvasFiles(id)
+                .then((result) => {
+                    canvasFiles = new Set(result.canvases.map((c) => c.filePath));
+                })
+                .catch(() => {
+                    /* non-critical */
                 });
 
             // Send completion notifications (browser, sound, tab title)
@@ -221,12 +245,21 @@
     // Shared side panel state: only one panel can be open at a time
     // Initialized from localStorage per conversation (see effect below)
     let sidePanel = $state<"security" | "history" | "agent" | null>(null);
+    // Canvas panel is separate — opening it closes sidePanel; opening sidePanel
+    // while canvas is open overlays sidePanel on top of the canvas pane
+    let canvasPanelOpen = $state(false);
     // Search results panel state
     let searchResultsOpen = $state(false);
     let searchResultsQuery = $state("");
     let searchResultsData = $state<SearchResultItem[]>([]);
     // Fetched page panel state
     let fetchedPageOpen = $state(false);
+
+    // --- Canvas panel state ---
+    /** Reference to the CanvasPanel component for calling exposed methods */
+    let canvasPanelRef: {
+        openFile?: (filePath: string, content: string, version?: number) => void;
+    } | null = $state(null);
 
     // --- Accessibility: screen reader announcements ---
     let a11yAnnouncement = $state("");
@@ -487,6 +520,20 @@
             availableModels = await listModels();
         } catch {
             // Models will be empty, user can still chat with default
+        }
+
+        // Load initial workspace and canvas file lists
+        if (id) {
+            listWorkspaceFiles(id)
+                .then((result) => {
+                    sandboxFiles = result.files;
+                })
+                .catch(() => {});
+            listCanvasFiles(id)
+                .then((result) => {
+                    canvasFiles = new Set(result.canvases.map((c) => c.filePath));
+                })
+                .catch(() => {});
         }
     });
 
@@ -750,6 +797,8 @@
         getModelInitialized: () => modelInitialized,
         setDraftRestored: (v: boolean) => (draftRestored = v),
         setDraftRestoredForId: (v: string | null) => (draftRestoredForId = v),
+        setCanvasFiles: (v: Set<string>) => (canvasFiles = v),
+        getCanvasFiles: () => canvasFiles,
         scrollToHashMessage,
         hideTopBar,
         draftKey,
@@ -766,6 +815,7 @@
         try {
             await deleteWorkspaceFile(id, path);
             sandboxFiles = sandboxFiles.filter((f) => f !== path);
+            canvasFiles = new Set([...canvasFiles].filter((f) => f !== path));
             // Queue an invisible status update so the AI knows the file was removed
             pendingStatusUpdates = [
                 ...pendingStatusUpdates,
@@ -780,6 +830,47 @@
     function handleDownloadSandboxFile(path: string) {
         if (!id) return;
         downloadWorkspaceFile(id, path);
+    }
+
+    /**
+     * Handle the user clicking the edit/pencil icon on a sandbox file chip.
+     * Idempotent: tags the file as canvas (if not already) and opens it.
+     *
+     * @param path - The sandbox file path to open as canvas
+     */
+    async function handleEditCanvasFile(path: string) {
+        if (!id) return;
+
+        try {
+            let version: number | undefined;
+
+            // Only toggle ON if the file isn't already canvas-ized
+            if (!canvasFiles.has(path)) {
+                const result = await toggleCanvas(id, path);
+                if (!result.isCanvas) return;
+                canvasFiles = new Set([...canvasFiles, path]);
+                version = result.version;
+            }
+
+            // Open the canvas panel and the file; close sidePanel
+            canvasPanelOpen = true;
+            sidePanel = null;
+
+            // Fetch file content via the workspace download API
+            // oxlint-disable-next-line secure-coding/no-ldap-injection
+            const downloadUrl = `/api/sessions/${id}/workspace/download?path=${encodeURIComponent(path)}`;
+            let content = "";
+            try {
+                const response = await fetch(downloadUrl);
+                content = await response.text();
+            } catch {
+                // Fall through with empty content
+            }
+
+            canvasPanelRef?.openFile?.(path, content, version);
+        } catch (err) {
+            console.error("[chat] Failed to open canvas:", err);
+        }
     }
 
     /**
@@ -935,6 +1026,7 @@
         if (currentId) {
             const saved = loadPanelState(currentId);
             sidePanel = saved.sidePanel;
+            canvasPanelOpen = saved.canvasOpen ?? false;
             // If restoring the history panel, load DAG data
             if (saved.sidePanel === "history") {
                 void loadDagData();
@@ -942,13 +1034,14 @@
         }
     });
 
-    // Save panel state whenever sidePanel changes.
+    // Save panel state whenever sidePanel or canvasPanelOpen changes.
     // Uses untrack(id) so this only fires on panel changes, not on navigation.
     $effect(() => {
         const sp = sidePanel;
+        const co = canvasPanelOpen;
         untrack(() => {
             if (id) {
-                savePanelState(id, { sidePanel: sp });
+                savePanelState(id, { sidePanel: sp, canvasOpen: co });
             }
         });
     });
@@ -1119,8 +1212,9 @@
                             {#snippet child({ props })}
                                 <button
                                     {...props}
-                                    onclick={() =>
-                                        (sidePanel = sidePanel === "security" ? null : "security")}
+                                    onclick={() => {
+                                        sidePanel = sidePanel === "security" ? null : "security";
+                                    }}
                                     class="inline-flex items-center {isMobile.current
                                         ? 'justify-center min-w-11 min-h-11'
                                         : 'gap-1 px-2 py-1'} text-[11px] {sidePanel === 'security'
@@ -1166,8 +1260,9 @@
                             {#snippet child({ props })}
                                 <button
                                     {...props}
-                                    onclick={() =>
-                                        (sidePanel = sidePanel === "agent" ? null : "agent")}
+                                    onclick={() => {
+                                        sidePanel = sidePanel === "agent" ? null : "agent";
+                                    }}
                                     class="inline-flex items-center {isMobile.current
                                         ? 'justify-center min-w-11 min-h-11'
                                         : 'gap-1 px-2 py-1'} text-[11px] {sidePanel === 'agent'
@@ -1181,6 +1276,33 @@
                             {/snippet}
                         </TooltipTrigger>
                         <TooltipContent>Agent configuration</TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger>
+                            {#snippet child({ props })}
+                                <button
+                                    {...props}
+                                    onclick={() => {
+                                        const opening = !canvasPanelOpen;
+                                        canvasPanelOpen = opening;
+                                        // Opening canvas closes sidePanel (not search/fetch)
+                                        if (opening) sidePanel = null;
+                                    }}
+                                    class="inline-flex items-center {isMobile.current
+                                        ? 'justify-center min-w-11 min-h-11'
+                                        : 'gap-1 px-2 py-1'} text-[11px] {canvasPanelOpen
+                                        ? 'text-foreground bg-muted'
+                                        : 'text-muted-foreground hover:text-foreground'} transition-colors cursor-pointer rounded hover:bg-muted"
+                                    aria-label="Toggle canvas panel"
+                                >
+                                    <Paintbrush class={isMobile.current ? "size-4" : "size-3"} />
+                                    {#if !isMobile.current}<span>Canvas</span>{/if}
+                                </button>
+                            {/snippet}
+                        </TooltipTrigger>
+                        <TooltipContent>Canvas editor</TooltipContent>
                     </Tooltip>
                 </TooltipProvider>
                 <DropdownMenu>
@@ -1247,7 +1369,15 @@
                 autoSaveId={id ? `chat-panes-${id}` : undefined}
             >
                 <!-- Main chat area -->
-                <ResizablePane defaultSize={sidePanel ? 75 : 100} minSize={50}>
+                <ResizablePane
+                    defaultSize={sidePanel ||
+                    searchResultsOpen ||
+                    fetchedPageOpen ||
+                    canvasPanelOpen
+                        ? 60
+                        : 100}
+                    minSize={35}
+                >
                     <div
                         class="h-full flex flex-col overflow-hidden max-w-[100ch] mx-auto {isMobile.current
                             ? 'pb-12'
@@ -1514,6 +1644,7 @@
                                 onabort={handleAbort}
                                 onremovesandboxfile={handleRemoveSandboxFile}
                                 ondownloadsandboxfile={handleDownloadSandboxFile}
+                                {canvasFiles}
                                 hasPendingStatus={pendingStatusUpdates.length > 0}
                                 onsetconversationdefault={handleSetConversationDefault}
                                 onswitchtoglobaldefault={handleSwitchToGlobalDefault}
@@ -1544,10 +1675,10 @@
                     </div></ResizablePane
                 >
 
-                <!-- Resizable side panel (desktop only) -->
-                {#if sidePanel && id && !isMobile.current}
+                <!-- Resizable side panel (desktop, only when canvas is closed) -->
+                {#if sidePanel && id && !isMobile.current && !canvasPanelOpen}
                     <ResizableHandle withHandle />
-                    <ResizablePane defaultSize={25} minSize={15} maxSize={50}>
+                    <ResizablePane defaultSize={20} minSize={15} maxSize={35}>
                         <div class="h-full bg-background flex flex-col">
                             {#if sidePanel === "security"}
                                 <ConversationSecurityPanel conversationId={id} />
@@ -1564,39 +1695,97 @@
                         </div>
                     </ResizablePane>
                 {/if}
-            </ResizablePaneGroup>
 
-            <!-- Non-resizable overlay panels (search results, fetched pages) -->
-            {#if searchResultsOpen}
-                <div
-                    class="absolute right-0 top-0 bottom-0 w-96 border-l bg-background flex flex-col shrink-0 z-10"
-                >
-                    <SearchResultsPanel
-                        query={searchResultsQuery}
-                        results={searchResultsData}
-                        onclose={() => {
-                            searchResultsOpen = false;
-                        }}
-                        onresultclick={(url: string, title: string, content: string) => {
-                            handlePageClick(url, title, content);
-                        }}
-                    />
-                </div>
-            {/if}
-            {#if fetchedPageOpen}
-                <div
-                    class="absolute right-0 top-0 bottom-0 w-2xl border-l bg-background flex flex-col shrink-0 z-10"
-                >
-                    <FetchedPagePanel
-                        url={fetchedPageUrl}
-                        title={fetchedPageTitle}
-                        content={fetchedPageContent}
-                        onclose={() => {
-                            fetchedPageOpen = false;
-                        }}
-                    />
-                </div>
-            {/if}
+                <!-- Search results panel (desktop only) -->
+                {#if searchResultsOpen && !isMobile.current}
+                    <ResizableHandle withHandle />
+                    <ResizablePane defaultSize={25} minSize={15} maxSize={40}>
+                        <div class="h-full border-l bg-background flex flex-col">
+                            <SearchResultsPanel
+                                query={searchResultsQuery}
+                                results={searchResultsData}
+                                onclose={() => {
+                                    searchResultsOpen = false;
+                                }}
+                                onresultclick={(url: string, title: string, content: string) => {
+                                    handlePageClick(url, title, content);
+                                }}
+                            />
+                        </div>
+                    </ResizablePane>
+                {/if}
+
+                <!-- Fetched page panel (desktop only) -->
+                {#if fetchedPageOpen && !isMobile.current}
+                    <ResizableHandle withHandle />
+                    <ResizablePane defaultSize={30} minSize={20} maxSize={50}>
+                        <div class="h-full border-l bg-background flex flex-col">
+                            <FetchedPagePanel
+                                url={fetchedPageUrl}
+                                title={fetchedPageTitle}
+                                content={fetchedPageContent}
+                                onclose={() => {
+                                    fetchedPageOpen = false;
+                                }}
+                            />
+                        </div>
+                    </ResizablePane>
+                {/if}
+
+                <!-- Canvas panel (desktop only) -->
+                {#if canvasPanelOpen && id && !isMobile.current}
+                    <ResizableHandle withHandle />
+                    <ResizablePane defaultSize={25} minSize={15} maxSize={40}>
+                        <div class="h-full border-l bg-background flex flex-col relative">
+                            <CanvasPanel
+                                bind:this={canvasPanelRef}
+                                conversationId={id}
+                                {canvasFiles}
+                                onclose={() => (canvasPanelOpen = false)}
+                            />
+                            <!-- Side panel overlay on top of canvas -->
+                            {#if sidePanel}
+                                <div
+                                    class="absolute inset-0 z-10 bg-background flex flex-col animate-in slide-in-from-right duration-200"
+                                >
+                                    <div
+                                        class="flex items-center justify-between px-4 py-2 border-b"
+                                    >
+                                        <span class="text-sm font-medium">
+                                            {sidePanel === "security"
+                                                ? "Security"
+                                                : sidePanel === "history"
+                                                  ? "History"
+                                                  : "Agent"}
+                                        </span>
+                                        <button
+                                            onclick={() => (sidePanel = null)}
+                                            class="p-2 hover:bg-muted rounded-md"
+                                            aria-label="Close panel"
+                                        >
+                                            <X class="size-4" />
+                                        </button>
+                                    </div>
+                                    <div class="flex-1 overflow-auto">
+                                        {#if sidePanel === "security"}
+                                            <ConversationSecurityPanel conversationId={id} />
+                                        {:else if sidePanel === "history"}
+                                            <MessageDag
+                                                nodes={dagNodes}
+                                                leafId={dagLeafId}
+                                                onnavigateto={handleDagNavigate}
+                                                navigating={chat.navigating}
+                                            />
+                                        {:else if sidePanel === "agent"}
+                                            <AgentInfoPanel conversationId={id} />
+                                        {/if}
+                                    </div>
+                                </div>
+                            {/if}
+                        </div>
+                    </ResizablePane>
+                {/if}
+            </ResizablePaneGroup>
 
             <!-- Mobile full-screen overlay for side panels -->
             {#if isMobile.current && sidePanel && id}
@@ -1632,6 +1821,87 @@
                         {:else if sidePanel === "agent"}
                             <AgentInfoPanel conversationId={id} />
                         {/if}
+                    </div>
+                </div>
+            {/if}
+            <!-- Mobile full-screen overlay for canvas panel -->
+            {#if isMobile.current && canvasPanelOpen && id}
+                <div
+                    class="absolute inset-0 z-20 bg-background flex flex-col animate-in slide-in-from-right duration-200"
+                >
+                    <div class="flex items-center justify-between px-4 py-2 border-b">
+                        <span class="text-sm font-medium">Canvas</span>
+                        <button
+                            onclick={() => (canvasPanelOpen = false)}
+                            class="p-2 hover:bg-muted rounded-md"
+                            aria-label="Close canvas panel"
+                        >
+                            <X class="size-4" />
+                        </button>
+                    </div>
+                    <div class="flex-1 overflow-auto">
+                        <CanvasPanel
+                            bind:this={canvasPanelRef}
+                            conversationId={id}
+                            {canvasFiles}
+                            onclose={() => (canvasPanelOpen = false)}
+                        />
+                    </div>
+                </div>
+            {/if}
+            <!-- Mobile full-screen overlay for search results panel -->
+            {#if isMobile.current && searchResultsOpen}
+                <div
+                    class="absolute inset-0 z-20 bg-background flex flex-col animate-in slide-in-from-right duration-200"
+                >
+                    <div class="flex items-center justify-between px-4 py-2 border-b">
+                        <span class="text-sm font-medium">Search Results</span>
+                        <button
+                            onclick={() => (searchResultsOpen = false)}
+                            class="p-2 hover:bg-muted rounded-md"
+                            aria-label="Close search results"
+                        >
+                            <X class="size-4" />
+                        </button>
+                    </div>
+                    <div class="flex-1 overflow-auto">
+                        <SearchResultsPanel
+                            query={searchResultsQuery}
+                            results={searchResultsData}
+                            onclose={() => {
+                                searchResultsOpen = false;
+                            }}
+                            onresultclick={(url: string, title: string, content: string) => {
+                                handlePageClick(url, title, content);
+                            }}
+                        />
+                    </div>
+                </div>
+            {/if}
+            <!-- Mobile full-screen overlay for fetched page panel -->
+            {#if isMobile.current && fetchedPageOpen}
+                <div
+                    class="absolute inset-0 z-20 bg-background flex flex-col animate-in slide-in-from-right duration-200"
+                >
+                    <div class="flex items-center justify-between px-4 py-2 border-b">
+                        <span class="text-sm font-medium">{fetchedPageTitle || "Page"}</span>
+                        <button
+                            onclick={() => (fetchedPageOpen = false)}
+                            class="p-2 hover:bg-muted rounded-md"
+                            aria-label="Close fetched page"
+                        >
+                            <X class="size-4" />
+                        </button>
+                    </div>
+                    <div class="flex-1 overflow-auto">
+                        <FetchedPagePanel
+                            url={fetchedPageUrl}
+                            title={fetchedPageTitle}
+                            content={fetchedPageContent}
+                            onclose={() => {
+                                fetchedPageOpen = false;
+                            }}
+                        />
                     </div>
                 </div>
             {/if}

@@ -74,6 +74,7 @@
         "pre-push": "bun audit && bun run lint --quiet"
     },
     "dependencies": {
+        "@codemirror/collab": "^6.1.1",
         "@codemirror/lang-markdown": "^6.5.0",
         "@codemirror/language-data": "^6.5.2",
         "@mariozechner/pi-agent-core": "^0.73.1",

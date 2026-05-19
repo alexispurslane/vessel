@@ -35,6 +35,7 @@
     import Eraser from "@lucide/svelte/icons/eraser";
     import Check from "@lucide/svelte/icons/check";
     import CheckCircle from "@lucide/svelte/icons/check-circle";
+    import Paintbrush from "@lucide/svelte/icons/paintbrush";
     import Undo2 from "@lucide/svelte/icons/undo-2";
     import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
     import Plus from "@lucide/svelte/icons/plus";
@@ -77,6 +78,8 @@
         ondownloadsandboxfile?: (path: string) => void;
         /** Callback when user removes an uploaded sandbox file */
         onremovesandboxfile?: (path: string) => void;
+        /** Set of sandbox file paths that are currently canvas-ized */
+        canvasFiles?: Set<string>;
         /** Whether there are pending invisible status updates to send (enables send with empty text) */
         hasPendingStatus?: boolean;
         /** Callback when send button is clicked */
@@ -107,6 +110,7 @@
         sandboxFiles = [],
         ondownloadsandboxfile,
         onremovesandboxfile,
+        canvasFiles = new Set<string>(),
         hasPendingStatus = false,
         onsend,
         onabort,
@@ -339,7 +343,11 @@
                     }}
                     aria-label="Download {filename} from sandbox"
                 >
-                    <Check class="size-3 shrink-0 text-green-600" />
+                    {#if canvasFiles.has(filename)}
+                        <Paintbrush class="size-3 shrink-0 text-purple-500" />
+                    {:else}
+                        <Check class="size-3 shrink-0 text-green-600" />
+                    {/if}
                     <span class="truncate">{filename}</span>
                     <button
                         class="shrink-0 rounded-sm hover:bg-muted-foreground/20 p-0.5"

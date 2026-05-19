@@ -51,15 +51,16 @@ Client tracks its last synced version. On SSE reconnect, `GET /api/sessions/[id]
 
 ## Canvas Tracking
 
-A file becomes a canvas when the user clicks "edit" on its sandbox file pill. Track which files are canvases per conversation — a simple JSON file in the conversation dir (`canvases.json`) listing file paths. The agent can also designate a canvas via a tool (V2).
+A file becomes a canvas when the user clicks "edit" on its sandbox file pill. Track which files are canvases per conversation — a simple JSON file in the conversation dir (`canvases.json`) listing file paths. The agent can also designate a canvas via a tool — if the file already exists it's designated as a canvas; if not, the agent creates it and designates it as a canvas in one step.
 
 ## Agent Notification
 
-When the user edits a canvas, the server sends a `sendCustomMessage` to the agent session with `customType: "canvas_edit"`, content like `"User edited canvas file: notes.md"`, and `deliverAs: "nextTurn"`. If the agent is currently running, use `triggerTurn: true` so it can react immediately. Word-level diffs are V2.
+When the user edits a canvas, the server sends a `sendCustomMessage` to the agent session with `customType: "canvas_edit"`, content like `"User edited canvas file: notes.md"`, and `deliverAs: "nextTurn"`. If the agent is currently running, use `triggerTurn: true` so it can react immediately. Notifications include word-level diffs so the agent knows what changed.
 
 ## Frontend
 
 - **Canvas panel**: A collapsible, resizable pane sharing the screen with the conversation (using the existing `ResizablePaneGroup`). Contains a full CodeMirror 6 editor with `@codemirror/collab`.
+- **Syntax highlighting**: Language-aware highlighting toggled by the canvas file's extension (trivial via `@codemirror/language-data`'s language descriptions matched to filename).
 - **File pills**: Add an edit/pencil icon to sandbox file chips. Clicking it toggles the file as a canvas and opens the canvas editor showing that file. Clicking it again just re-opens it.
 - **Push timing**: 200ms debounce after user stops typing, then `sendableUpdates()` → POST.
 - **Keymaps**: Emacs (built into CM6) and vim (`@codemirror/vim`) modes. Toggle in the canvas panel header.
@@ -77,11 +78,7 @@ Persist updates to disk (append-only log per canvas file) so the server can reco
 ## Dependencies
 
 - `@codemirror/collab`
-- `@codemirror/vim` (optional, nice-to-have for V1)
 
 ## V2 (not now)
 
-- Agent tool to designate a file as a canvas
-- Word-level diffs in agent notifications
 - Vim mode
-- Language-aware syntax highlighting in canvas editor

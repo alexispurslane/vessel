@@ -392,7 +392,11 @@
         function handleKeyDown(e: KeyboardEvent) {
             if ((e.metaKey || e.ctrlKey) && e.key === "f") {
                 const tag = (e.target as HTMLElement | null)?.tagName;
-                if (tag === "INPUT" || tag === "TEXTAREA" || isInCodeMirror(e)) return;
+                if (tag === "INPUT" || tag === "TEXTAREA") return;
+                if (isInCodeMirror(e)) {
+                    e.preventDefault();
+                    return;
+                }
                 e.preventDefault();
                 focusSearch();
             }
