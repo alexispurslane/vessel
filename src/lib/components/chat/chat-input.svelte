@@ -44,6 +44,8 @@
     import Minimize from "@lucide/svelte/icons/minimize";
     import FileIcon from "@lucide/svelte/icons/file";
     import ImageIcon from "@lucide/svelte/icons/image";
+    import Download from "@lucide/svelte/icons/download";
+    import { isTextFile } from "$lib/utils/file-type.js";
     import type { ModelInfo } from "$lib/types.js";
 
     interface PendingFile {
@@ -76,6 +78,8 @@
         sandboxFiles?: string[];
         /** Callback when user clicks a sandbox file to download it */
         ondownloadsandboxfile?: (path: string) => void;
+        /** Callback when user clicks a text sandbox file to open it as canvas */
+        oneditcanvasfile?: (path: string) => void;
         /** Callback when user removes an uploaded sandbox file */
         onremovesandboxfile?: (path: string) => void;
         /** Set of sandbox file paths that are currently canvas-ized */
@@ -109,6 +113,7 @@
         pendingFiles = $bindable<PendingFile[]>([]),
         sandboxFiles = [],
         ondownloadsandboxfile,
+        oneditcanvasfile,
         onremovesandboxfile,
         canvasFiles = new Set<string>(),
         hasPendingStatus = false,
@@ -330,36 +335,57 @@
         <div class="flex flex-wrap gap-1.5 pb-2">
             <!-- Sandbox files: already uploaded, subdued style -->
             {#each sandboxFiles as filename (filename)}
-                <div
-                    class="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground bg-muted/50 max-w-50 hover:bg-muted/70 cursor-pointer transition-colors"
-                    role="button"
-                    tabindex="0"
-                    onclick={() => ondownloadsandboxfile?.(filename)}
-                    onkeydown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            ondownloadsandboxfile?.(filename);
-                        }
-                    }}
-                    aria-label="Download {filename} from sandbox"
-                >
-                    {#if canvasFiles.has(filename)}
-                        <Paintbrush class="size-3 shrink-0 text-purple-500" />
-                    {:else}
-                        <Check class="size-3 shrink-0 text-green-600" />
-                    {/if}
-                    <span class="truncate">{filename}</span>
-                    <button
-                        class="shrink-0 rounded-sm hover:bg-muted-foreground/20 p-0.5"
-                        onclick={(e) => {
-                            e.stopPropagation();
-                            onremovesandboxfile?.(filename);
-                        }}
-                        aria-label="Remove {filename} from sandbox"
-                    >
-                        <X class="size-3" />
-                    </button>
-                </div>
+                {@const isText = isTextFile(filename)}
+                <ContextMenu>
+                    <ContextMenuTrigger>
+                        <div
+                            class="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground bg-muted/50 max-w-50 hover:bg-muted/70 cursor-pointer transition-colors"
+                            role="button"
+                            tabindex="0"
+                            onclick={() => {
+                                if (isText) {
+                                    oneditcanvasfile?.(filename);
+                                } else {
+                                    ondownloadsandboxfile?.(filename);
+                                }
+                            }}
+                            onkeydown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                    e.preventDefault();
+                                    if (isText) {
+                                        oneditcanvasfile?.(filename);
+                                    } else {
+                                        ondownloadsandboxfile?.(filename);
+                                    }
+                                }
+                            }}
+                            aria-label="{isText ? 'Open' : 'Download'} {filename} from sandbox"
+                        >
+                            {#if canvasFiles.has(filename)}
+                                <Paintbrush class="size-3 shrink-0 text-purple-500" />
+                            {:else}
+                                <Check class="size-3 shrink-0 text-green-600" />
+                            {/if}
+                            <span class="truncate">{filename}</span>
+                            <button
+                                class="shrink-0 rounded-sm hover:bg-muted-foreground/20 p-0.5"
+                                onclick={(e) => {
+                                    e.stopPropagation();
+                                    onremovesandboxfile?.(filename);
+                                }}
+                                aria-label="Remove {filename} from sandbox"
+                            >
+                                <X class="size-3" />
+                            </button>
+                        </div>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent>
+                        <ContextMenuItem onclick={() => ondownloadsandboxfile?.(filename)}>
+                            <Download class="size-4" />
+                            <span>Download</span>
+                        </ContextMenuItem>
+                    </ContextMenuContent>
+                </ContextMenu>
             {/each}
             <!-- Pending files: queued for upload, outlined -->
             {#each pendingFiles as pf (pf.id)}

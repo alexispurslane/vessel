@@ -1644,6 +1644,7 @@
                                 onabort={handleAbort}
                                 onremovesandboxfile={handleRemoveSandboxFile}
                                 ondownloadsandboxfile={handleDownloadSandboxFile}
+                                oneditcanvasfile={handleEditCanvasFile}
                                 {canvasFiles}
                                 hasPendingStatus={pendingStatusUpdates.length > 0}
                                 onsetconversationdefault={handleSetConversationDefault}

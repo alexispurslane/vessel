@@ -25,6 +25,7 @@
         type DecorationSet,
         ViewPlugin,
         type ViewUpdate,
+        WidgetType,
     } from "@codemirror/view";
     import {
         EditorState,
@@ -83,6 +84,9 @@
     /** Whether we're currently pushing changes to avoid re-entrant pushes */
     let pushing = false;
 
+    /** Whether we're currently applying a remote update (so the dismiss plugin knows not to fire) */
+    let processingRemoteUpdate = false;
+
     /** Language compartment for reconfigurable syntax highlighting */
     const languageCompartment = new Compartment();
 
@@ -111,6 +115,102 @@
 
     /** Effect: clear all pulse-highlight decorations */
     const clearHighlights = StateEffect.define<void>();
+
+    // --- Agent cursor system ---
+
+    /**
+     * Effect: set the agent cursor position (the exact document position
+     * after the last character the AI edited). A yellow cursor widget
+     * appears here so the user can see where the agent left off.
+     */
+    const setAgentCursor = StateEffect.define<number>();
+
+    /** Effect: dismiss the agent cursor */
+    const dismissAgentCursor = StateEffect.define<void>();
+
+    /**
+     * Inline widget that renders a yellow cursor bar at the exact
+     * character position after the agent's last edit.
+     */
+    class AgentCursorWidget extends WidgetType {
+        toDOM(): HTMLElement {
+            const span = document.createElement("span");
+            span.className = "cm-agent-cursor";
+            span.textContent = "\u200B";
+            return span;
+        }
+
+        ignoreEvent(): boolean {
+            return true;
+        }
+    }
+
+    /**
+     * StateField for the agent cursor decoration.
+     * On `setAgentCursor`, places a fresh widget at the exact character
+     * position; on `dismissAgentCursor` or user edit, removes it.
+     */
+    const agentCursorField = StateField.define<DecorationSet>({
+        create: () => Decoration.none,
+        update: (decorations, tr) => {
+            let updated = decorations.map(tr.changes);
+
+            for (const effect of tr.effects) {
+                if (effect.is(setAgentCursor)) {
+                    const pos = effect.value;
+                    const widget = Decoration.widget({
+                        widget: new AgentCursorWidget(),
+                        side: 1,
+                    });
+                    return Decoration.set([widget.range(pos)]);
+                } else if (effect.is(dismissAgentCursor)) {
+                    return Decoration.none;
+                }
+            }
+
+            return updated;
+        },
+        provide: (f) => EditorView.decorations.from(f),
+    });
+
+    /**
+     * ViewPlugin that auto-dismisses the agent cursor when the user
+     * edits text or moves their cursor to the agent cursor position.
+     * Skips dismissal during remote update processing to avoid clearing
+     * the cursor that was just set.
+     */
+    const agentCursorDismissPlugin = ViewPlugin.fromClass(
+        class {
+            update(update: ViewUpdate) {
+                // Skip during remote update processing
+                if (processingRemoteUpdate) return;
+
+                const field = update.state.field(agentCursorField, false);
+                if (!field || field.size === 0) return;
+
+                // Dismiss if the user made local edits
+                if (update.docChanged) {
+                    update.view.dispatch({ effects: dismissAgentCursor.of(undefined) });
+                    return;
+                }
+
+                // Dismiss if the user's cursor reaches the agent cursor position
+                if (update.selectionSet) {
+                    const mainHead = update.state.selection.main.head;
+                    const cursorIter = field.iter();
+                    while (cursorIter.value) {
+                        if (mainHead === cursorIter.from) {
+                            update.view.dispatch({
+                                effects: dismissAgentCursor.of(undefined),
+                            });
+                            return;
+                        }
+                        cursorIter.next();
+                    }
+                }
+            }
+        }
+    );
 
     /** Mark decoration applied to each inserted range */
     const pulseMark = Decoration.mark({
@@ -309,6 +409,14 @@
             animation: "cm-pulse-highlight 1.8s ease-out",
             borderRadius: "2px",
         },
+        ".cm-agent-cursor": {
+            display: "inline-block",
+            width: "2px",
+            height: "1.15em",
+            backgroundColor: "#facc15",
+            borderRadius: "1px",
+            verticalAlign: "text-bottom",
+        },
         "@keyframes cm-pulse-highlight": {
             "0%": {
                 backgroundColor: "color-mix(in srgb, var(--color-primary) 35%, transparent)",
@@ -417,13 +525,24 @@
 
         // Apply remote updates first, then dispatch the highlight effect
         // separately to avoid interfering with collab state tracking.
-        const tr = receiveUpdates(view.state, remoteUpdates);
-        view.dispatch(tr);
+        // Guard with processingRemoteUpdate so the agent cursor dismiss
+        // plugin doesn't fire on these remote-originated doc changes.
+        processingRemoteUpdate = true;
+        try {
+            const tr = receiveUpdates(view.state, remoteUpdates);
+            view.dispatch(tr);
 
-        if (tr.changes.empty) return;
-        const ranges = extractInsertedRanges(tr.changes);
-        if (ranges.length > 0) {
-            view.dispatch({ effects: [highlightChanges.of(ranges)] });
+            if (tr.changes.empty) return;
+            const ranges = extractInsertedRanges(tr.changes);
+            if (ranges.length > 0) {
+                const lastRange = ranges[ranges.length - 1];
+                const agentCursorPos = lastRange.to;
+                view.dispatch({
+                    effects: [highlightChanges.of(ranges), setAgentCursor.of(agentCursorPos)],
+                });
+            }
+        } finally {
+            processingRemoteUpdate = false;
         }
     }
 
@@ -455,6 +574,8 @@
             collab({ startVersion: initialVersion }),
             highlightField,
             autoClearPlugin,
+            agentCursorField,
+            agentCursorDismissPlugin,
             EditorView.updateListener.of(() => {
                 schedulePush();
             }),
