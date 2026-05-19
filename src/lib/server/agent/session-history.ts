@@ -313,6 +313,12 @@ function processBranchEntry(state: HistoryBuilderState, entry: SessionEntry): vo
         return;
     }
 
+    // canvas_versions entries are metadata for the canvas-diff-tracker extension;
+    // skip them during history building (not user-facing).
+    if (entry.type === "custom" && (entry as { customType: string }).customType === "canvas_versions") {
+        return;
+    }
+
     if (entry.type !== "message") return;
 
     const msg = (entry as unknown as { message: Record<string, unknown> | null | undefined }).message;

@@ -55,7 +55,31 @@ A file becomes a canvas when the user clicks "edit" on its sandbox file pill. Tr
 
 ## Agent Notification
 
-When the user edits a canvas, the server sends a `sendCustomMessage` to the agent session with `customType: "canvas_edit"`, content like `"User edited canvas file: notes.md"`, and `deliverAs: "nextTurn"`. If the agent is currently running, use `triggerTurn: true` so it can react immediately. Notifications include word-level diffs so the agent knows what changed.
+When the user edits a canvas, the server sends a `sendCustomMessage` to the agent session with `customType: "canvas_edit"`, a compact diff-formatted string as content, and `deliverAs: "nextTurn"`. If the agent is currently running, use `triggerTurn: true` so it can react immediately.
+
+### Compact diff format
+
+The notification uses a human-readable diff format instead of JSON to minimize token usage:
+
+```
+[CANVAS EDIT NOTIFICATION]
+
+File: notes.md
+
+Edit 1:
+...Everything in Land's thought [-begins-]{+originates+} with a problem Kant left behind...
+
+Edit 2:
+...His early [-work,-]{+essays,+} collected in *Fanged Noumena*...
+
+---
+```
+
+- `[-text-]` = removed, `{+text+}` = added
+- ≤40 chars of context on each side — enough to locate, not enough to waste tokens
+- One `Edit N:` block per change location
+- Bracketed `[CANVAS EDIT NOTIFICATION]` header prevents confusion with user speech
+- `---` footer marks the end of the notification
 
 ## Frontend
 

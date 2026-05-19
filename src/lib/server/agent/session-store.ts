@@ -39,6 +39,7 @@ import { createSearchTool, SEARCH_SETTINGS_KEYS } from "./sandboxed-search-tool.
 import { fetchTracker } from "./extensions/fetch-tracker.js";
 import type { FetchedSource } from "./extensions/fetch-tracker.js";
 import { timingTracker } from "./extensions/timing-tracker.js";
+import { createCanvasDiffTracker } from "./extensions/canvas-diff-tracker.js";
 import type { HistoryResult, TurnTiming } from "$lib/types.js";
 import { createSessionSandbox, getSessionWorkDir, loadConversationSettingsFromDb, saveConversationSettingsToDb, isNetworkAllowed, getEffectiveAgentMode } from "./sandbox-factory.js";
 import type { Model as PiModel, Api } from "@mariozechner/pi-ai";
@@ -460,6 +461,8 @@ interface SessionInfrastructureOptions {
     hasMcpServers: boolean;
     eventBus: ReturnType<typeof createEventBus>;
     sessionWorkDir: string;
+    /** Conversation ID needed by canvas-diff-tracker extension */
+    conversationId: string;
 }
 
 /**
@@ -471,11 +474,15 @@ interface SessionInfrastructureOptions {
 async function createSessionInfrastructure(
     opts: SessionInfrastructureOptions
 ): Promise<{ agentSession: PiAgentSession; extensionsResult: Awaited<ReturnType<typeof createAgentSession>>["extensionsResult"] }> {
-    const { sessionManager, model, settingsManager, modelRegistry, mcpFlagValues, hasMcpServers, eventBus, sessionWorkDir } = opts;
+    const { sessionManager, model, settingsManager, modelRegistry, mcpFlagValues, hasMcpServers, eventBus, sessionWorkDir, conversationId } = opts;
+
+    // Create per-conversation canvas diff tracker (needs conversationId
+    // for canvas-store access)
+    const canvasDiffTracker = createCanvasDiffTracker(conversationId);
 
     // Create a custom ResourceLoader that includes the fetch tracker (always) and
     // pi-mcp-adapter (only when there are enabled MCP servers).
-    const extensionFactories = hasMcpServers ? [mcpAdapter, fetchTracker, timingTracker] : [fetchTracker, timingTracker];
+    const extensionFactories = hasMcpServers ? [mcpAdapter, fetchTracker, timingTracker, canvasDiffTracker] : [fetchTracker, timingTracker, canvasDiffTracker];
     const resourceLoader = new DefaultResourceLoader({
         cwd: sessionWorkDir,
         agentDir: AGENT_DIR,
@@ -883,7 +890,7 @@ export async function getOrHydrateSession(conversationId: string): Promise<PiAge
     const eventBus = createEventBus();
     const { agentSession } = await createSessionInfrastructure({
         sessionManager, model, settingsManager, modelRegistry,
-        mcpFlagValues, hasMcpServers, eventBus, sessionWorkDir
+        mcpFlagValues, hasMcpServers, eventBus, sessionWorkDir, conversationId
     });
 
     // Register Vessel-specific tools and set active tools

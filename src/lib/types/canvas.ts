@@ -86,15 +86,10 @@ export interface CanvasToggleResponse {
     version?: number;
 }
 
-/** Agent canvas_edit notification content */
-export interface CanvasEditNotification {
-    /** The workspace-relative file path that was edited */
-    filePath: string;
-    /** Word-level diff of what changed */
-    diff: WordDiff[];
-}
-
-/** A single word-level diff entry */
+/**
+ * A single diff entry from word-level comparison.
+ * Used internally to compute the compact edit notification format.
+ */
 export interface WordDiff {
     /** The change type */
     type: "added" | "removed" | "unchanged";

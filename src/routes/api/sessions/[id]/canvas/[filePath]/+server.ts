@@ -12,12 +12,8 @@ import {
     pushCanvasChanges,
     getCanvasUpdatesSince,
     isCanvasFile,
-    getOrCreateCanvasDoc,
     formatCanvasSSEEvent,
-    computeWordDiff,
-    formatCanvasEditNotification,
 } from "$lib/server/canvas-store.js";
-import { sendCustomMessage } from "$lib/server/agent/session-store.js";
 import { broadcastCanvasUpdate } from "$lib/server/canvas-broadcast.js";
 import type { SerializedUpdate } from "$lib/types/canvas.js";
 
@@ -53,10 +49,6 @@ export const POST = apiHandler(PushBody, async ({ body, event }) => {
         return badRequest("File is not a canvas");
     }
 
-    // Capture pre-push content for diff computation
-    const prePushDoc = await getOrCreateCanvasDoc(conversationId, filePath);
-    const oldContent = prePushDoc.doc.toString();
-
     // Push changes through OT
     const result = await pushCanvasChanges(
         conversationId,
@@ -73,22 +65,8 @@ export const POST = apiHandler(PushBody, async ({ body, event }) => {
     });
     await broadcastCanvasUpdate(conversationId, sseEvent);
 
-    // Notify the agent about the edit with a word-level diff (best-effort)
-    const newContent = (await getOrCreateCanvasDoc(conversationId, filePath)).doc.toString();
-    if (oldContent !== newContent) {
-        try {
-            const diff = computeWordDiff(oldContent, newContent);
-            const notification = formatCanvasEditNotification(filePath, diff);
-            await sendCustomMessage(
-                conversationId,
-                "canvas_edit",
-                notification,
-                { triggerTurn: true, deliverAs: "nextTurn" }
-            );
-        } catch {
-            // Agent notification is best-effort
-        }
-    }
+    // Agent diff notifications are handled lazily by the canvas-diff-tracker
+    // extension at the before_agent_start boundary, not on every push.
 
     return json({ version: result.version, serverUpdates: result.serverUpdates });
 });

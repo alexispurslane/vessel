@@ -22,7 +22,6 @@ import type { ChatSSEEvent } from "$lib/types.js";
 import type {
     SerializedUpdate,
     CanvasUpdateEvent,
-    CanvasEditNotification,
     WordDiff,
     CanvasesManifest,
     CanvasEntry,
@@ -559,6 +558,41 @@ export async function getCanvasUpdatesSince(
     };
 }
 
+// --- Version snapshot and content access ---
+
+/**
+ * Get a snapshot of current canvas file versions for a conversation.
+ * Returns a map of filePath → current version for all open canvases.
+ *
+ * @param conversationId - The conversation ID
+ * @returns Map of workspace-relative file paths to their current version numbers
+ */
+export function getCanvasVersionSnapshot(conversationId: string): Record<string, number> {
+    const canvases = conversationCanvases.get(conversationId);
+    if (!canvases) return {};
+
+    const snapshot: Record<string, number> = {};
+    for (const [filePath, canvasDoc] of canvases.canvases) {
+        snapshot[filePath] = canvasDoc.version;
+    }
+    return snapshot;
+}
+
+/**
+ * Get the current content of a canvas file, or null if not loaded.
+ *
+ * @param conversationId - The conversation ID
+ * @param filePath - Workspace-relative file path
+ * @returns The current document text, or null
+ */
+export function getCanvasDocContent(conversationId: string, filePath: string): string | null {
+    const canvases = conversationCanvases.get(conversationId);
+    if (!canvases) return null;
+    const canvasDoc = canvases.canvases.get(filePath);
+    if (!canvasDoc) return null;
+    return canvasDoc.doc.toString();
+}
+
 // --- Disk persistence ---
 
 /**
@@ -599,7 +633,7 @@ async function persistUpdateLog(
 
 /**
  * Compute a word-level diff between old and new document content.
- * Used for canvas_edit agent notifications.
+ * Used for canvas_diff agent notifications.
  *
  * @param oldContent - The previous content
  * @param newContent - The new content
@@ -729,12 +763,140 @@ export function formatCanvasSSEEvent(event: CanvasUpdateEvent): ChatSSEEvent {
 }
 
 /**
- * Format a canvas_edit notification for the agent.
+ * Maximum context characters to show on each side of a change.
+ * Enough to locate the edit, not enough to waste tokens.
+ */
+const CONTEXT_RADIUS = 40;
+
+/**
+ * Gather unchanged context backwards from a position in the diff array.
+ * Returns up to CONTEXT_RADIUS chars of preceding unchanged text.
+ *
+ * @param diff - The word-level diff array
+ * @param position - Index to start looking backwards from
+ * @returns Up to CONTEXT_RADIUS chars of preceding context
+ */
+function gatherBeforeContext(diff: WordDiff[], position: number): string {
+    let buf = "";
+    let idx = position - 1;
+    while (idx >= 0 && diff[idx].type === "unchanged") {
+        buf = diff[idx].value + buf;
+        if (buf.length >= CONTEXT_RADIUS) break;
+        idx--;
+    }
+    return buf.length > CONTEXT_RADIUS ? buf.slice(-CONTEXT_RADIUS) : buf;
+}
+
+/**
+ * Gather unchanged context forwards from a position in the diff array.
+ * Returns up to CONTEXT_RADIUS chars of following unchanged text.
+ *
+ * @param diff - The word-level diff array
+ * @param position - Index to start looking forwards from
+ * @returns Up to CONTEXT_RADIUS chars of following context
+ */
+function gatherAfterContext(diff: WordDiff[], position: number): string {
+    let buf = "";
+    let idx = position;
+    while (idx < diff.length
+        && diff[idx].type === "unchanged"
+        && buf.length < CONTEXT_RADIUS) {
+        buf += diff[idx].value;
+        idx++;
+    }
+    return buf.length > CONTEXT_RADIUS ? buf.slice(0, CONTEXT_RADIUS) : buf;
+}
+
+/**
+ * Consume a run of consecutive added/removed entries from the diff,
+ * starting at `startIdx`. Returns the removed and added text,
+ * and the index after the change run.
+ *
+ * @param diff - The word-level diff array
+ * @param startIdx - Index where the change run begins
+ * @returns Tuple of [removedText, addedText, nextIdx]
+ */
+function consumeChangeRun(
+    diff: WordDiff[],
+    startIdx: number
+): [string, string, number] {
+    const removedParts: string[] = [];
+    const addedParts: string[] = [];
+    let i = startIdx;
+    while (i < diff.length && diff[i].type !== "unchanged") {
+        if (diff[i].type === "removed") {
+            removedParts.push(diff[i].value);
+        } else {
+            addedParts.push(diff[i].value);
+        }
+        i++;
+    }
+    return [removedParts.join(""), addedParts.join(""), i];
+}
+
+/**
+ * Format a single edit line with context and change markers.
+ *
+ * @param before - Context text before the change
+ * @param removed - Text that was removed (empty if pure addition)
+ * @param added - Text that was added (empty if pure deletion)
+ * @param after - Context text after the change
+ * @returns Formatted edit line like `...context[-removed-]{+added+}context...`
+ */
+function formatEditLine(
+    before: string,
+    removed: string,
+    added: string,
+    after: string
+): string {
+    let line = "..." + before;
+    // Diff markers, not XPath
+    // oxlint-disable-next-line secure-coding/no-xpath-injection
+    if (removed) line += "[-" + removed + "-]";
+    // Diff markers, not XPath
+    // oxlint-disable-next-line secure-coding/no-xpath-injection
+    if (added) line += "{+" + added + "}";
+    line += after + "...";
+    return line;
+}
+
+/**
+ * Format a canvas_diff notification for the agent using the compact
+ * diff format. Each edit shows ≤40 chars of context before and after
+ * the change, with `[-removed-]` and `{+added+}` markers.
+ *
  * @param filePath - The file that was edited
  * @param diff - The word-level diff
  * @returns The notification content string
  */
 export function formatCanvasEditNotification(filePath: string, diff: WordDiff[]): string {
-    const notification: CanvasEditNotification = { filePath, diff };
-    return JSON.stringify(notification);
+    const edits: string[] = [];
+    let i = 0;
+
+    while (i < diff.length) {
+        // Skip unchanged runs — they provide context but aren't edits
+        if (diff[i].type === "unchanged") {
+            i++;
+            continue;
+        }
+
+        // Gather context and change run
+        const before = gatherBeforeContext(diff, i);
+        const [removed, added, nextIdx] = consumeChangeRun(diff, i);
+        const after = gatherAfterContext(diff, nextIdx);
+
+        edits.push(formatEditLine(before, removed, added, after));
+        i = nextIdx;
+    }
+
+    // Assemble the notification in the compact format
+    const lines: string[] = ["[CANVAS EDIT NOTIFICATION]", "", `File: ${filePath}`, ""];
+    edits.forEach((edit, idx) => {
+        lines.push(`Edit ${idx + 1}:`);
+        lines.push(edit);
+    });
+    lines.push("");
+    lines.push("---");
+
+    return lines.join("\n");
 }
