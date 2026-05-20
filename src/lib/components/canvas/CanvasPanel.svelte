@@ -287,7 +287,7 @@
 
                     <!-- Editor (only rendered when expanded) -->
                     {#if entry.expanded && !entry.loading}
-                        <div class="min-h-48 max-h-80 border-t border-border">
+                        <div class="border-t border-border">
                             <CanvasEditor
                                 {conversationId}
                                 filePath={entry.filePath}

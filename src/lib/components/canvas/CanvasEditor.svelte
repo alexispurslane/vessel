@@ -75,6 +75,22 @@
     /** The EditorView instance */
     let view: EditorView | null = $state(null);
 
+    /** Reactive height of the wrapper, derived from CM6 contentHeight */
+    let wrapperHeight: number = $state(200);
+
+    /**
+     * Track the editor's content height so the wrapper can auto-grow.
+     * Always shows full content — no max-height cap.
+     *
+     * @param v - The EditorView whose content height to measure
+     */
+    function syncHeight(v: EditorView): void {
+        const contentH = v.contentHeight;
+        if (contentH !== wrapperHeight && contentH > 0) {
+            wrapperHeight = contentH;
+        }
+    }
+
     /** Current document version (synced with server) */
     let version = $state(initialVersion);
 
@@ -576,8 +592,11 @@
             autoClearPlugin,
             agentCursorField,
             agentCursorDismissPlugin,
-            EditorView.updateListener.of(() => {
+            EditorView.updateListener.of((update) => {
                 schedulePush();
+                if (update.docChanged || update.geometryChanged) {
+                    syncHeight(update.view);
+                }
             }),
             canvasTheme,
             syntaxHighlighting(markdownHighlightStyle),
@@ -602,6 +621,9 @@
             parent: wrapperEl,
         });
 
+        // Initial height sync after mount
+        syncHeight(view);
+
         // Register to receive SSE canvas_update events
         onregisterReceiver?.(handleRemoteUpdate);
     });
@@ -613,11 +635,11 @@
     });
 </script>
 
-<div class="flex flex-col h-full">
+<div class="overflow-hidden">
     <!-- CodeMirror editor -->
     <div
         bind:this={wrapperEl}
-        class="flex-1 min-h-0 overflow-hidden"
+        style="height: {wrapperHeight}px;"
         role="textbox"
         aria-multiline="true"
         aria-label="Canvas editor for {filePath}"
