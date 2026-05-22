@@ -145,6 +145,15 @@ Vessel is a **monolithic SvelteKit app** where the server handles all AI inferen
 
 Conversations are persisted as pi `.jsonl` session files under `data/sessions/`, with metadata and settings stored in a SQLite database (`data/vessel.db`). Active sessions are kept in memory with SSE subscriptions for real-time streaming to clients. Message history is represented as an append-only DAG, enabling full branch navigation and forking without data loss.
 
+## Special Thanks
+
+Special thanks to [Kat Suricata](https://katsuricata.com/) and
+[Amolith](https://secluded.site/) for providing me with their Synthetic.new and
+(in Kat's case) NeuralWatt API keys, which allowed me to stand up and polish
+this project — by far the biggest I've built so far — so quickly, as well as
+providing bug reports, user testing, and encouragement. It is deeply
+appreciated.
+
 ## License
 
 This project is licensed under the [0BSD](LICENSE).

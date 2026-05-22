@@ -403,6 +403,10 @@
     let settingsError = $state<string | null>(null);
     let defaultModelId = $state<string>("");
     let secondaryModelId = $state<string>("");
+    let fallbackVisionModelId = $state<string>("");
+
+    /** Models that accept image input, for the fallback vision model selector */
+    let visionModels = $derived(models.filter((m) => m.input.includes("image")));
 
     async function loadAppSettings() {
         settingsLoading = true;
@@ -410,8 +414,10 @@
             appSettings = await getSettings();
             const dm = appSettings["defaultModel"] ?? "";
             const sm = appSettings["secondaryModel"] ?? "";
+            const fvm = appSettings["fallbackVisionModel"] ?? "";
             if (dm) defaultModelId = dm;
             if (sm) secondaryModelId = sm;
+            if (fvm) fallbackVisionModelId = fvm;
         } catch (e) {
             settingsError = e instanceof Error ? e.message : "Failed to load settings";
         } finally {
@@ -451,6 +457,23 @@
         }
     }
 
+    /**
+     * Save the fallback vision model setting.
+     *
+     * @param modelId - The model ID to use as fallback for vision, or empty string to clear
+     */
+    async function saveFallbackVisionModel(modelId: string) {
+        settingsError = null;
+        fallbackVisionModelId = modelId;
+        try {
+            await updateSettings({
+                fallbackVisionModel: modelId,
+            });
+        } catch (e) {
+            settingsError = e instanceof Error ? e.message : "Failed to save fallback vision model";
+        }
+    }
+
     onMount(() => {
         void loadProviders();
         void loadModels();
@@ -472,8 +495,8 @@
             <div>
                 <h3 class="text-base font-medium">Default Models</h3>
                 <p class="text-sm text-muted-foreground">
-                    Choose the default model for new chats and the secondary model used for
-                    auto-generating titles and tags.
+                    Choose the default model for new chats, the secondary model for titles/tags, and
+                    a fallback vision model for conversations with images.
                 </p>
             </div>
             {#if settingsLoading}
@@ -534,6 +557,36 @@
                             <SelectContent>
                                 <SelectItem value="">Same as default</SelectItem>
                                 {#each models as model (model.id)}
+                                    <SelectItem value={model.id}>
+                                        {model.name}
+                                        <span class="text-muted-foreground ml-1"
+                                            >({model.provider})</span
+                                        >
+                                    </SelectItem>
+                                {/each}
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    <Separator />
+
+                    <div class="space-y-2">
+                        <Label>Fallback Vision Model</Label>
+                        <p class="text-xs text-muted-foreground">
+                            When the default model doesn't support images, this model will be used
+                            instead for conversations containing images.
+                        </p>
+                        <Select
+                            type="single"
+                            value={fallbackVisionModelId}
+                            onValueChange={(v: string) => saveFallbackVisionModel(v)}
+                        >
+                            <SelectTrigger class="w-full">
+                                <SelectValue placeholder="None" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="">None</SelectItem>
+                                {#each visionModels as model (model.id)}
                                     <SelectItem value={model.id}>
                                         {model.name}
                                         <span class="text-muted-foreground ml-1"
