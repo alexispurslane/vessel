@@ -128,7 +128,6 @@ Optional flags:
 | `--target <target>` | Bun compile target (e.g. `bun-linux-x64`, `bun-darwin-arm64`) |
 | `--outfile <path>` | Output binary path (defaults to `build/standalone/vessel`) |
 | `--zerobox-bin <path>` | Path to zerobox binary to embed |
-| `--upx [path]` | Compress the binary with UPX after compilation |
 
 ### Other Commands
 

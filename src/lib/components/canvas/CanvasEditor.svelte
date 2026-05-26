@@ -539,10 +539,8 @@
             clientID: u.clientID,
         }));
 
-        // Apply remote updates first, then dispatch the highlight effect
-        // separately to avoid interfering with collab state tracking.
-        // Guard with processingRemoteUpdate so the agent cursor dismiss
-        // plugin doesn't fire on these remote-originated doc changes.
+        // Apply remote updates first; dispatch highlight effect separately
+        // to avoid interfering with collab and cursor-dismiss tracking.
         processingRemoteUpdate = true;
         try {
             const tr = receiveUpdates(view.state, remoteUpdates);
