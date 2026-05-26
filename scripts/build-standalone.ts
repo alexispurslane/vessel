@@ -16,7 +16,10 @@
  *   3. Auto-generate `build/standalone/assets.ts` with `import ... with { type: "file" }`
  *      for each asset and a URL→path mapping
  *   4. Compile `src/standalone/entry.ts` + the generated assets into a standalone binary
- *   5. (Optional) Compress the binary with UPX for smaller distribution size
+ *   5. UPX compression is no longer supported — it corrupts Bun's $bunfs
+ *      virtual filesystem, causing all embedded assets to fail with ENOENT.
+ *      The --upx flag is retained for backwards compatibility but exits with
+ *      an error message. Use zstd or gzip on the uncompressed binary instead.
  *
  * Usage:
  *   bun run scripts/build-standalone.ts [--upx [/path/to/upx]]
@@ -25,9 +28,10 @@
  *   --target <target>   Bun compile target (e.g. bun-linux-x64)
  *   --outfile <path>    Output binary path (defaults to build/standalone/vessel)
  *   --zerobox-bin <path> Path to zerobox binary to embed
- *   --upx [/path/to/upx] Compress the binary with UPX after compilation.
- *                       If a path is given it is used directly; otherwise
- *                       the `upx` executable is looked up on PATH.
+ *   --upx [/path/to/upx] DEPRECATED — exits with error. UPX compression
+ *                       corrupts Bun's $bunfs embedded filesystem, causing
+ *                       all static assets to fail with ENOENT at runtime.
+ *                       Use zstd or gzip on the uncompressed binary instead.
  *
  * @see src/standalone/entry.ts — the persistent entry point that loads the
  *   generated asset module and serves embedded assets in compiled mode.
@@ -333,65 +337,33 @@ if (compileResult.exitCode !== 0) {
     process.exit(1);
 }
 
-// --- Step 5: UPX compression (optional) ---
+// --- Step 5: UPX compression (disabled) ---
+// UPX compression is fundamentally incompatible with Bun's compiled binary
+// format. Bun stores embedded assets (imported via `import ... with { type: "file" }`)
+// in a `.bun` ELF section (~54 MB). UPX compresses this section like any other
+// data, but on decompression at runtime the internal format no longer matches
+// what Bun expects, and every `Bun.file($bunfsPath)` call returns ENOENT.
+// There is no UPX flag (--overlay, --keep-resource, etc.) that can preserve
+// this section correctly. See: https://github.com/alexispurslane/vessel/issues/41
 
 let compressedMb: string | null = null;
 if (upxPath) {
-    const resolvedUpx = (() => {
-        // If the user gave an explicit path, use it directly.
-        if (upxPath !== "upx") return upxPath;
-        // Otherwise try to find `upx` on PATH.
-        const which = Bun.spawnSync(["which", "upx"], {
-            stdout: "pipe",
-            stderr: "pipe",
-        });
-        if (which.exitCode === 0) return which.stdout.toString().trim();
-        return null;
-    })();
-
-    if (!resolvedUpx) {
-        console.warn(
-            "⚠️  --upx was requested but UPX is not installed. " +
-            "Install it from https://upx.github.io/ or pass an explicit path with --upx /path/to/upx",
-        );
-    } else {
-        const preCompressSize = statSync(join(projectRoot, OUTPUT_BINARY)).size;
-        const preMb = (preCompressSize / 1024 / 1024).toFixed(1);
-        console.log(`[5/5] Compressing binary with UPX (${resolvedUpx})...`);
-        console.log(`  Pre-compression size: ${preMb} MB`);
-
-        const upxResult = Bun.spawnSync(
-            [resolvedUpx, "--best", join(projectRoot, OUTPUT_BINARY)],
-            { cwd: projectRoot, stdout: "inherit", stderr: "inherit" },
-        );
-
-        if (upxResult.exitCode !== 0) {
-            console.warn(
-                "⚠️  UPX compression failed — binary is still functional but uncompressed.",
-            );
-        } else {
-            const postStat = statSync(join(projectRoot, OUTPUT_BINARY));
-            compressedMb = (postStat.size / 1024 / 1024).toFixed(1);
-            const savings = (
-                ((preCompressSize - postStat.size) / preCompressSize) *
-                100
-            ).toFixed(1);
-            console.log(
-                `  Post-compression size: ${compressedMb} MB (${savings}% smaller)`,
-            );
-        }
-    }
+    console.error(
+        "❌  --upx is no longer supported. " +
+        "UPX compression corrupts Bun's embedded filesystem ($bunfs), " +
+        "causing all static assets (CSS, JS, images) to fail with ENOENT at runtime. " +
+        "Use an alternative like zstd or gzip on the uncompressed binary instead.",
+    );
+    process.exit(1);
 } else {
-    console.log("[5/5] UPX compression skipped (use --upx to enable).");
+    console.log("[5/5] UPX compression skipped (not compatible with $bunfs).");
 }
 
 // --- Report ---
 
 const binaryStat = statSync(join(projectRoot, OUTPUT_BINARY));
 const mb = (binaryStat.size / 1024 / 1024).toFixed(1);
-const sizeLine = compressedMb
-    ? `${mb} MB → ${compressedMb} MB (UPX compressed)`
-    : `${mb} MB`;
+const sizeLine = `${mb} MB`;
 
 console.log(`
 ✅ Standalone Vessel binary built successfully!

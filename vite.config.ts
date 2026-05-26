@@ -30,7 +30,10 @@ export default defineConfig({
             glimpseui: fileURLToPath(new URL("./src/lib/server/stubs/glimpseui.ts", import.meta.url)),
             // Stub out pi-tui (CLI terminal UI) — the web app never uses it.
             // Replaces ~2.4MB of terminal rendering code + the koffi FFI addon.
+            // Both the old (@mariozechner) and new (@earendil-works) npm scopes
+            // are aliased since pi-mcp-adapter migrated to the new scope.
             "@mariozechner/pi-tui": fileURLToPath(new URL("./src/lib/server/stubs/pi-tui.ts", import.meta.url)),
+            "@earendil-works/pi-tui": fileURLToPath(new URL("./src/lib/server/stubs/pi-tui.ts", import.meta.url)),
         },
     },
 });
