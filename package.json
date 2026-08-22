@@ -85,7 +85,7 @@
         "codemirror": "^6.0.2",
         "cookie": "^0.7.2",
         "d3-dag": "^1.2.1",
-        "defuddle": "^0.18.1",
+        "defuddle": "^0.19.2",
         "fflate": "^0.8.2",
         "happy-dom": "^20.9.0",
         "impit": "^0.14.0",
